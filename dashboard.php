@@ -134,6 +134,23 @@ $mushroomStmt->close();
     .mushroom-records-table td{font-size:14px}
     .record-count{background:var(--accent); color:#fff; padding:2px 8px; border-radius:12px; font-size:12px; font-weight:600}
 
+    /* mushroom image analysis */
+    .mushroom-image-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:16px; margin-top:10px}
+    .mushroom-image-card{background:var(--panel); border-radius:10px; overflow:hidden; border:1px solid rgba(15,23,42,0.08); box-shadow:0 2px 8px rgba(15,23,42,0.04); transition:transform .2s ease, box-shadow .2s ease}
+    .mushroom-image-card:hover{transform:translateY(-4px); box-shadow:0 8px 24px rgba(15,23,42,0.1)}
+    .mushroom-image-card img{width:100%; height:150px; object-fit:cover; display:block}
+    .mushroom-image-info{padding:12px}
+    .mushroom-image-info .size-info{font-weight:700; color:var(--text); font-size:15px; margin-bottom:6px}
+    .mushroom-image-info .status-badge{display:inline-block; padding:4px 10px; border-radius:12px; font-size:11px; font-weight:600; margin-bottom:6px}
+    .mushroom-image-info .status-ready{background:#dcfce7; color:#16a34a}
+    .mushroom-image-info .status-almost{background:#fef9c3; color:#a16207}
+    .mushroom-image-info .status-not-ready{background:#e0e7ff; color:#4338ca}
+    .mushroom-image-info .status-overripe{background:#fee2e2; color:#dc2626}
+    .mushroom-image-info .timestamp{color:var(--muted); font-size:11px}
+    .mushroom-image-info .confidence{color:var(--muted); font-size:11px; margin-top:4px}
+    .no-images{text-align:center; padding:30px; color:var(--muted)}
+    .no-images i{font-size:40px; margin-bottom:10px; display:block; opacity:0.5}
+
     /* sidebar */
     .sidebar{position:fixed; left:0; top:0; width:250px; height:100vh; background:#f8f9fa; border-right:1px solid rgba(15,23,42,0.04); box-shadow:var(--panel-shadow); display:flex; flex-direction:column; z-index:50}
     .sidebar-logo{padding:20px; text-align:center; border-bottom:1px solid rgba(15,23,42,0.1)}
