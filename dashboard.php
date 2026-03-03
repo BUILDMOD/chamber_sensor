@@ -323,6 +323,29 @@ $mushroomStmt->close();
         <p style="margin-top:12px; color:var(--muted); font-size:12px">Records are tracked manually for monthly progress monitoring.</p>
       </div>
 
+      <!-- Mushroom Image Analysis -->
+      <div class="card mushroom-image-box" style="grid-column: 1 / -1;">
+        <h3>📷 Mushroom Image Analysis <i class="fas fa-info-circle status-info-icon" id="imageInfoIcon" title="Click for info"></i></h3>
+        
+        <!-- Upload Section -->
+        <div style="margin-bottom: 20px; padding: 15px; background: var(--muted-ghost); border-radius: 10px;">
+          <form id="imageUploadForm" enctype="multipart/form-data" style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+            <label style="font-weight: 600; color: var(--text);">Upload Mushroom Image:</label>
+            <input type="file" id="imageInput" name="image" accept="image/*" style="flex: 1; min-width: 200px; padding: 8px; border: 1px solid rgba(15,23,42,0.1); border-radius: 8px;">
+            <button type="submit" style="background: var(--accent); color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: background 0.2s ease;">Analyze & Save</button>
+          </form>
+          <div id="uploadStatus" style="margin-top: 10px; font-size: 13px;"></div>
+        </div>
+
+        <!-- Image Grid Display -->
+        <div class="mushroom-image-grid" id="mushroomImageGrid">
+          <div class="no-images" id="noImages">
+            <i class="fas fa-camera"></i>
+            <p>No images analyzed yet. Upload an image to start.</p>
+          </div>
+        </div>
+      </div>
+
     </div> <!-- end container -->
 
     <!-- Popup Modal for Status Info -->

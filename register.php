@@ -1,6 +1,6 @@
 <?php  
 include 'includes/db_connect.php';
-include 'send_email.php'; // EMAIL SENDER
+include 'send_email.php';
 session_start();
 
 if (isset($_SESSION['user'])) {
@@ -13,39 +13,29 @@ $success = "";
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
-    // SANITIZE INPUT
-    $first = mysqli_real_escape_string($conn, $_POST['first_name']);
+    $first  = mysqli_real_escape_string($conn, $_POST['first_name']);
     $middle = mysqli_real_escape_string($conn, $_POST['middle_name']);
-    $last = mysqli_real_escape_string($conn, $_POST['last_name']);
-
+    $last   = mysqli_real_escape_string($conn, $_POST['last_name']);
     $fullname = trim($first . " " . $middle . " " . $last);
 
-    $email    = mysqli_real_escape_string($conn, $_POST['email']);
-    $phone    = mysqli_real_escape_string($conn, $_POST['phone']);
-    $username = mysqli_real_escape_string($conn, $_POST['username']);
+    $email        = mysqli_real_escape_string($conn, $_POST['email']);
+    $phone        = mysqli_real_escape_string($conn, $_POST['phone']);
+    $username     = mysqli_real_escape_string($conn, $_POST['username']);
     $password_raw = $_POST['password'];
-    $role     = mysqli_real_escape_string($conn, $_POST['role']);
+    $role         = mysqli_real_escape_string($conn, $_POST['role']);
 
-    // LETTERS ONLY FOR NAMES
     if (!preg_match("/^[A-Za-z\s]+$/", $first)) {
         $error = "First name must contain letters only.";
-    }
-    elseif (!empty($middle) && !preg_match("/^[A-Za-z\s]+$/", $middle)) {
+    } elseif (!empty($middle) && !preg_match("/^[A-Za-z\s]+$/", $middle)) {
         $error = "Middle name must contain letters only.";
-    }
-    elseif (!preg_match("/^[A-Za-z\s]+$/", $last)) {
+    } elseif (!preg_match("/^[A-Za-z\s]+$/", $last)) {
         $error = "Last name must contain letters only.";
-    }
-    // NUMBERS ONLY
-    elseif (!preg_match("/^[0-9]+$/", $phone)) {
+    } elseif (!preg_match("/^[0-9]+$/", $phone)) {
         $error = "Phone number must contain numbers only.";
-    }
-    // USERNAME LETTERS + NUMBERS ONLY
-    elseif (!preg_match("/^[A-Za-z0-9]+$/", $username)) {
+    } elseif (!preg_match("/^[A-Za-z0-9]+$/", $username)) {
         $error = "Username must contain letters and numbers only.";
     }
 
-    // PASSWORD CHECK
     $uppercase = preg_match('@[A-Z]@', $password_raw);
     $lowercase = preg_match('@[a-z]@', $password_raw);
     $number    = preg_match('@[0-9]@', $password_raw);
@@ -53,15 +43,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     $minLength = strlen($password_raw) >= 8;
 
     if (empty($error) && (!$uppercase || !$lowercase || !$number || !$special || !$minLength)) {
-        $error = "Password must be at least 8 characters and include uppercase, lowercase, number, and special character.";
+        $error = "Password must be at least 8 characters with uppercase, lowercase, number, and special character.";
     }
 
-    // IF NO ERRORS → PROCEED
     if (empty($error)) {
-
         $password = password_hash($password_raw, PASSWORD_DEFAULT);
 
-        // CHECK FOR DUPLICATE EMAIL OR USERNAME
         $check = $conn->prepare("SELECT id FROM users WHERE username=? OR email=?");
         $check->bind_param("ss", $username, $email);
         $check->execute();
@@ -70,7 +57,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         if ($check->num_rows > 0) {
             $error = "Username or Email already exists!";
         } else {
-
             $stmt = $conn->prepare("
                 INSERT INTO users (first_name, middle_name, last_name, fullname, email, phone, username, password, role, verified)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
@@ -82,29 +68,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $fullname, $email, $phone,
                     $username, $password, $role
                 );
-
                 $stmt->execute();
 
-                // SEND EMAIL NOTIFICATION
                 $subject = "Welcome to J.WHO Mushroom System!";
                 $body = "
                     Hello <b>$fullname</b>,<br><br>
                     Your account has been successfully created in the 
                     <b>J.WHO Mushroom Growth Chamber System</b>.<br><br>
-
                     <b>Username:</b> $username<br>
                     <b>Role:</b> $role<br><br>
-
                     You may now log in to your account.<br><br>
                     Thank you!<br>
                     <b>J.WHO Mushroom Farm</b>
                 ";
-
                 sendEmail($email, $subject, $body);
 
                 $success = "Account created! Redirecting...";
                 header("refresh:2; url=index.php");
-
             } else {
                 $error = "Database error: " . $conn->error;
             }
@@ -117,255 +97,332 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register</title>
+    <title>Register — J WHO? Mushroom Farm</title>
 
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 
     <style>
-        * { box-sizing: border-box; }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            font-family: 'Poppins', sans-serif;
-            margin: 0;
+            font-family: 'DM Sans', sans-serif;
             min-height: 100vh;
-            background: url("assets/img/bg-mushroom.jpg") no-repeat center center/cover;
+            background: url("assets/img/bg-mushroom.jpg") center/cover no-repeat;
             display: flex;
-            justify-content: center;
             align-items: center;
-            position: relative;
+            justify-content: center;
+            padding: 80px 16px 40px;
         }
 
         body::before {
-            content: "";
-            position: absolute;
+            content: '';
+            position: fixed;
             inset: 0;
-            background: rgba(0,0,0,0.28);
-            z-index: 0;
+            background: rgba(10, 22, 10, 0.60);
         }
 
+        /* Logo */
         .logo {
             position: fixed;
-            top: 20px;
-            left: 20px;
+            top: 18px; left: 18px;
             z-index: 10;
             background: white;
             border-radius: 50%;
-            padding: 5px;
-            box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+            padding: 4px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.25);
         }
+        .logo img { width: 52px; height: 52px; border-radius: 50%; display: block; }
 
-        .logo img { width: 70px; }
-
-        .register-box {
+        /* Card */
+        .card {
             position: relative;
             z-index: 1;
-            background: rgba(40, 40, 40, 0.55);
-            padding: 11px;
-            width: 480px;
-            max-width: 90%;
-            border-radius: 15px;
-            backdrop-filter: blur(8px);
-            box-shadow: 0 0 30px rgba(0,0,0,0.45);
-            color: white;
+            width: 360px;
+            max-width: 100%;
+            background: rgba(255,255,255,0.10);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 16px;
+            padding: 30px 28px 26px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 16px 40px rgba(0,0,0,0.45);
+            text-align: center;
         }
 
         h2 {
-            text-align: center;
-            font-weight: 600;
-            color: #7dff9c;
-            margin-bottom: 25px;
+            font-family: 'DM Serif Display', serif;
+            font-size: 20px;
+            font-weight: 400;
+            color: #c8e8b8;
+            margin-bottom: 4px;
         }
 
+        .subtitle {
+            font-size: 11px;
+            color: rgba(200,232,184,0.50);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            margin-bottom: 20px;
+        }
+
+        /* Grid */
         .grid-2 {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 12px;
+            gap: 8px;
         }
 
-        input, select {
+        /* Fields */
+        .field { margin-bottom: 8px; text-align: left; }
+        .input-wrap { position: relative; }
+
+        input[type="text"],
+        input[type="email"],
+        input[type="password"],
+        select {
             width: 100%;
-            padding: 12px;
-            margin-top: 10px;
-            border-radius: 8px;
-            border: 1px solid #bcd8c5;
-            background: #f2fff4;
-            font-family: "Poppins";
-            color: #000;
+            padding: 10px 12px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(200,232,184,0.20);
+            border-radius: 9px;
+            color: #f0ede6;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s, background 0.2s;
+            -webkit-appearance: none;
         }
 
-        .input-container {
-            position: relative;
-            margin-top: 10px;
+        input::placeholder { color: rgba(200,232,184,0.35); }
+
+        input:focus, select:focus {
+            border-color: rgba(122,171,110,0.6);
+            background: rgba(255,255,255,0.13);
+        }
+
+        select option { background: #2d4a2d; color: #f0ede6; }
+
+        /* Password field with toggle */
+        .input-wrap input[type="password"],
+        .input-wrap input[type="text"] {
+            padding-right: 36px;
         }
 
         .toggle-password {
             position: absolute;
-            right: 15px;
-            top: 50%;
+            right: 10px; top: 50%;
             transform: translateY(-50%);
-            color: #37954f;
             cursor: pointer;
-            font-size: 18px;
+            color: rgba(200,232,184,0.45);
+            font-size: 13px;
         }
+        .toggle-password:hover { color: #7aab6e; }
 
-        #strength-bar {
-            height: 5px;
-            width: 100%;
-            background: #ccc;
-            margin-top: 3px;
+        /* Strength bar */
+        .strength-bar {
+            height: 3px;
+            background: rgba(255,255,255,0.10);
             border-radius: 4px;
+            margin-top: 5px;
+            overflow: hidden;
         }
-
-        #strength-fill {
+        .strength-fill {
             height: 100%;
             width: 0%;
-            background: red;
             border-radius: 4px;
-            transition: .3s;
+            transition: width 0.3s, background 0.3s;
         }
 
-        button {
+        /* Messages */
+        .error-msg, .success-msg {
+            font-size: 12px;
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin-bottom: 10px;
+            text-align: left;
+        }
+        .error-msg {
+            color: #f08080;
+            background: rgba(192,57,43,0.15);
+            border: 1px solid rgba(192,57,43,0.30);
+        }
+        .success-msg {
+            color: #9affb5;
+            background: rgba(74,124,74,0.20);
+            border: 1px solid rgba(74,124,74,0.35);
+        }
+
+        /* Buttons */
+        .btn-register {
             width: 100%;
-            margin-top: 15px;
-            padding: 12px;
-            background: linear-gradient(135deg, #4caf50, #74d88b);
+            padding: 11px;
             border: none;
-            border-radius: 10px;
-            color: white;
-            font-size: 17px;
+            border-radius: 9px;
+            background: linear-gradient(135deg, #4a7c4a, #7aab6e);
+            color: #fff;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 14px;
             font-weight: 600;
             cursor: pointer;
+            margin-top: 6px;
+            transition: opacity 0.2s, transform 0.2s;
+        }
+        .btn-register:hover { opacity: 0.9; transform: translateY(-1px); }
+
+        /* Footer */
+        .card-footer { margin-top: 18px; }
+        .card-footer a {
+            color: #7aab6e;
+            font-size: 12px;
+            text-decoration: none;
+        }
+        .card-footer a:hover { color: #c8e8b8; }
+        .card-footer .copy {
+            margin-top: 10px;
+            font-size: 10px;
+            color: rgba(200,232,184,0.25);
         }
 
-        .error, .success {
-            margin-top: 12px;
-            text-align: center;
-            font-size: 14px;
+        /* PH Time */
+        .ph-time {
+            position: fixed;
+            bottom: 18px;
+            right: 20px;
+            z-index: 10;
+            text-align: right;
+            color: rgba(200,232,184,0.75);
+            font-family: 'DM Sans', sans-serif;
         }
-
-        .error { color: #ff5f5f; }
-        .success { color: #9affb5; }
-
-        .footer-text {
-            margin-top: 18px;
-            font-size: 13px;
-            text-align: center;
-            color: white;
-        }
+        .ph-time .time  { font-size: 22px; font-weight: 600; letter-spacing: 0.02em; line-height: 1; }
+        .ph-time .date  { font-size: 11px; color: rgba(200,232,184,0.45); margin-top: 3px; }
+        .ph-time .label { font-size: 10px; color: rgba(200,232,184,0.30); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px; }
     </style>
 </head>
-
 <body>
 
+<!-- Logo -->
 <div class="logo">
     <img src="assets/img/logo.png" alt="Logo">
 </div>
 
-<div class="register-box">
-    <h2>Create Your Account</h2>
+<!-- Register Card -->
+<div class="card">
+
+    <h2>Create Account</h2>
+    <p class="subtitle">J WHO? Mushroom Farm</p>
+
+    <?php if (!empty($error)): ?>
+        <div class="error-msg"><?= htmlspecialchars($error) ?></div>
+    <?php endif; ?>
+    <?php if (!empty($success)): ?>
+        <div class="success-msg"><?= htmlspecialchars($success) ?></div>
+    <?php endif; ?>
 
     <form method="POST">
 
         <div class="grid-2">
-            <input type="text" 
-                   name="first_name" 
-                   placeholder="First Name" 
-                   required
-                   pattern="[A-Za-z\s]+"
-                   oninput="this.value = this.value.replace(/[^A-Za-z\s]/g, '')">
-
-            <input type="text" 
-                   name="middle_name" 
-                   placeholder="Middle Name"
-                   pattern="[A-Za-z\s]+"
-                   oninput="this.value = this.value.replace(/[^A-Za-z\s]/g, '')">
+            <div class="field">
+                <input type="text" name="first_name" placeholder="First Name" required
+                       oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')">
+            </div>
+            <div class="field">
+                <input type="text" name="middle_name" placeholder="Middle Name"
+                       oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')">
+            </div>
         </div>
 
-        <input type="text" 
-               name="last_name" 
-               placeholder="Last Name" 
-               required
-               pattern="[A-Za-z\s]+"
-               oninput="this.value = this.value.replace(/[^A-Za-z\s]/g, '')">
+        <div class="field">
+            <input type="text" name="last_name" placeholder="Last Name" required
+                   oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')">
+        </div>
 
         <div class="grid-2">
-            <input type="email" name="email" placeholder="Email" required>
-
-            <input type="text" 
-                   name="phone" 
-                   placeholder="Phone"
-                   required
-                   maxlength="11"
-                   pattern="[0-9]+"
-                   oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+            <div class="field">
+                <input type="email" name="email" placeholder="Email" required>
+            </div>
+            <div class="field">
+                <input type="text" name="phone" placeholder="Phone" required maxlength="11"
+                       oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+            </div>
         </div>
 
-        <input type="text" 
-               name="username" 
-               placeholder="Username" 
-               required
-               pattern="[A-Za-z0-9]+"
-               oninput="this.value = this.value.replace(/[^A-Za-z0-9]/g, '')">
-
-        <div class="input-container">
-            <input type="password" name="password" id="password" placeholder="Password" required>
-            <span class="toggle-password" id="togglePassword"><i class="fa fa-eye"></i></span>
+        <div class="field">
+            <input type="text" name="username" placeholder="Username" required
+                   oninput="this.value=this.value.replace(/[^A-Za-z0-9]/g,'')">
         </div>
 
-        <div id="strength-bar"><div id="strength-fill"></div></div>
+        <div class="field">
+            <div class="input-wrap">
+                <input type="password" name="password" id="password" placeholder="Password" required>
+                <span class="toggle-password" id="togglePassword">
+                    <i class="fa fa-eye" id="eyeIcon"></i>
+                </span>
+            </div>
+            <div class="strength-bar">
+                <div class="strength-fill" id="strengthFill"></div>
+            </div>
+        </div>
 
-        <select name="role" required>
-            <option value="staff" selected>Staff</option>
-        </select>
+        <div class="field">
+            <select name="role" required>
+                <option value="staff" selected>Staff</option>
+            </select>
+        </div>
 
-        <button type="submit">Register</button>
+        <button type="submit" class="btn-register">Register</button>
 
-        <?php 
-            if (!empty($error)) echo "<div class='error'>$error</div>";
-            if (!empty($success)) echo "<div class='success'>$success</div>";
-        ?>
     </form>
 
-    <div class="footer-text">
-        <a href="index.php" style="color:#7dff9c;font-weight:600;text-decoration:none;">Already have an account? Login</a>
-        <br><br>
-        © 2025 J WHO? Mushroom Farm
+    <div class="card-footer">
+        <a href="index.php">Already have an account? <strong>Login</strong></a>
+        <p class="copy">© 2025 J WHO? Mushroom Farm</p>
     </div>
+
+</div>
+
+<!-- PH Time -->
+<div class="ph-time">
+    <div class="time" id="phTime">--:-- --</div>
+    <div class="date" id="phDate">---</div>
+    <div class="label">Philippine Time</div>
 </div>
 
 <script>
-// PASSWORD TOGGLE
-const passwordInput = document.getElementById("password");
-const togglePassword = document.getElementById("togglePassword");
-const icon = togglePassword.querySelector("i");
+// PH Time
+function updatePHTime() {
+    const now = new Date();
+    const opts = { timeZone: 'Asia/Manila' };
+    document.getElementById('phTime').textContent = now.toLocaleTimeString('en-PH', { ...opts, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    document.getElementById('phDate').textContent = now.toLocaleDateString('en-PH', { ...opts, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+updatePHTime();
+setInterval(updatePHTime, 1000);
 
-togglePassword.addEventListener("click", () => {
-    const show = passwordInput.type === "password";
-    passwordInput.type = show ? "text" : "password";
-    icon.classList.toggle("fa-eye");
-    icon.classList.toggle("fa-eye-slash");
+// Password toggle
+const toggle    = document.getElementById('togglePassword');
+const passInput = document.getElementById('password');
+const eyeIcon   = document.getElementById('eyeIcon');
+
+toggle.addEventListener('click', () => {
+    const show = passInput.type === 'password';
+    passInput.type = show ? 'text' : 'password';
+    eyeIcon.classList.toggle('fa-eye',      !show);
+    eyeIcon.classList.toggle('fa-eye-slash', show);
 });
 
-// PASSWORD STRENGTH BAR
-const strengthFill = document.getElementById("strength-fill");
+// Password strength bar
+const strengthFill = document.getElementById('strengthFill');
+passInput.addEventListener('input', () => {
+    const v = passInput.value;
+    let s = 0;
+    if (v.match(/[a-z]/)) s++;
+    if (v.match(/[A-Z]/)) s++;
+    if (v.match(/[0-9]/)) s++;
+    if (v.match(/[^a-zA-Z0-9]/)) s++;
+    if (v.length >= 8) s++;
 
-passwordInput.addEventListener("input", () => {
-    let val = passwordInput.value;
-    let strength = 0;
-
-    if (val.match(/[a-z]/)) strength++;
-    if (val.match(/[A-Z]/)) strength++;
-    if (val.match(/[0-9]/)) strength++;
-    if (val.match(/[^a-zA-Z0-9]/)) strength++;
-    if (val.length >= 8) strength++;
-
-    let width = (strength / 5) * 100;
-    strengthFill.style.width = width + "%";
-
-    if (strength <= 2) strengthFill.style.background = "red";
-    else if (strength === 3) strengthFill.style.background = "orange";
-    else strengthFill.style.background = "green";
+    strengthFill.style.width = (s / 5 * 100) + '%';
+    strengthFill.style.background = s <= 2 ? '#e74c3c' : s === 3 ? '#e67e22' : '#4a7c4a';
 });
 </script>
 
