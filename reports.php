@@ -17,8 +17,8 @@ $server_ts_ms = round(microtime(true) * 1000);
 $server_time_formatted = date('M j, Y — h:i:s A');
 
 $displayName = 'Menu';
-if (isset($_SESSION) && !empty($_SESSION['user_name']))    $displayName = $_SESSION['user_name'];
-elseif (isset($_SESSION) && !empty($_SESSION['username'])) $displayName = $_SESSION['username'];
+if (isset($_SESSION) && !empty($_SESSION['fullname'])) $displayName = $_SESSION['fullname'];
+elseif (isset($_SESSION) && !empty($_SESSION['user'])) $displayName = $_SESSION['user'];
 
 // ── 7-day sensor data ──
 $sql = "SELECT
@@ -93,7 +93,7 @@ function trendIcon($v) { return $v > 0 ? 'arrow-up' : ($v < 0 ? 'arrow-down' : '
     .sidebar-logo img { width: 36px; height: 36px; border-radius: 8px; }
     .sidebar-logo-text { font-size: 14px; font-weight: 700; color: var(--text); line-height: 1.2; }
     .sidebar-logo-sub  { font-size: 11px; color: var(--muted); }
-    .sidebar-nav { flex: 1; padding: 16px 12px; display: flex; flex-direction: column; gap: 2px; }
+    .sidebar-nav { flex: 1; padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; overflow-y: auto; }
     .sidebar-nav a { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13.5px; font-weight: 500; transition: all .15s ease; }
     .sidebar-nav a i { width: 16px; text-align: center; font-size: 13px; }
     .sidebar-nav a:hover  { background: var(--surface2); color: var(--text); }
@@ -183,6 +183,10 @@ function trendIcon($v) { return $v > 0 ? 'arrow-up' : ($v < 0 ? 'arrow-down' : '
   <nav class="sidebar-nav">
     <a href="dashboard.php"><i class="fas fa-table-cells-large"></i> Dashboard</a>
     <a href="reports.php" class="active"><i class="fas fa-chart-line"></i> Reports</a>
+    <a href="harvest.php"><i class="fas fa-seedling"></i> Harvest & Batches</a>
+    <a href="automation.php"><i class="fas fa-robot"></i> Automation</a>
+    <a href="logs.php"><i class="fas fa-list-check"></i> Logs</a>
+    <a href="settings.php"><i class="fas fa-gear"></i> Settings</a>
     <a href="profile.php"><i class="fas fa-sliders"></i> System Profile</a>
     <a href="logout.php"><i class="fas fa-arrow-right-from-bracket"></i> Logout</a>
   </nav>

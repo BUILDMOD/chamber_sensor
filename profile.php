@@ -11,8 +11,32 @@ if (!$currentUsername) { header('Location: index.php'); exit; }
 
 function logActivity($conn, $userId, $action) {
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+
+    // Write to activity_logs (used by profile sidebar)
     $stmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, ip_address) VALUES (?, ?, ?)");
     if ($stmt) { $stmt->bind_param("iss", $userId, $action, $ip); $stmt->execute(); $stmt->close(); }
+
+    // Bug 4 fix: also write to system_logs (read by logs.php)
+    $conn->query("CREATE TABLE IF NOT EXISTS system_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        event_type VARCHAR(50) NOT NULL,
+        description TEXT NOT NULL,
+        user VARCHAR(100) NULL,
+        ip_address VARCHAR(45) NULL,
+        logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )");
+    // Map action string to event_type
+    $event_type = 'system';
+    if (stripos($action, 'login')    !== false) $event_type = 'login';
+    elseif (stripos($action, 'logout')   !== false) $event_type = 'logout';
+    elseif (stripos($action, 'password') !== false) $event_type = 'password_change';
+    elseif (stripos($action, 'profile')  !== false) $event_type = 'profile_update';
+    elseif (stripos($action, 'device')   !== false) $event_type = 'device_control';
+    elseif (stripos($action, 'user')     !== false) $event_type = 'profile_update';
+
+    $username = $_SESSION['user'] ?? $_SESSION['fullname'] ?? 'Unknown';
+    $sl = $conn->prepare("INSERT INTO system_logs (event_type, description, user, ip_address) VALUES (?,?,?,?)");
+    if ($sl) { $sl->bind_param("ssss", $event_type, $action, $username, $ip); $sl->execute(); $sl->close(); }
 }
 
 $user = null;
@@ -193,8 +217,8 @@ body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); col
 .sidebar-logo img { width: 36px; height: 36px; border-radius: 8px; }
 .sidebar-logo-text { font-size: 14px; font-weight: 700; color: var(--text); line-height: 1.2; }
 .sidebar-logo-sub  { font-size: 11px; color: var(--muted); }
-.sidebar-nav { flex: 1; padding: 16px 12px; display: flex; flex-direction: column; gap: 2px; }
-.sidebar-nav a { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13.5px; font-weight: 500; transition: all .15s; }
+.sidebar-nav { flex: 1; padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; overflow-y: auto; }
+.sidebar-nav a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 500; transition: all .15s; white-space: nowrap; }
 .sidebar-nav a i { width: 16px; text-align: center; font-size: 13px; }
 .sidebar-nav a:hover  { background: var(--surface2); color: var(--text); }
 .sidebar-nav a.active { background: var(--green-lt); color: var(--green); font-weight: 600; }
@@ -349,6 +373,10 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
   <nav class="sidebar-nav">
     <a href="dashboard.php"><i class="fas fa-table-cells-large"></i> Dashboard</a>
     <a href="reports.php"><i class="fas fa-chart-line"></i> Reports</a>
+    <a href="harvest.php"><i class="fas fa-seedling"></i> Harvest & Batches</a>
+    <a href="automation.php"><i class="fas fa-robot"></i> Automation</a>
+    <a href="logs.php"><i class="fas fa-list-check"></i> Logs</a>
+    <a href="settings.php"><i class="fas fa-gear"></i> Settings</a>
     <a href="profile.php" class="active"><i class="fas fa-sliders"></i> System Profile</a>
     <a href="logout.php"><i class="fas fa-arrow-right-from-bracket"></i> Logout</a>
   </nav>

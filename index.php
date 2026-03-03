@@ -31,6 +31,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $_SESSION['role'] = $row['role'];
                 $_SESSION['fullname'] = $row['fullname'];
 
+                // Bug 5 fix: log login event to system_logs (read by logs.php)
+                $conn->query("CREATE TABLE IF NOT EXISTS system_logs (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    event_type VARCHAR(50) NOT NULL,
+                    description TEXT NOT NULL,
+                    user VARCHAR(100) NULL,
+                    ip_address VARCHAR(45) NULL,
+                    logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )");
+                $ip  = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+                $usr = $row['username'];
+                $desc = "User '{$usr}' logged in successfully.";
+                $evt = 'login';
+                $ls = $conn->prepare("INSERT INTO system_logs (event_type, description, user, ip_address) VALUES (?,?,?,?)");
+                if ($ls) { $ls->bind_param("ssss", $evt, $desc, $usr, $ip); $ls->execute(); $ls->close(); }
+
                 header("Location: dashboard.php");
                 exit;
             } else {
