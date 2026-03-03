@@ -49,208 +49,257 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Login</title>
+    <title>Login — J WHO? Mushroom Farm</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 
     <style>
-        * { box-sizing: border-box; }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            font-family: 'Poppins', sans-serif;
-            margin: 0;
-            height: 100vh;
-            background: url("assets/img/bg-mushroom.jpg") no-repeat center center/cover;
+            font-family: 'DM Sans', sans-serif;
+            min-height: 100vh;
+            background: url("assets/img/bg-mushroom.jpg") center/cover no-repeat;
             display: flex;
-            justify-content: center;
             align-items: center;
-            position: relative;
-            color: #000;
+            justify-content: center;
         }
 
         body::before {
-            content: "";
-            position: absolute;
+            content: '';
+            position: fixed;
             inset: 0;
-            background: rgba(0, 0, 0, 0.25);
-            z-index: 0;
+            background: rgba(10, 22, 10, 0.60);
         }
 
+        /* Logo */
         .logo {
             position: fixed;
-            top: 20px;
-            left: 20px;
+            top: 18px; left: 18px;
             z-index: 10;
             background: white;
             border-radius: 50%;
-            padding: 5px;
-            box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+            padding: 4px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.25);
         }
+        .logo img { width: 52px; height: 52px; border-radius: 50%; display: block; }
 
-        .logo img {
-            width: 70px;
-        }
-
-        .login-box {
+        /* Card */
+        .card {
             position: relative;
             z-index: 1;
-            background: rgba(60, 60, 60, 0.55);
-            padding: 30px 40px;
-            width: 360px;
-            max-width: 90%;
-            border-radius: 12px;
-            backdrop-filter: blur(8px); 
-            box-shadow: 0 0 25px rgba(0, 0, 0, 0.4);
+            width: 310px;
+            background: rgba(255,255,255,0.10);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 16px;
+            padding: 32px 28px 28px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 16px 40px rgba(0,0,0,0.45);
             text-align: center;
         }
 
         h2 {
-            margin-bottom: 25px;
-            font-weight: 600;
-            color: #3fbf55;
-            font-size: 19px;
+            font-family: 'DM Serif Display', serif;
+            font-size: 20px;
+            font-weight: 400;
+            color: #c8e8b8;
+            margin-bottom: 4px;
         }
 
-        input[type="text"], input[type="password"] {
+        .subtitle {
+            font-size: 11px;
+            color: rgba(200,232,184,0.50);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            margin-bottom: 24px;
+        }
+
+        /* Inputs */
+        .field { margin-bottom: 12px; text-align: left; }
+
+        .input-wrap { position: relative; }
+
+        input[type="text"],
+        input[type="password"] {
             width: 100%;
-            padding: 12px 45px 12px 12px;
-            margin: 10px 0;
-            border-radius: 10px;
-            border: 1px solid #bcd8c5;
-            background: #f2fff4;
-            color: #000;
-            font-size: 15px;
-            font-family: "Courier New", monospace;
+            padding: 10px 36px 10px 12px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(200,232,184,0.20);
+            border-radius: 9px;
+            color: #f0ede6;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 14px;
             outline: none;
+            transition: border-color 0.2s, background 0.2s;
         }
-
+        input::placeholder { color: rgba(200,232,184,0.35); }
         input:focus {
-            border-color: #57d36c;
-            background: #eaffea;
-        }
-
-        .input-container {
-            position: relative;
-            width: 100%;
+            border-color: rgba(122,171,110,0.6);
+            background: rgba(255,255,255,0.13);
         }
 
         .toggle-password {
             position: absolute;
-            top: 50%;
-            right: 15px;
+            right: 10px; top: 50%;
             transform: translateY(-50%);
             cursor: pointer;
-            color: #4caf50;
-            font-size: 18px;
+            color: rgba(200,232,184,0.45);
+            font-size: 13px;
+        }
+        .toggle-password:hover { color: #7aab6e; }
+
+        /* Error */
+        .error-msg {
+            font-size: 12px;
+            color: #f08080;
+            background: rgba(192,57,43,0.15);
+            border: 1px solid rgba(192,57,43,0.30);
+            border-radius: 8px;
+            padding: 8px 10px;
+            margin-bottom: 12px;
+            text-align: left;
         }
 
-        button {
+        /* Buttons */
+        .btn-login {
             width: 100%;
-            background: linear-gradient(135deg, #4caf50, #81c784);
-            color: white;
-            padding: 12px;
+            padding: 11px;
             border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            font-size: 16px;
-            margin-top: 10px;
+            border-radius: 9px;
+            background: linear-gradient(135deg, #4a7c4a, #7aab6e);
+            color: #fff;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 14px;
             font-weight: 600;
+            cursor: pointer;
+            margin-top: 4px;
+            transition: opacity 0.2s, transform 0.2s;
         }
+        .btn-login:hover { opacity: 0.9; transform: translateY(-1px); }
 
-        button:hover {
-            transform: scale(1.03);
-        }
-
-        .back-home {
+        .btn-home {
             display: block;
             width: 100%;
             padding: 10px;
-            margin-top: 14px;
-            border-radius: 10px;
-            background: #ffffffc8;
-            border: 1px solid #bcd8c5;
-            text-decoration: none;
-            font-weight: 600;
-            color: #2c662d;
-        }
-
-        .back-home:hover {
-            background: white;
-            transform: scale(1.03);
-        }
-
-        .error {
-            color: #ff4d4d;
-            margin-top: 12px;
-            font-size: 14px;
-        }
-
-        .footer-text {
-            margin-top: 25px;
+            margin-top: 10px;
+            border-radius: 9px;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(200,232,184,0.15);
+            color: rgba(200,232,184,0.75);
+            font-family: 'DM Sans', sans-serif;
             font-size: 13px;
-            color: #fff;
-            opacity: 0.9;
+            text-decoration: none;
+            transition: background 0.2s, color 0.2s;
+        }
+        .btn-home:hover { background: rgba(255,255,255,0.12); color: #c8e8b8; }
+
+        /* Footer */
+        .card-footer {
+            margin-top: 20px;
+        }
+        .card-footer a {
+            color: #7aab6e;
+            font-size: 12px;
+            text-decoration: none;
+        }
+        .card-footer a:hover { color: #c8e8b8; }
+        .card-footer .copy {
+            margin-top: 10px;
+            font-size: 10px;
+            color: rgba(200,232,184,0.25);
         }
 
-        @media (max-width:1024px){ .login-box{max-width:400px} }
-        @media (max-width:900px){ .login-box{max-width:380px} }
-        @media (max-width:768px){ .login-box{padding:20px 30px; width:320px} .logo img{width:60px} h2{font-size:17px} input{padding:10px 40px 10px 10px; font-size:14px} button{padding:10px; font-size:15px} .back-home{padding:8px; font-size:14px} .footer-text{font-size:12px} }
-        @media (max-width:600px){ .login-box{width:300px} .logo{top:15px; left:15px} .logo img{width:55px} }
-        @media (max-width:520px){ .login-box{width:280px} h2{font-size:16px} input{font-size:13px} button{font-size:14px} }
-        @media (max-width:480px){ .login-box{padding:15px 20px; width:280px} .logo img{width:50px} h2{font-size:16px} input{padding:8px 35px 8px 8px; font-size:13px} button{padding:8px; font-size:14px} .back-home{padding:6px; font-size:13px} .footer-text{font-size:11px} }
-        @media (max-width:360px){ .login-box{padding:10px 15px; width:250px} .logo img{width:45px} h2{font-size:15px} input{padding:6px 30px 6px 6px; font-size:12px} button{padding:6px; font-size:13px} .back-home{padding:4px; font-size:12px} .footer-text{font-size:10px} }
+        .ph-time {
+            position: fixed;
+            bottom: 18px;
+            right: 20px;
+            z-index: 10;
+            text-align: right;
+            color: rgba(200,232,184,0.75);
+            font-family: 'DM Sans', sans-serif;
+        }
+        .ph-time .time { font-size: 22px; font-weight: 600; letter-spacing: 0.02em; line-height: 1; }
+        .ph-time .date { font-size: 11px; color: rgba(200,232,184,0.45); margin-top: 3px; }
+        .ph-time .label { font-size: 10px; color: rgba(200,232,184,0.30); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px; }
     </style>
 </head>
-
 <body>
 
+<!-- Logo -->
 <div class="logo">
     <img src="assets/img/logo.png" alt="J.WHO Logo">
 </div>
 
-<div class="login-box">
-    <h2>J WHO? Mushroom System</h2>
+<!-- Login card -->
+<div class="card">
+
+    <h2>J WHO? Mushroom</h2>
+    <p class="subtitle">Management System</p>
+
+    <?php if (!empty($error)): ?>
+        <div class="error-msg"><?= htmlspecialchars($error) ?></div>
+    <?php endif; ?>
 
     <form method="POST" action="">
-        <input type="text" name="username" placeholder="Enter Username" required>
 
-        <div class="input-container">
-            <input type="password" name="password" id="password" placeholder="Enter Password" required>
-            <span class="toggle-password" id="togglePassword">
-                <i class="fa fa-eye"></i>
-            </span>
+        <div class="field">
+            <div class="input-wrap">
+                <input type="text" name="username" placeholder="Username" required autocomplete="username">
+            </div>
         </div>
 
-        <button type="submit">Login</button>
+        <div class="field">
+            <div class="input-wrap">
+                <input type="password" id="password" name="password" placeholder="Password" required autocomplete="current-password">
+                <span class="toggle-password" id="togglePassword">
+                    <i class="fa fa-eye" id="eyeIcon"></i>
+                </span>
+            </div>
+        </div>
 
-        <?php 
-            if (!empty($error)) echo "<div class='error'>$error</div>";
-        ?>
+        <button type="submit" class="btn-login">Login</button>
+
     </form>
 
-    <a href="homepage.php" class="back-home">⬅ Back to Home</a>
+    <a href="homepage.php" class="btn-home">← Back to Home</a>
 
-    <div class="footer-text">
-        <a href="register.php" style="color:#9fffaf; text-decoration:none; font-weight:600;">
-            Create an account
-        </a>
-        <br><br>
-        © 2025 J WHO? Mushroom Farm
+    <div class="card-footer">
+        <a href="register.php">Create an account</a>
+        <p class="copy">© 2025 J WHO? Mushroom Farm</p>
     </div>
+
+</div>
+
+<!-- PH Time -->
+<div class="ph-time">
+    <div class="time" id="phTime">--:-- --</div>
+    <div class="date" id="phDate">---</div>
+    <div class="label">Philippine Time</div>
 </div>
 
 <script>
-const togglePassword = document.getElementById('togglePassword');
-const passwordInput = document.getElementById('password');
-const icon = togglePassword.querySelector('i');
+function updatePHTime() {
+    const now = new Date();
+    const opts = { timeZone: 'Asia/Manila' };
+    const time = now.toLocaleTimeString('en-PH', { ...opts, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    const date = now.toLocaleDateString('en-PH', { ...opts, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    document.getElementById('phTime').textContent = time;
+    document.getElementById('phDate').textContent = date;
+}
+updatePHTime();
+setInterval(updatePHTime, 1000);
 
-togglePassword.addEventListener('click', () => {
-  const show = passwordInput.type === 'password';
-  passwordInput.type = show ? 'text' : 'password';
-  icon.classList.toggle('fa-eye');
-  icon.classList.toggle('fa-eye-slash');
+const toggle = document.getElementById('togglePassword');
+const passInput = document.getElementById('password');
+const eyeIcon = document.getElementById('eyeIcon');
+
+toggle.addEventListener('click', () => {
+    const show = passInput.type === 'password';
+    passInput.type = show ? 'text' : 'password';
+    eyeIcon.classList.toggle('fa-eye', !show);
+    eyeIcon.classList.toggle('fa-eye-slash', show);
 });
 </script>
 
