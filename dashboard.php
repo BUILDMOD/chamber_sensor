@@ -22,8 +22,8 @@ $server_time_formatted = date('M j, Y — h:i:s A');
 
 $displayName = 'Menu';
 if (session_status() === PHP_SESSION_NONE) @session_start();
-if (!empty($_SESSION['user_name']))    $displayName = $_SESSION['user_name'];
-elseif (!empty($_SESSION['username'])) $displayName = $_SESSION['username'];
+if (!empty($_SESSION['fullname']))     $displayName = $_SESSION['fullname'];
+elseif (!empty($_SESSION['user']))     $displayName = $_SESSION['user'];
 
 $currentMonth = date('Y-m');
 $mushroomSql = "SELECT record_date, mushroom_count, growth_stage, notes FROM mushroom_records WHERE DATE_FORMAT(record_date, '%Y-%m') = ? ORDER BY record_date DESC";
@@ -386,6 +386,10 @@ $mushroomStmt->close();
   <nav class="sidebar-nav">
     <a href="dashboard.php" class="active"><i class="fas fa-table-cells-large"></i> Dashboard</a>
     <a href="reports.php"><i class="fas fa-chart-line"></i> Reports</a>
+    <a href="harvest.php"><i class="fas fa-seedling"></i> Harvest & Batches</a>
+    <a href="automation.php"><i class="fas fa-robot"></i> Automation</a>
+    <a href="logs.php"><i class="fas fa-list-check"></i> Logs</a>
+    <a href="settings.php"><i class="fas fa-gear"></i> Settings</a>
     <a href="profile.php"><i class="fas fa-sliders"></i> System Profile</a>
     <a href="logout.php"><i class="fas fa-arrow-right-from-bracket"></i> Logout</a>
   </nav>
