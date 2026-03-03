@@ -2,421 +2,487 @@
 include('includes/auth_check.php');
 include('includes/db_connect.php');
 
-// Create sensor_summary table if it doesn't exist
 $createTableSql = "CREATE TABLE IF NOT EXISTS sensor_summary (
     id INT AUTO_INCREMENT PRIMARY KEY,
     summary_date DATE NOT NULL,
-
-    avg_temp FLOAT,
-    min_temp FLOAT,
-    max_temp FLOAT,
-
-    avg_hum FLOAT,
-    min_hum FLOAT,
-    max_hum FLOAT,
-
+    avg_temp FLOAT, min_temp FLOAT, max_temp FLOAT,
+    avg_hum FLOAT, min_hum FLOAT, max_hum FLOAT,
     readings INT NOT NULL,
-
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )";
-if (!$conn->query($createTableSql)) {
-    die("Error creating table: " . $conn->error);
-}
+if (!$conn->query($createTableSql)) die("Error creating table: " . $conn->error);
 
-// ensure server uses Philippines timezone and provide server timestamp for client sync
 date_default_timezone_set('Asia/Manila');
-$server_ts_ms = round(microtime(true) * 1000); // milliseconds
-$server_time_formatted = date('M j, Y — h:i:s A'); // example: Nov 19, 2025 — 11:52:03 AM
+$server_ts_ms = round(microtime(true) * 1000);
+$server_time_formatted = date('M j, Y — h:i:s A');
 
-// get display name for topbar menu (fallback to 'Menu')
 $displayName = 'Menu';
-if (isset($_SESSION) && !empty($_SESSION['user_name'])) {
-    $displayName = $_SESSION['user_name'];
-} elseif (isset($_SESSION) && !empty($_SESSION['username'])) {
-    $displayName = $_SESSION['username'];
+if (isset($_SESSION) && !empty($_SESSION['user_name']))    $displayName = $_SESSION['user_name'];
+elseif (isset($_SESSION) && !empty($_SESSION['username'])) $displayName = $_SESSION['username'];
+
+// ── 7-day sensor data ──
+$sql = "SELECT
+          DATE(timestamp) as summary_date,
+          AVG(temperature) as avg_temp, MIN(temperature) as min_temp, MAX(temperature) as max_temp,
+          AVG(humidity) as avg_hum, MIN(humidity) as min_hum, MAX(humidity) as max_hum,
+          COUNT(*) as readings
+        FROM sensor_data
+        WHERE STR_TO_DATE(timestamp,'%Y-%m-%d %H:%i:%s') >= UTC_TIMESTAMP() - INTERVAL 7 DAY
+        GROUP BY DATE(timestamp) ORDER BY summary_date ASC";
+$result = $conn->query($sql);
+$data = [];
+if ($result && $result->num_rows > 0)
+    while ($row = $result->fetch_assoc()) $data[] = $row;
+
+// Save to sensor_summary
+foreach ($data as $row) {
+    $ins = $conn->prepare("INSERT IGNORE INTO sensor_summary (summary_date,avg_temp,min_temp,max_temp,avg_hum,min_hum,max_hum,readings) VALUES (?,?,?,?,?,?,?,?)");
+    if ($ins) { $ins->bind_param("sddddddi",$row['summary_date'],$row['avg_temp'],$row['min_temp'],$row['max_temp'],$row['avg_hum'],$row['min_hum'],$row['max_hum'],$row['readings']); $ins->execute(); $ins->close(); }
 }
+
+// ── compute changes ──
+$temp_changes = []; $hum_changes = []; $change_dates = [];
+for ($i = 1; $i < count($data); $i++) {
+    $temp_changes[] = $data[$i]['avg_temp'] - $data[$i-1]['avg_temp'];
+    $hum_changes[]  = $data[$i]['avg_hum']  - $data[$i-1]['avg_hum'];
+    $change_dates[]  = $data[$i]['summary_date'];
+}
+$avg_tc = count($temp_changes) ? array_sum($temp_changes)/count($temp_changes) : 0;
+$avg_hc = count($hum_changes)  ? array_sum($hum_changes)/count($hum_changes)   : 0;
+
+function trendWord($v) { return $v > 0 ? 'Increasing' : ($v < 0 ? 'Decreasing' : 'Stable'); }
+function trendClass($v){ return $v > 0 ? 'pos' : ($v < 0 ? 'neg' : 'neu'); }
+function trendIcon($v) { return $v > 0 ? 'arrow-up' : ($v < 0 ? 'arrow-down' : 'minus'); }
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Reports</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <link rel="stylesheet" href="assets/css/style.css">
+  <title>Reports</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
   <style>
-    /* ---------- Light / White Theme ---------- */
-    :root{
-      --bg: #f5f7fb;
-      --panel: #ffffff;
-      --muted: #6b7280;
-      --text: #0f172a;
-      --accent: #16a34a; /* green */
-      --accent-2: #ef4444; /* red */
-      --panel-shadow: 0 8px 30px rgba(15,23,42,0.06);
-      --muted-ghost: rgba(15,23,42,0.04);
+    :root {
+      --bg:       #f0f2f5;
+      --surface:  #ffffff;
+      --surface2: #f7f8fa;
+      --border:   rgba(0,0,0,0.07);
+      --text:     #0d1117;
+      --muted:    #6e7681;
+      --green:    #1a9e5c;
+      --green-lt: #e6f7ef;
+      --red:      #d93025;
+      --red-lt:   #fdecea;
+      --amber:    #b45309;
+      --amber-lt: #fef3c7;
+      --blue:     #1a6bba;
+      --blue-lt:  #e8f1fb;
+      --r:        12px;
+      --shadow:   0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+      --shadow-lg:0 2px 8px rgba(0,0,0,0.08), 0 12px 40px rgba(0,0,0,0.06);
     }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
 
-    *{box-sizing:border-box}
-    body {
-      font-family: "Poppins", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
-      color: var(--text);
-      margin: 0;
-      padding: 0;
-      -webkit-font-smoothing:antialiased;
-      -moz-osx-font-smoothing:grayscale;
-    }
+    /* ── SIDEBAR ── */
+    .sidebar { position: fixed; inset: 0 auto 0 0; width: 220px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 50; }
+    .sidebar-logo { padding: 22px 20px 18px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+    .sidebar-logo img { width: 36px; height: 36px; border-radius: 8px; }
+    .sidebar-logo-text { font-size: 14px; font-weight: 700; color: var(--text); line-height: 1.2; }
+    .sidebar-logo-sub  { font-size: 11px; color: var(--muted); }
+    .sidebar-nav { flex: 1; padding: 16px 12px; display: flex; flex-direction: column; gap: 2px; }
+    .sidebar-nav a { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13.5px; font-weight: 500; transition: all .15s ease; }
+    .sidebar-nav a i { width: 16px; text-align: center; font-size: 13px; }
+    .sidebar-nav a:hover  { background: var(--surface2); color: var(--text); }
+    .sidebar-nav a.active { background: var(--green-lt); color: var(--green); font-weight: 600; }
 
-    /* topbar */
-    .topbar {
-      background: white;
-      color: black;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      padding:16px 22px;
-      position: sticky;
-      top: 0;
-      z-index: 60;
-      border-bottom: 1px solid rgba(15,23,42,0.04);
-      backdrop-filter: blur(6px);
-    }
-    .topbar .left {
-      display:flex;
-      align-items:center;
-      gap:14px;
-    }
-    .topbar img { width: 44px; height: 40px; border-radius: 1px; background:transparent; box-shadow: 0 6px 18px rgba(2,6,23,0.04);}
-    .topbar h1 { font-size:17px; margin:0; color:black; font-weight:600; letter-spacing: -0.2px; }
+    /* ── MAIN ── */
+    .main { margin-left: 220px; min-height: 100vh; }
 
-    /* layout */
-    .container {
-      display:grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap:20px;
-      padding:26px;
-      max-width:1200px;
-      margin: 5px auto;
-    }
+    /* ── TOPBAR ── */
+    .topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 28px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 40; }
+    .topbar-title { font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -.2px; }
+    .topbar-time { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); background: var(--surface2); padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); }
 
-    .card {
-      background: var(--panel);
-      border-radius:14px;
-      padding:18px;
-      box-shadow: var(--panel-shadow);
-      transition: transform .12s ease, box-shadow .12s ease;
-      border: 1px solid rgba(15,23,42,0.03);
-      overflow-x: auto;
-    }
-    .card:hover { transform: translateY(-4px); box-shadow: 0 16px 48px rgba(15,23,42,0.06); }
-    .card h3 { margin:0 0 12px 0; color:var(--text); font-weight:700; font-size:16px; display:flex; align-items:center; gap:8px; }
-    .card p { margin:0; color:var(--muted); }
+    /* ── PAGE BODY ── */
+    .page { padding: 24px 28px; max-width: 1280px; display: flex; flex-direction: column; gap: 16px; }
 
-    /* report table */
-    .report-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 12px;
-    }
-    .report-table th, .report-table td {
-      padding: 8px 12px;
-      text-align: left;
-      border-bottom: 1px solid rgba(15,23,42,0.04);
-    }
-    .report-table th {
-      background: var(--muted-ghost);
-      font-weight: 700;
-      color: var(--text);
-    }
-    .report-table td {
-      color: var(--muted);
-    }
+    /* ── CARD ── */
+    .card { background: var(--surface); border-radius: var(--r); border: 1px solid var(--border); box-shadow: var(--shadow); overflow: hidden; }
+    .card-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px 14px; border-bottom: 1px solid var(--border); }
+    .card-title { font-size: 13px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
+    .card-title .icon { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+    .icon-blue  { background: var(--blue-lt);  color: var(--blue);  }
+    .icon-green { background: var(--green-lt); color: var(--green); }
+    .card-sub   { font-size: 12px; color: var(--muted); }
+    .card-body  { padding: 0; }
 
-    /* sidebar */
-    .sidebar {
-      position: fixed;
-      left: 0;
-      top: 0;
-      width: 250px;
-      height: 100vh;
-      background: #f8f9fa;
-      border-right: 1px solid rgba(15,23,42,0.04);
-      box-shadow: var(--panel-shadow);
-      display: flex;
-      flex-direction: column;
-      z-index: 50;
-    }
-    .sidebar-logo {
-      padding: 20px;
-      text-align: center;
-      border-bottom: 1px solid rgba(15,23,42,0.1);
-    }
-    .sidebar-logo img {
-      width: 60px;
-      height: 60px;
-      border-radius: 8px;
-    }
-    .sidebar-nav {
-      flex: 1;
-      padding: 20px 0;
-    }
-    .sidebar-nav a {
-      display: block;
-      padding: 12px 20px;
-      color: #495057;
-      text-decoration: none;
-      font-weight: 600;
-      transition: all 0.2s ease;
-      border-left: 3px solid transparent;
-    }
-    .sidebar-nav a:hover {
-      background: rgba(15,23,42,0.05);
-      color: #0f172a;
-      border-left-color: #1e40af;
-    }
-    .sidebar-nav a.active {
-      background: rgba(30,64,175,0.1);
-      color: #1e40af;
-      border-left-color: #1e40af;
-    }
+    /* ── STAT STRIP ── */
+    .stat-strip { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+    .stat-item { flex: 1; padding: 14px 18px; border-right: 1px solid var(--border); }
+    .stat-item:last-child { border-right: none; }
+    .stat-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+    .stat-val   { font-size: 22px; font-weight: 700; font-family: 'DM Mono', monospace; color: var(--text); }
+    .stat-val span { font-size: 12px; font-weight: 500; color: var(--muted); }
 
-    /* main content */
-    .main-content {
-      margin-left: 250px;
-      min-height: 100vh;
-      background: var(--bg);
-    }
+    /* ── TABLE ── */
+    .tbl-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead th { text-align: left; padding: 9px 14px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; background: var(--surface2); border-bottom: 1px solid var(--border); white-space: nowrap; }
+    tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text); font-family: 'DM Mono', monospace; font-size: 12.5px; }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: var(--surface2); }
+    td.date-col { font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600; color: var(--text); }
+    td.readings-col { font-weight: 700; }
 
-    /* small helper */
-    .muted-small { color:var(--muted); font-size:13px; }
+    /* range badges */
+    .badge { display: inline-block; padding: 2px 7px; border-radius: 20px; font-size: 11px; font-weight: 700; font-family: 'DM Sans', sans-serif; }
+    .badge-green { background: var(--green-lt); color: var(--green); }
+    .badge-red   { background: var(--red-lt);   color: var(--red);   }
+    .badge-amber { background: var(--amber-lt); color: var(--amber); }
+    .badge-blue  { background: var(--blue-lt);  color: var(--blue);  }
 
     /* change indicators */
-    .change-positive { color: var(--accent); font-weight: 600; }
-    .change-negative { color: var(--accent-2); font-weight: 600; }
-    .change-neutral { color: var(--muted); font-weight: 600; }
+    .pos { color: var(--green); font-weight: 700; }
+    .neg { color: var(--red);   font-weight: 700; }
+    .neu { color: var(--muted); font-weight: 600; }
 
+    /* ── CHART AREA ── */
+    .chart-wrap { padding: 20px; }
+    .chart-wrap canvas { max-height: 220px; }
+
+    /* ── SUMMARY BOX ── */
+    .summary-box { background: var(--surface2); border-top: 1px solid var(--border); padding: 20px; }
+    .summary-box h4 { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; }
+    .summary-rows { display: flex; gap: 24px; flex-wrap: wrap; }
+    .summary-row { display: flex; flex-direction: column; gap: 2px; }
+    .summary-row .s-label { font-size: 11px; color: var(--muted); }
+    .summary-row .s-val   { font-size: 16px; font-weight: 700; font-family: 'DM Mono', monospace; display: flex; align-items: center; gap: 5px; }
+    .summary-row .s-trend { font-size: 11px; font-weight: 600; margin-top: 2px; }
+
+    /* empty state */
+    .empty-state { text-align: center; padding: 40px; color: var(--muted); }
+    .empty-state i { font-size: 28px; display: block; margin-bottom: 8px; opacity: .35; }
+    .empty-state span { font-size: 13px; }
   </style>
 </head>
 <body>
-  <!-- Sidebar -->
-  <div class="sidebar">
-    <div class="sidebar-logo">
-      <img src="assets/img/logo.png" alt="logo">
+
+<!-- ── SIDEBAR ── -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <img src="assets/img/logo.png" alt="logo">
+    <div>
+      <div class="sidebar-logo-text">MushroomOS</div>
+      <div class="sidebar-logo-sub">Cultivation System</div>
     </div>
-    <nav class="sidebar-nav">
-      <a href="dashboard.php"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
-      <a href="reports.php"  class="active"><i class="fas fa-chart-bar"></i> Reports</a>
-      <a href="profile.php"><i class="fas fa-user"></i> System Profile</a>
-      <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
-    </nav>
   </div>
+  <nav class="sidebar-nav">
+    <a href="dashboard.php"><i class="fas fa-table-cells-large"></i> Dashboard</a>
+    <a href="reports.php" class="active"><i class="fas fa-chart-line"></i> Reports</a>
+    <a href="profile.php"><i class="fas fa-sliders"></i> System Profile</a>
+    <a href="logout.php"><i class="fas fa-arrow-right-from-bracket"></i> Logout</a>
+  </nav>
+</aside>
 
-  <!-- Main Content -->
-  <div class="main-content">
-    <div class="topbar">
-      <div class="left">
-        <h2>System Reports</h2>
-      </div>
+<!-- ── MAIN ── -->
+<main class="main">
+  <header class="topbar">
+    <span class="topbar-title">Reports</span>
+    <span class="topbar-time" id="phTime" data-server-ts="<?= $server_ts_ms ?>"><?= htmlspecialchars($server_time_formatted) ?></span>
+  </header>
 
+  <div class="page">
 
-      <div style="display:flex; align-items:center; gap:14px;">
-        <span id="phTime" data-server-ts="<?= $server_ts_ms ?>" class="muted-small" style="white-space:nowrap;">
-          <?= htmlspecialchars($server_time_formatted) ?>
-        </span>
-      </div>
-    </div>
+    <?php
+    // Quick stat aggregates for the strip
+    $all_temps = array_column($data, 'avg_temp');
+    $all_hums  = array_column($data, 'avg_hum');
+    $all_reads = array_column($data, 'readings');
+    $overall_avg_t = count($all_temps) ? array_sum($all_temps)/count($all_temps) : null;
+    $overall_avg_h = count($all_hums)  ? array_sum($all_hums)/count($all_hums)   : null;
+    $total_reads   = array_sum($all_reads);
+    $overall_min_t = count($data) ? min(array_column($data,'min_temp')) : null;
+    $overall_max_t = count($data) ? max(array_column($data,'max_temp')) : null;
+    ?>
 
-    <div class="container">
-      <!-- Sensor Data Report -->
-      <div class="card" style="grid-column: 1 / -1;">
-        <h3>📊 Sensor Data Report</h3>
-        <p>Summary of temperature and humidity readings over the last 7 days.</p>
-        <?php
-        $sql = "SELECT
-                  DATE(timestamp) as summary_date,
-                  AVG(temperature) as avg_temp,
-                  MIN(temperature) as min_temp,
-                  MAX(temperature) as max_temp,
-                  AVG(humidity) as avg_hum,
-                  MIN(humidity) as min_hum,
-                  MAX(humidity) as max_hum,
-                  COUNT(*) as readings
-                FROM sensor_data
-                WHERE STR_TO_DATE(timestamp, '%Y-%m-%d %H:%i:%s') >= UTC_TIMESTAMP() - INTERVAL 7 DAY
-                GROUP BY DATE(timestamp)
-                ORDER BY summary_date ASC";
-        $result = $conn->query($sql);
-
-        $data = [];
-        if ($result && $result->num_rows > 0) {
-            while ($row = $result->fetch_assoc()) {
-                $data[] = $row;
-            }
-        }
-
-        // Save the report data to sensor_summary table
-        foreach ($data as $row) {
-            $insertSql = "INSERT IGNORE INTO sensor_summary (summary_date, avg_temp, min_temp, max_temp, avg_hum, min_hum, max_hum, readings) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-            $stmt = $conn->prepare($insertSql);
-            if ($stmt === false) {
-                die("Error preparing statement: " . $conn->error);
-            }
-            $stmt->bind_param("sddddddi", $row['summary_date'], $row['avg_temp'], $row['min_temp'], $row['max_temp'], $row['avg_hum'], $row['min_hum'], $row['max_hum'], $row['readings']);
-            $stmt->execute();
-            $stmt->close();
-        }
-
-        // Get historical data for averages (last 30 days)
-        $hist_sql = "SELECT DATE(timestamp) as date, AVG(temperature) as avg_temp, AVG(humidity) as avg_hum FROM sensor_data WHERE STR_TO_DATE(timestamp, '%Y-%m-%d %H:%i:%s') >= UTC_TIMESTAMP() - INTERVAL 30 DAY GROUP BY DATE(timestamp) ORDER BY date ASC";
-        $hist_result = $conn->query($hist_sql);
-        $hist_data = [];
-        if ($hist_result && $hist_result->num_rows > 0) {
-            while ($row = $hist_result->fetch_assoc()) {
-                $hist_data[] = $row;
-            }
-        }
-
-        // Calculate historical average changes
-        $temp_changes = [];
-        $hum_changes = [];
-        for ($i = 1; $i < count($hist_data); $i++) {
-            $temp_changes[] = $hist_data[$i]['avg_temp'] - $hist_data[$i-1]['avg_temp'];
-            $hum_changes[] = $hist_data[$i]['avg_hum'] - $hist_data[$i-1]['avg_hum'];
-        }
-        $avg_hist_temp_change = count($temp_changes) > 0 ? array_sum($temp_changes) / count($temp_changes) : 0;
-        $avg_hist_hum_change = count($hum_changes) > 0 ? array_sum($hum_changes) / count($hum_changes) : 0;
-        ?>
-        <table class="report-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Avg Temp (°C)</th>
-              <th>Min Temp (°C)</th>
-              <th>Max Temp (°C)</th>
-              <th>Avg Hum (%)</th>
-              <th>Min Hum (%)</th>
-              <th>Max Hum (%)</th>
-              <th>Readings</th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php foreach ($data as $row): ?>
-            <tr>
-              <td><?= htmlspecialchars($row['summary_date']) ?></td>
-              <td><?= number_format($row['avg_temp'], 1) ?></td>
-              <td><?= number_format($row['min_temp'], 1) ?></td>
-              <td><?= number_format($row['max_temp'], 1) ?></td>
-              <td><?= number_format($row['avg_hum'], 1) ?></td>
-              <td><?= number_format($row['min_hum'], 1) ?></td>
-              <td><?= number_format($row['max_hum'], 1) ?></td>
-              <td><?= htmlspecialchars($row['readings']) ?></td>
-            </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Sensor Data Changes Report -->
-      <div class="card" style="grid-column: 1 / -1;">
-        <h3>📈 Sensor Data Changes</h3>
-        <p>Daily changes in average temperature and humidity from the previous day.</p>
-        <table class="report-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Temp Change (°C)</th>
-              <th>Hum Change (%)</th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php
-            $temp_changes = [];
-            $hum_changes = [];
-            for ($i = 1; $i < count($data); $i++):
-              $temp_change = $data[$i]['avg_temp'] - $data[$i-1]['avg_temp'];
-              $hum_change = $data[$i]['avg_hum'] - $data[$i-1]['avg_hum'];
-              $temp_changes[] = $temp_change;
-              $hum_changes[] = $hum_change;
-            ?>
-            <tr>
-              <td><?= htmlspecialchars($data[$i]['summary_date']) ?></td>
-              <td class="<?= $temp_change > 0 ? 'change-positive' : ($temp_change < 0 ? 'change-negative' : 'change-neutral') ?>">
-                <i class="fas fa-<?= $temp_change > 0 ? 'arrow-up' : ($temp_change < 0 ? 'arrow-down' : 'minus') ?>"></i>
-                <?= number_format($temp_change, 1) ?>
-              </td>
-              <td class="<?= $hum_change > 0 ? 'change-positive' : ($hum_change < 0 ? 'change-negative' : 'change-neutral') ?>">
-                <i class="fas fa-<?= $hum_change > 0 ? 'arrow-up' : ($hum_change < 0 ? 'arrow-down' : 'minus') ?>"></i>
-                <?= number_format($hum_change, 1) ?>
-              </td>
-            </tr>
-            <?php endfor; ?>
-          </tbody>
-        </table>
-
-        <!-- Chart for Changes -->
-        <div style="margin-top: 20px;">
-          <canvas id="changesChart" width="400" height="200"></canvas>
+    <!-- ── Sensor Data Report ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <span class="icon icon-blue"><i class="fas fa-table"></i></span>
+          Sensor Data Report
         </div>
+        <span class="card-sub">Last 7 days · <?= count($data) ?> day<?= count($data) != 1 ? 's' : '' ?> of data</span>
+      </div>
 
-        <!-- Summary Section -->
-        <div style="margin-top: 20px; padding: 15px; background: var(--muted-ghost); border-radius: 8px;">
-          <h4 style="margin: 0 0 10px 0; color: var(--text);">Summary of Changes</h4>
-          <p style="margin: 5px 0;">
-            <strong>Average Temperature Change:</strong>
-            <span class="<?= array_sum($temp_changes)/count($temp_changes) > 0 ? 'change-positive' : (array_sum($temp_changes)/count($temp_changes) < 0 ? 'change-negative' : 'change-neutral') ?>">
-              <?= number_format(array_sum($temp_changes)/count($temp_changes), 2) ?> °C
-            </span>
-          </p>
-          <p style="margin: 5px 0;">
-            <strong>Average Humidity Change:</strong>
-            <span class="<?= array_sum($hum_changes)/count($hum_changes) > 0 ? 'change-positive' : (array_sum($hum_changes)/count($hum_changes) < 0 ? 'change-negative' : 'change-neutral') ?>">
-              <?= number_format(array_sum($hum_changes)/count($hum_changes), 2) ?> %
-            </span>
-          </p>
-          <p style="margin: 5px 0; font-size: 14px; color: var(--muted);">
-            Trends: Temperature has been <?= array_sum($temp_changes)/count($temp_changes) > 0 ? 'increasing' : (array_sum($temp_changes)/count($temp_changes) < 0 ? 'decreasing' : 'stable') ?> on average,
-            while humidity has been <?= array_sum($hum_changes)/count($hum_changes) > 0 ? 'increasing' : (array_sum($hum_changes)/count($hum_changes) < 0 ? 'decreasing' : 'stable') ?>.
-          </p>
+      <!-- stat strip -->
+      <?php if (count($data)): ?>
+      <div class="stat-strip">
+        <div class="stat-item">
+          <div class="stat-label">Avg Temp</div>
+          <div class="stat-val"><?= number_format($overall_avg_t, 1) ?><span> °C</span></div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Temp Range</div>
+          <div class="stat-val"><?= number_format($overall_min_t,1) ?>–<?= number_format($overall_max_t,1) ?><span> °C</span></div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Avg Humidity</div>
+          <div class="stat-val"><?= number_format($overall_avg_h, 1) ?><span> %</span></div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Total Readings</div>
+          <div class="stat-val"><?= number_format($total_reads) ?></div>
         </div>
       </div>
+      <?php endif; ?>
 
-    <script>
-      // Pass PHP data to JavaScript
-      var tempChanges = <?php echo json_encode($temp_changes); ?>;
-      var humChanges = <?php echo json_encode($hum_changes); ?>;
-      var dates = <?php echo json_encode(array_slice(array_column($data, 'summary_date'), 1)); ?>;
-      // ---------------- PH SERVER-SYNCED TIME ----------------
-      (function(){
-        const el = document.getElementById('phTime');
-        if(!el) return;
+      <div class="card-body">
+        <?php if (empty($data)): ?>
+          <div class="empty-state"><i class="fas fa-database"></i><span>No sensor data available for the last 7 days.</span></div>
+        <?php else: ?>
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Avg Temp</th>
+                <th>Min Temp</th>
+                <th>Max Temp</th>
+                <th>Avg Hum</th>
+                <th>Min Hum</th>
+                <th>Max Hum</th>
+                <th>Readings</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach ($data as $row):
+                $tc = ($row['avg_temp'] >= 22 && $row['avg_temp'] <= 28) ? 'badge-green' : (($row['avg_temp'] < 22) ? 'badge-blue' : 'badge-amber');
+                $hc = ($row['avg_hum']  >= 85 && $row['avg_hum']  <= 95) ? 'badge-green' : (($row['avg_hum']  < 85) ? 'badge-blue' : 'badge-red');
+              ?>
+              <tr>
+                <td class="date-col"><?= date('M j, Y', strtotime($row['summary_date'])) ?></td>
+                <td><span class="badge <?= $tc ?>"><?= number_format($row['avg_temp'],1) ?>°</span></td>
+                <td><?= number_format($row['min_temp'],1) ?>°</td>
+                <td><?= number_format($row['max_temp'],1) ?>°</td>
+                <td><span class="badge <?= $hc ?>"><?= number_format($row['avg_hum'],1) ?>%</span></td>
+                <td><?= number_format($row['min_hum'],1) ?>%</td>
+                <td><?= number_format($row['max_hum'],1) ?>%</td>
+                <td class="readings-col"><?= number_format($row['readings']) ?></td>
+              </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
+        <?php endif; ?>
+      </div>
+    </div>
 
-        let current = parseInt(el.dataset.serverTs, 10) || Date.now();
+    <!-- ── Sensor Data Changes ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <span class="icon icon-green"><i class="fas fa-chart-line"></i></span>
+          Sensor Data Changes
+        </div>
+        <span class="card-sub">Day-over-day deltas</span>
+      </div>
 
-        function formatPH(ms){
-          const d = new Date(ms);
-          return d.toLocaleString('en-PH', {
-            timeZone: 'Asia/Manila',
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: true
-          }).replace(',', ' —');
+      <?php if (count($data) < 2): ?>
+        <div class="empty-state" style="padding:40px;"><i class="fas fa-chart-line"></i><span>Not enough data to compute changes.</span></div>
+      <?php else: ?>
+
+        <!-- chart -->
+        <div class="chart-wrap">
+          <canvas id="changesChart"></canvas>
+        </div>
+
+        <!-- changes table -->
+        <div class="tbl-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Temp Change (°C)</th>
+                <th>Humidity Change (%)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php for ($i = 1; $i < count($data); $i++):
+                $row_tc = $data[$i]['avg_temp'] - $data[$i-1]['avg_temp'];
+                $row_hc = $data[$i]['avg_hum']  - $data[$i-1]['avg_hum'];
+              ?>
+              <tr>
+                <td class="date-col"><?= date('M j, Y', strtotime($data[$i]['summary_date'])) ?></td>
+                <td class="<?= trendClass($row_tc) ?>">
+                  <i class="fas fa-<?= trendIcon($row_tc) ?>"></i>
+                  <?= ($row_tc >= 0 ? '+' : '') . number_format($row_tc, 2) ?>
+                </td>
+                <td class="<?= trendClass($row_hc) ?>">
+                  <i class="fas fa-<?= trendIcon($row_hc) ?>"></i>
+                  <?= ($row_hc >= 0 ? '+' : '') . number_format($row_hc, 2) ?>
+                </td>
+              </tr>
+              <?php endfor; ?>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- summary box — rendered after table so loop vars don't interfere -->
+        <div class="summary-box">
+          <h4>Summary of Changes</h4>
+          <div class="summary-rows">
+            <div class="summary-row">
+              <span class="s-label">Average Temperature Change</span>
+              <span class="s-val" style="color:<?= $avg_tc > 0 ? 'var(--green)' : ($avg_tc < 0 ? 'var(--red)' : 'var(--muted)') ?>">
+                <i class="fas fa-<?= trendIcon($avg_tc) ?>" style="font-size:13px;"></i>
+                <?= ($avg_tc >= 0 ? '+' : '') . number_format($avg_tc, 2) ?>°C
+              </span>
+              <span class="s-trend" style="color:<?= $avg_tc > 0 ? 'var(--green)' : ($avg_tc < 0 ? 'var(--red)' : 'var(--muted)') ?>"><?= trendWord($avg_tc) ?></span>
+            </div>
+            <div class="summary-row">
+              <span class="s-label">Average Humidity Change</span>
+              <span class="s-val" style="color:<?= $avg_hc > 0 ? 'var(--green)' : ($avg_hc < 0 ? 'var(--red)' : 'var(--muted)') ?>">
+                <i class="fas fa-<?= trendIcon($avg_hc) ?>" style="font-size:13px;"></i>
+                <?= ($avg_hc >= 0 ? '+' : '') . number_format($avg_hc, 2) ?>%
+              </span>
+              <span class="s-trend" style="color:<?= $avg_hc > 0 ? 'var(--green)' : ($avg_hc < 0 ? 'var(--red)' : 'var(--muted)') ?>"><?= trendWord($avg_hc) ?></span>
+            </div>
+            <div class="summary-row" style="flex:1;min-width:200px;">
+              <span class="s-label">Trend Narrative</span>
+              <span style="font-size:13px;color:var(--muted);line-height:1.6;margin-top:4px;">
+                Temperature has been <strong style="color:var(--text)"><?= strtolower(trendWord($avg_tc)) ?></strong> on average,
+                while humidity has been <strong style="color:var(--text)"><?= strtolower(trendWord($avg_hc)) ?></strong>.
+              </span>
+            </div>
+          </div>
+        </div>
+
+      <?php endif; ?>
+    </div>
+
+  </div><!-- end page -->
+</main>
+
+<script>
+// ── PH Time ──
+(function(){
+  const el = document.getElementById('phTime');
+  if (!el) return;
+  let t = parseInt(el.dataset.serverTs, 10) || Date.now();
+  const fmt = ms => new Date(ms).toLocaleString('en-PH', {
+    timeZone:'Asia/Manila', month:'short', day:'numeric', year:'numeric',
+    hour:'numeric', minute:'2-digit', second:'2-digit', hour12:true
+  }).replace(',', ' —');
+  el.textContent = fmt(t);
+  setInterval(() => { t += 1000; el.textContent = fmt(t); }, 1000);
+})();
+
+// ── Changes Chart ──
+(function(){
+  const canvas = document.getElementById('changesChart');
+  if (!canvas) return;
+
+  const tempChanges = <?= json_encode($temp_changes) ?>;
+  const humChanges  = <?= json_encode($hum_changes) ?>;
+  const dates       = <?= json_encode($change_dates) ?>;
+
+  if (!dates.length) return;
+
+  const fmtDate = s => {
+    const d = new Date(s + 'T00:00:00');
+    return d.toLocaleDateString('en-PH', { month:'short', day:'numeric' });
+  };
+
+  new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: dates.map(fmtDate),
+      datasets: [
+        {
+          label: 'Temp Change (°C)',
+          data: tempChanges,
+          backgroundColor: tempChanges.map(v => v >= 0 ? 'rgba(26,158,92,0.7)' : 'rgba(217,48,37,0.7)'),
+          borderRadius: 5,
+          borderSkipped: false,
+          yAxisID: 'y',
+        },
+        {
+          label: 'Humidity Change (%)',
+          data: humChanges,
+          backgroundColor: humChanges.map(v => v >= 0 ? 'rgba(26,107,186,0.6)' : 'rgba(180,83,9,0.6)'),
+          borderRadius: 5,
+          borderSkipped: false,
+          yAxisID: 'y1',
+          type: 'line',
+          fill: false,
+          borderColor: 'rgba(26,107,186,0.8)',
+          pointBackgroundColor: humChanges.map(v => v >= 0 ? '#1a6bba' : '#b45309'),
+          pointRadius: 4,
+          tension: 0.3,
         }
-
-        el.textContent = formatPH(current);
-
-        setInterval(function(){
-          current += 1000;
-          el.textContent = formatPH(current);
-        }, 1000);
-      })();
-
-    </script>
-  </div>
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: {
+            font: { family: 'DM Sans', size: 12 },
+            color: '#6e7681',
+            boxWidth: 12, boxHeight: 12, borderRadius: 4,
+          }
+        },
+        tooltip: {
+          backgroundColor: '#fff',
+          borderColor: 'rgba(0,0,0,0.08)',
+          borderWidth: 1,
+          titleColor: '#0d1117',
+          bodyColor: '#6e7681',
+          padding: 12,
+          cornerRadius: 8,
+          titleFont: { family: 'DM Sans', weight: '700', size: 12 },
+          bodyFont:  { family: 'DM Mono', size: 12 },
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              const sign = v >= 0 ? '+' : '';
+              return ` ${ctx.dataset.label}: ${sign}${v.toFixed(2)}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { font: { family: 'DM Sans', size: 11 }, color: '#6e7681' }
+        },
+        y: {
+          position: 'left',
+          grid: { color: 'rgba(0,0,0,0.05)' },
+          ticks: {
+            font: { family: 'DM Mono', size: 11 }, color: '#6e7681',
+            callback: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '°'
+          }
+        },
+        y1: {
+          position: 'right',
+          grid: { drawOnChartArea: false },
+          ticks: {
+            font: { family: 'DM Mono', size: 11 }, color: '#6e7681',
+            callback: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%'
+          }
+        }
+      }
+    }
+  });
+})();
+</script>
 </body>
 </html>

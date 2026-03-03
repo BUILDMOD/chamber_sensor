@@ -1,430 +1,159 @@
 <?php 
-// profile.php
 include('includes/auth_check.php');
 include('includes/db_connect.php');
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+if (session_status() === PHP_SESSION_NONE) session_start();
 
-// Determine current user (username stored in session at login)
 $currentUsername = null;
-if (isset($_SESSION['user']) && !empty($_SESSION['user'])) {
-    $currentUsername = $_SESSION['user'];
-} elseif (isset($_SESSION['user_name']) && !empty($_SESSION['user_name'])) {
-    $currentUsername = $_SESSION['user_name'];
-}
+if (!empty($_SESSION['user']))      $currentUsername = $_SESSION['user'];
+elseif (!empty($_SESSION['user_name'])) $currentUsername = $_SESSION['user_name'];
+if (!$currentUsername) { header('Location: index.php'); exit; }
 
-if (!$currentUsername) {
-    header('Location: index.php');
-    exit;
-}
-
-// Function to log activity
 function logActivity($conn, $userId, $action) {
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
     $stmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, ip_address) VALUES (?, ?, ?)");
-    if ($stmt) {
-        $stmt->bind_param("iss", $userId, $action, $ip);
-        $stmt->execute();
-        $stmt->close();
-    }
+    if ($stmt) { $stmt->bind_param("iss", $userId, $action, $ip); $stmt->execute(); $stmt->close(); }
 }
 
-// fetch user first (so we have user id for logging)
 $user = null;
 $stmt = $conn->prepare("SELECT id, first_name, middle_name, last_name, fullname, email, phone, username, created_at FROM users WHERE username = ? LIMIT 1");
-if ($stmt) {
-    $stmt->bind_param("s", $currentUsername);
-    $stmt->execute();
-    $res = $stmt->get_result();
-    if ($res && $res->num_rows > 0) {
-        $user = $res->fetch_assoc();
-    }
-    $stmt->close();
-}
+if ($stmt) { $stmt->bind_param("s", $currentUsername); $stmt->execute(); $res = $stmt->get_result(); if ($res && $res->num_rows > 0) $user = $res->fetch_assoc(); $stmt->close(); }
 
-$errors = [];
-$success = "";
+$errors = []; $success = "";
 
-// ------------- ADD USER (OWNER ONLY) -------------
+// ADD USER
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
-
-    // Server-side guard: only allow if session role is owner
     $sessionRole = $_SESSION['role'] ?? '';
-    if ($sessionRole !== 'owner') {
-        $errors[] = "Access denied. Only owner can create new accounts.";
-    } else {
-        // collect inputs
-        $a_first  = trim($_POST['a_first_name'] ?? '');
-        $a_middle = trim($_POST['a_middle_name'] ?? '');
-        $a_last   = trim($_POST['a_last_name'] ?? '');
-        $a_email  = trim($_POST['a_email'] ?? '');
-        $a_phone  = trim($_POST['a_phone'] ?? '');
-        $a_username = trim($_POST['a_username'] ?? '');
-        $a_password_raw = $_POST['a_password'] ?? '';
-        $a_role = in_array($_POST['a_role'] ?? 'staff', ['owner','staff']) ? $_POST['a_role'] : 'staff';
-
-        // basic validation
-        if ($a_first === '') $errors[] = "First name is required for new user.";
-        if ($a_last === '') $errors[] = "Last name is required for new user.";
-        if ($a_email === '') $errors[] = "Email is required for new user.";
-        if ($a_username === '') $errors[] = "Username is required for new user.";
-        if ($a_password_raw === '') $errors[] = "Password is required for new user.";
-
-        // strong password validation
-        $uppercase = preg_match('@[A-Z]@', $a_password_raw);
-        $lowercase = preg_match('@[a-z]@', $a_password_raw);
-        $number    = preg_match('@[0-9]@', $a_password_raw);
-        $special   = preg_match('@[^\w]@', $a_password_raw);
-        $minLength = strlen($a_password_raw) >= 8;
-
-        if (!$uppercase || !$lowercase || !$number || !$special || !$minLength) {
-            $errors[] = "Password must be at least 8 characters and include uppercase, lowercase, number, and special character.";
-        }
-
+    if ($sessionRole !== 'owner') { $errors[] = "Access denied."; } else {
+        $a_first=$_POST['a_first_name']??''; $a_middle=$_POST['a_middle_name']??''; $a_last=$_POST['a_last_name']??'';
+        $a_email=$_POST['a_email']??''; $a_phone=$_POST['a_phone']??''; $a_username=$_POST['a_username']??''; $a_password_raw=$_POST['a_password']??'';
+        $a_role=in_array($_POST['a_role']??'staff',['owner','staff'])?$_POST['a_role']:'staff';
+        if (!$a_first) $errors[]="First name required."; if (!$a_last) $errors[]="Last name required.";
+        if (!$a_email) $errors[]="Email required."; if (!$a_username) $errors[]="Username required."; if (!$a_password_raw) $errors[]="Password required.";
+        if (!preg_match('@[A-Z]@',$a_password_raw)||!preg_match('@[a-z]@',$a_password_raw)||!preg_match('@[0-9]@',$a_password_raw)||!preg_match('@[^\w]@',$a_password_raw)||strlen($a_password_raw)<8)
+            $errors[]="Password must be 8+ chars with uppercase, lowercase, number, and special character.";
         if (empty($errors)) {
-            // check duplicates (username or email)
-            $chk = $conn->prepare("SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1");
-            if ($chk) {
-                $chk->bind_param("ss", $a_username, $a_email);
-                $chk->execute();
-                $chk->store_result();
-                if ($chk->num_rows > 0) {
-                    $errors[] = "Username or Email already exists.";
-                }
-                $chk->close();
-            } else {
-                $errors[] = "Failed to validate uniqueness.";
-            }
+            $chk=$conn->prepare("SELECT id FROM users WHERE username=? OR email=? LIMIT 1");
+            if ($chk) { $chk->bind_param("ss",$a_username,$a_email); $chk->execute(); $chk->store_result(); if ($chk->num_rows>0) $errors[]="Username or email already exists."; $chk->close(); }
         }
-
         if (empty($errors)) {
-            $a_fullname = trim($a_first . ' ' . ($a_middle !== '' ? $a_middle . ' ' : '') . $a_last);
-            $a_hashed = password_hash($a_password_raw, PASSWORD_DEFAULT);
-
-            $ins = $conn->prepare("
-                INSERT INTO users (first_name, middle_name, last_name, fullname, email, phone, username, password, role, verified)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-            ");
-            if ($ins) {
-                $ins->bind_param(
-                    "sssssssss",
-                    $a_first, $a_middle, $a_last,
-                    $a_fullname, $a_email, $a_phone,
-                    $a_username, $a_hashed, $a_role
-                );
-                if ($ins->execute()) {
-                    $success = "New user created successfully.";
-                    // log activity using current user's id (creator)
-                    if ($user && isset($user['id'])) {
-                        logActivity($conn, $user['id'], "Created new user: {$a_username}");
-                    }
-                } else {
-                    $errors[] = "Database error while creating user.";
-                }
-                $ins->close();
-            } else {
-                $errors[] = "Failed to prepare create user statement.";
-            }
+            $a_fullname=trim($a_first.' '.($a_middle?$a_middle.' ':'').$a_last); $a_hashed=password_hash($a_password_raw,PASSWORD_DEFAULT);
+            $ins=$conn->prepare("INSERT INTO users (first_name,middle_name,last_name,fullname,email,phone,username,password,role,verified) VALUES (?,?,?,?,?,?,?,?,?,1)");
+            if ($ins) { $ins->bind_param("sssssssss",$a_first,$a_middle,$a_last,$a_fullname,$a_email,$a_phone,$a_username,$a_hashed,$a_role);
+                if ($ins->execute()) { $success="User created successfully."; if ($user) logActivity($conn,$user['id'],"Created user: {$a_username}"); } else $errors[]="Database error."; $ins->close(); }
         }
     }
 }
-// ------------- END ADD USER -------------
 
-// ------------- DELETE USER (OWNER ONLY) -------------
+// DELETE USER
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_user'])) {
-
-    // Server-side guard: only allow if session role is owner
-    $sessionRole = $_SESSION['role'] ?? '';
-    if ($sessionRole !== 'owner') {
-        $errors[] = "Access denied. Only owner can delete users.";
-    } else {
-        $delete_id = intval($_POST['delete_user_id'] ?? 0);
-        if ($delete_id <= 0) {
-            $errors[] = "Invalid user ID.";
-        } else {
-            // Fetch user to delete
-            $del_user = null;
-            $stmt = $conn->prepare("SELECT id, username, role FROM users WHERE id = ? LIMIT 1");
-            if ($stmt) {
-                $stmt->bind_param("i", $delete_id);
-                $stmt->execute();
-                $res = $stmt->get_result();
-                if ($res && $res->num_rows > 0) {
-                    $del_user = $res->fetch_assoc();
-                }
-                $stmt->close();
-            }
-            if (!$del_user) {
-                $errors[] = "User not found.";
-            } elseif ($del_user['id'] === $user['id']) {
-                $errors[] = "You cannot delete your own account.";
-            } else {
-                // Delete
-                $del_stmt = $conn->prepare("DELETE FROM users WHERE id = ?");
-                if ($del_stmt) {
-                    $del_stmt->bind_param("i", $delete_id);
-                    if ($del_stmt->execute()) {
-                        $success = "User deleted successfully.";
-                        logActivity($conn, $user['id'], "Deleted user: {$del_user['username']}");
-                    } else {
-                        $errors[] = "Database error while deleting user.";
-                    }
-                    $del_stmt->close();
-                } else {
-                    $errors[] = "Failed to prepare delete statement.";
-                }
+    $sessionRole=$_SESSION['role']??''; if ($sessionRole!=='owner') { $errors[]="Access denied."; } else {
+        $del_id=intval($_POST['delete_user_id']??0);
+        if ($del_id<=0) { $errors[]="Invalid ID."; } else {
+            $du=null; $s=$conn->prepare("SELECT id,username,role FROM users WHERE id=? LIMIT 1");
+            if ($s) { $s->bind_param("i",$del_id); $s->execute(); $r=$s->get_result(); if ($r&&$r->num_rows>0) $du=$r->fetch_assoc(); $s->close(); }
+            if (!$du) { $errors[]="User not found."; } elseif ($du['id']===$user['id']) { $errors[]="Cannot delete own account."; } else {
+                $d=$conn->prepare("DELETE FROM users WHERE id=?");
+                if ($d) { $d->bind_param("i",$del_id); if ($d->execute()) { $success="User deleted."; logActivity($conn,$user['id'],"Deleted: {$du['username']}"); } else $errors[]="DB error."; $d->close(); }
             }
         }
     }
 }
-// ------------- END DELETE USER -------------
 
-// ------------- EDIT USER (OWNER ONLY) -------------
+// EDIT USER
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_user'])) {
-
-    // Server-side guard: only allow if session role is owner
-    $sessionRole = $_SESSION['role'] ?? '';
-    if ($sessionRole !== 'owner') {
-        $errors[] = "Access denied. Only owner can edit users.";
-    } else {
-        $edit_id = intval($_POST['edit_user_id'] ?? 0);
-        $e_first = trim($_POST['e_first_name'] ?? '');
-        $e_middle = trim($_POST['e_middle_name'] ?? '');
-        $e_last = trim($_POST['e_last_name'] ?? '');
-        $e_email = trim($_POST['e_email'] ?? '');
-        $e_phone = trim($_POST['e_phone'] ?? '');
-        $e_role = in_array($_POST['e_role'] ?? 'staff', ['owner','staff']) ? $_POST['e_role'] : 'staff';
-
-        // basic validation
-        if ($e_first === '') $errors[] = "First name is required.";
-        if ($e_last === '') $errors[] = "Last name is required.";
-        if ($e_email === '') $errors[] = "Email is required.";
-        if ($edit_id <= 0) {
-            $errors[] = "Invalid user ID.";
-        }
-
+    $sessionRole=$_SESSION['role']??''; if ($sessionRole!=='owner') { $errors[]="Access denied."; } else {
+        $eid=intval($_POST['edit_user_id']??0); $ef=$_POST['e_first_name']??''; $em=$_POST['e_middle_name']??''; $el=$_POST['e_last_name']??''; $ee=$_POST['e_email']??''; $ep=$_POST['e_phone']??''; $er=in_array($_POST['e_role']??'staff',['owner','staff'])?$_POST['e_role']:'staff';
+        if (!$ef) $errors[]="First name required."; if (!$el) $errors[]="Last name required."; if (!$ee) $errors[]="Email required."; if ($eid<=0) $errors[]="Invalid ID.";
         if (empty($errors)) {
-            // Fetch user to edit
-            $edit_user = null;
-            $stmt = $conn->prepare("SELECT id, username, role FROM users WHERE id = ? LIMIT 1");
-            if ($stmt) {
-                $stmt->bind_param("i", $edit_id);
-                $stmt->execute();
-                $res = $stmt->get_result();
-                if ($res && $res->num_rows > 0) {
-                    $edit_user = $res->fetch_assoc();
-                }
-                $stmt->close();
-            }
-            if (!$edit_user) {
-                $errors[] = "User not found.";
-            } elseif ($edit_user['id'] === $user['id']) {
-                $errors[] = "You cannot edit your own account.";
-            } else {
-                // Check email uniqueness (if changed)
-                $chk = $conn->prepare("SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1");
-                if ($chk) {
-                    $chk->bind_param("si", $e_email, $edit_id);
-                    $chk->execute();
-                    $chk->store_result();
-                    if ($chk->num_rows > 0) {
-                        $errors[] = "Email already exists.";
-                    }
-                    $chk->close();
-                }
+            $eu=null; $s=$conn->prepare("SELECT id,username,role FROM users WHERE id=? LIMIT 1");
+            if ($s) { $s->bind_param("i",$eid); $s->execute(); $r=$s->get_result(); if ($r&&$r->num_rows>0) $eu=$r->fetch_assoc(); $s->close(); }
+            if (!$eu) { $errors[]="User not found."; } elseif ($eu['id']===$user['id']) { $errors[]="Cannot edit own account here."; } else {
+                $chk=$conn->prepare("SELECT id FROM users WHERE email=? AND id!=? LIMIT 1");
+                if ($chk) { $chk->bind_param("si",$ee,$eid); $chk->execute(); $chk->store_result(); if ($chk->num_rows>0) $errors[]="Email exists."; $chk->close(); }
                 if (empty($errors)) {
-                    $e_fullname = trim($e_first . ' ' . ($e_middle !== '' ? $e_middle . ' ' : '') . $e_last);
-                    $upd = $conn->prepare("UPDATE users SET first_name = ?, middle_name = ?, last_name = ?, fullname = ?, email = ?, phone = ?, role = ? WHERE id = ?");
-                    if ($upd) {
-                        $upd->bind_param("sssssssi", $e_first, $e_middle, $e_last, $e_fullname, $e_email, $e_phone, $e_role, $edit_id);
-                        if ($upd->execute()) {
-                            $success = "User updated successfully.";
-                            logActivity($conn, $user['id'], "Edited user: {$edit_user['username']}");
-                        } else {
-                            $errors[] = "Database error while updating user.";
-                        }
-                        $upd->close();
-                    } else {
-                        $errors[] = "Failed to prepare update statement.";
-                    }
+                    $ef_full=trim($ef.' '.($em?$em.' ':'').$el);
+                    $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,fullname=?,email=?,phone=?,role=? WHERE id=?");
+                    if ($u) { $u->bind_param("sssssssi",$ef,$em,$el,$ef_full,$ee,$ep,$er,$eid); if ($u->execute()) { $success="User updated."; logActivity($conn,$user['id'],"Edited: {$eu['username']}"); } else $errors[]="DB error."; $u->close(); }
                 }
             }
         }
     }
 }
-// ------------- END EDIT USER -------------
 
-// ------------- APPROVE/REJECT USER (OWNER ONLY) -------------
+// APPROVE / REJECT
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['approve_user'])) {
-
-    // Server-side guard: only allow if session role is owner
-    $sessionRole = $_SESSION['role'] ?? '';
-    if ($sessionRole !== 'owner') {
-        $errors[] = "Access denied. Only owner can approve users.";
-    } else {
-        $approve_id = intval($_POST['approve_user_id'] ?? 0);
-        if ($approve_id <= 0) {
-            $errors[] = "Invalid user ID.";
-        } else {
-            // Update verified to 1
-            $upd = $conn->prepare("UPDATE users SET verified = 1 WHERE id = ?");
-            if ($upd) {
-                $upd->bind_param("i", $approve_id);
-                if ($upd->execute()) {
-                    $success = "User approved successfully.";
-                    logActivity($conn, $user['id'], "Approved user ID: {$approve_id}");
-                } else {
-                    $errors[] = "Database error while approving user.";
-                }
-                $upd->close();
-            } else {
-                $errors[] = "Failed to prepare approve statement.";
-            }
-        }
+    if (($_SESSION['role']??'')!=='owner') { $errors[]="Access denied."; } else {
+        $aid=intval($_POST['approve_user_id']??0);
+        $u=$conn->prepare("UPDATE users SET verified=1 WHERE id=?");
+        if ($u) { $u->bind_param("i",$aid); if ($u->execute()) { $success="User approved."; logActivity($conn,$user['id'],"Approved ID: {$aid}"); } $u->close(); }
     }
 }
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reject_user'])) {
-
-    // Server-side guard: only allow if session role is owner
-    $sessionRole = $_SESSION['role'] ?? '';
-    if ($sessionRole !== 'owner') {
-        $errors[] = "Access denied. Only owner can reject users.";
-    } else {
-        $reject_id = intval($_POST['reject_user_id'] ?? 0);
-        if ($reject_id <= 0) {
-            $errors[] = "Invalid user ID.";
-        } else {
-            // Delete the user
-            $del = $conn->prepare("DELETE FROM users WHERE id = ?");
-            if ($del) {
-                $del->bind_param("i", $reject_id);
-                if ($del->execute()) {
-                    $success = "User rejected and removed successfully.";
-                    logActivity($conn, $user['id'], "Rejected user ID: {$reject_id}");
-                } else {
-                    $errors[] = "Database error while rejecting user.";
-                }
-                $del->close();
-            } else {
-                $errors[] = "Failed to prepare reject statement.";
-            }
-        }
+    if (($_SESSION['role']??'')!=='owner') { $errors[]="Access denied."; } else {
+        $rid=intval($_POST['reject_user_id']??0);
+        $d=$conn->prepare("DELETE FROM users WHERE id=?");
+        if ($d) { $d->bind_param("i",$rid); if ($d->execute()) { $success="User rejected."; logActivity($conn,$user['id'],"Rejected ID: {$rid}"); } $d->close(); }
     }
 }
-// ------------- END APPROVE/REJECT USER -------------
 
-// --- Handle profile update ---
+// UPDATE PROFILE
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile']) && $user) {
-    $first = trim($_POST['first_name'] ?? '');
-    $middle = trim($_POST['middle_name'] ?? '');
-    $last = trim($_POST['last_name'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-    $phone = trim($_POST['phone'] ?? '');
-
-    // basic validations
-    if ($first === '') $errors[] = "First name is required.";
-    if ($last === '') $errors[] = "Last name is required.";
-    if ($email === '') $errors[] = "Email is required.";
-    // optional: phone required? previous code required it, keep required
-    if ($phone === '') $errors[] = "Phone number is required.";
-
+    $first=trim($_POST['first_name']??''); $middle=trim($_POST['middle_name']??''); $last=trim($_POST['last_name']??''); $email=trim($_POST['email']??''); $phone=trim($_POST['phone']??'');
+    if (!$first) $errors[]="First name required."; if (!$last) $errors[]="Last name required."; if (!$email) $errors[]="Email required."; if (!$phone) $errors[]="Phone required.";
     if (empty($errors)) {
-        $fullname = trim($first . ' ' . ($middle !== '' ? $middle . ' ' : '') . $last);
-
-        $u = $conn->prepare("UPDATE users SET first_name = ?, middle_name = ?, last_name = ?, fullname = ?, email = ?, phone = ? WHERE id = ?");
-        if ($u) {
-            $u->bind_param("ssssssi", $first, $middle, $last, $fullname, $email, $phone, $user['id']);
-            if ($u->execute()) {
-                $success = "Profile updated successfully.";
-                logActivity($conn, $user['id'], "Profile updated");
-
-                // re-fetch user to show updated values
-                $stmt = $conn->prepare("SELECT id, first_name, middle_name, last_name, fullname, email, phone, username, created_at FROM users WHERE id = ? LIMIT 1");
-                if ($stmt) {
-                    $stmt->bind_param("i", $user['id']);
-                    $stmt->execute();
-                    $res = $stmt->get_result();
-                    if ($res && $res->num_rows > 0) {
-                        $user = $res->fetch_assoc();
-                    }
-                    $stmt->close();
-                }
-            } else {
-                $errors[] = "Database error while updating profile.";
-            }
-            $u->close();
-        } else {
-            $errors[] = "Failed to prepare profile update.";
-        }
+        $fullname=trim($first.' '.($middle?$middle.' ':'').$last);
+        $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,fullname=?,email=?,phone=? WHERE id=?");
+        if ($u) { $u->bind_param("ssssssi",$first,$middle,$last,$fullname,$email,$phone,$user['id']); if ($u->execute()) { $success="Profile updated."; logActivity($conn,$user['id'],"Profile updated"); $stmt=$conn->prepare("SELECT id,first_name,middle_name,last_name,fullname,email,phone,username,created_at FROM users WHERE id=? LIMIT 1"); if ($stmt) { $stmt->bind_param("i",$user['id']); $stmt->execute(); $r=$stmt->get_result(); if ($r&&$r->num_rows>0) $user=$r->fetch_assoc(); $stmt->close(); } } else $errors[]="DB error."; $u->close(); }
     }
 }
 
-// --- Handle password change ---
+// CHANGE PASSWORD
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password']) && $user) {
-    $current_pass = $_POST['current_password'] ?? '';
-    $new_pass     = $_POST['new_password'] ?? '';
-    $confirm_pass = $_POST['confirm_password'] ?? '';
-
-    if ($current_pass === '' || $new_pass === '' || $confirm_pass === '') {
-        $errors[] = "All password fields are required.";
-    } elseif ($new_pass !== $confirm_pass) {
-        $errors[] = "New password and confirmation do not match.";
-    } else {
-        // fetch current hashed password from DB
-        $s = $conn->prepare("SELECT password FROM users WHERE id = ? LIMIT 1");
-        if ($s) {
-            $s->bind_param("i", $user['id']);
-            $s->execute();
-            $s->bind_result($db_hashed);
-            if ($s->fetch()) {
-                $s->close();
-                if (!password_verify($current_pass, $db_hashed)) {
-                    $errors[] = "Current password is incorrect.";
-                } else {
-                    // strong password validation
-                    $uppercase = preg_match('@[A-Z]@', $new_pass);
-                    $lowercase = preg_match('@[a-z]@', $new_pass);
-                    $number    = preg_match('@[0-9]@', $new_pass);
-                    $special   = preg_match('@[^\w]@', $new_pass);
-                    $minLength = strlen($new_pass) >= 8;
-
-                    if (!$uppercase || !$lowercase || !$number || !$special || !$minLength) {
-                        $errors[] = "New password must be at least 8 characters and include uppercase, lowercase, number, and special character.";
-                    } else {
-                        $new_hashed = password_hash($new_pass, PASSWORD_DEFAULT);
-                        $u = $conn->prepare("UPDATE users SET password = ? WHERE id = ?");
-                        if ($u) {
-                            $u->bind_param("si", $new_hashed, $user['id']);
-                            if ($u->execute()) {
-                                $success = "Password updated successfully.";
-                                logActivity($conn, $user['id'], "Password changed");
-                            } else {
-                                $errors[] = "Database error while updating password.";
-                            }
-                            $u->close();
-                        } else {
-                            $errors[] = "Failed to prepare password update.";
-                        }
-                    }
-                }
-            } else {
-                $s->close();
-                $errors[] = "Unable to verify current password.";
+    $cp=$_POST['current_password']??''; $np=$_POST['new_password']??''; $pp=$_POST['confirm_password']??'';
+    if (!$cp||!$np||!$pp) { $errors[]="All fields required."; } elseif ($np!==$pp) { $errors[]="Passwords do not match."; } else {
+        $s=$conn->prepare("SELECT password FROM users WHERE id=? LIMIT 1");
+        if ($s) { $s->bind_param("i",$user['id']); $s->execute(); $s->bind_result($dbh); if ($s->fetch()) { $s->close();
+            if (!password_verify($cp,$dbh)) { $errors[]="Current password incorrect."; } else {
+                if (!preg_match('@[A-Z]@',$np)||!preg_match('@[a-z]@',$np)||!preg_match('@[0-9]@',$np)||!preg_match('@[^\w]@',$np)||strlen($np)<8) $errors[]="New password too weak.";
+                else { $nh=password_hash($np,PASSWORD_DEFAULT); $u=$conn->prepare("UPDATE users SET password=? WHERE id=?"); if ($u) { $u->bind_param("si",$nh,$user['id']); if ($u->execute()) { $success="Password updated."; logActivity($conn,$user['id'],"Password changed"); } $u->close(); } }
             }
-        } else {
-            $errors[] = "Failed to fetch current password.";
-        }
+        } else { $s->close(); $errors[]="Cannot verify."; } }
     }
 }
 
-// server time
 date_default_timezone_set('Asia/Manila');
 $server_ts_ms = round(microtime(true) * 1000);
 $server_time_formatted = date('M j, Y — h:i:s A');
 
+// Latest sensor
+$latest_sensor = null;
+$ls = $conn->query("SELECT temperature, humidity, timestamp FROM sensor_data ORDER BY id DESC LIMIT 1");
+if ($ls && $ls->num_rows > 0) $latest_sensor = $ls->fetch_assoc();
+
+// Activity logs
+$logs = [];
+if ($user) {
+    $lq = $conn->prepare("SELECT action, timestamp FROM activity_logs WHERE user_id = ? ORDER BY timestamp DESC LIMIT 10");
+    if ($lq) { $lq->bind_param("i",$user['id']); $lq->execute(); $lr=$lq->get_result(); while ($row=$lr->fetch_assoc()) $logs[]=$row; $lq->close(); }
+}
+
+// Pending users
+$pending_users = [];
+if (isset($_SESSION['role']) && $_SESSION['role'] === 'owner') {
+    $pu = $conn->query("SELECT id,fullname,username,email,role FROM users WHERE verified=0 ORDER BY id ASC");
+    if ($pu) while ($r=$pu->fetch_assoc()) $pending_users[]=$r;
+}
+
+// Staff users
+$staff_users = [];
+if (isset($_SESSION['role']) && $_SESSION['role'] === 'owner') {
+    $su = $conn->query("SELECT id,first_name,middle_name,last_name,fullname,username,email,phone,role FROM users WHERE role='staff' AND verified=1 ORDER BY id ASC");
+    if ($su) while ($r=$su->fetch_assoc()) $staff_users[]=$r;
+}
+
+$isOwner = isset($_SESSION['role']) && $_SESSION['role'] === 'owner';
+$initials = $user ? strtoupper(substr($user['first_name'],0,1).substr($user['last_name'],0,1)) : '?';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -432,784 +161,669 @@ $server_time_formatted = date('M j, Y — h:i:s A');
 <meta charset="utf-8">
 <title>System Profile</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="stylesheet" href="assets/css/style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-
 <style>
-:root{
-  --bg: #f5f7fb;
-  --panel: #ffffff;
-  --muted: #6b7280;
-  --text: #0f172a;
-  --accent: #16a34a;
-  --accent-2: #ef4444;
-  --panel-shadow: 0 8px 30px rgba(15,23,42,0.06);
-  --muted-ghost: rgba(15,23,42,0.04);
+:root {
+  --bg:       #f0f2f5;
+  --surface:  #ffffff;
+  --surface2: #f7f8fa;
+  --border:   rgba(0,0,0,0.07);
+  --text:     #0d1117;
+  --muted:    #6e7681;
+  --green:    #1a9e5c;
+  --green-lt: #e6f7ef;
+  --red:      #d93025;
+  --red-lt:   #fdecea;
+  --amber:    #b45309;
+  --amber-lt: #fef3c7;
+  --blue:     #1a6bba;
+  --blue-lt:  #e8f1fb;
+  --r:        12px;
+  --shadow:   0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+  --shadow-lg:0 2px 8px rgba(0,0,0,0.08), 0 12px 40px rgba(0,0,0,0.06);
 }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
 
-body{font-family:"Poppins",Inter,system-ui; margin:0; background:var(--bg);color:var(--text);}
+/* ── SIDEBAR ── */
+.sidebar { position: fixed; inset: 0 auto 0 0; width: 220px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 50; }
+.sidebar-logo { padding: 22px 20px 18px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+.sidebar-logo img { width: 36px; height: 36px; border-radius: 8px; }
+.sidebar-logo-text { font-size: 14px; font-weight: 700; color: var(--text); line-height: 1.2; }
+.sidebar-logo-sub  { font-size: 11px; color: var(--muted); }
+.sidebar-nav { flex: 1; padding: 16px 12px; display: flex; flex-direction: column; gap: 2px; }
+.sidebar-nav a { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13.5px; font-weight: 500; transition: all .15s; }
+.sidebar-nav a i { width: 16px; text-align: center; font-size: 13px; }
+.sidebar-nav a:hover  { background: var(--surface2); color: var(--text); }
+.sidebar-nav a.active { background: var(--green-lt); color: var(--green); font-weight: 600; }
 
-/* FIXED: sidebar + topbar alignment */
-.sidebar {
-  position: fixed;
-  left: 0;
-  top: 0;
-  width: 250px;
-  height: 100vh;
-  background:  #f8f9fa;
-  border-right: 1px solid rgba(15,23,42,0.06);
-  box-shadow: var(--panel-shadow);
-  z-index: 50;
+/* ── MAIN ── */
+.main { margin-left: 220px; min-height: 100vh; }
+.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 28px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 40; }
+.topbar-title { font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -.2px; }
+.topbar-time { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); background: var(--surface2); padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); }
+.page { padding: 24px 28px; max-width: 1200px; }
+
+/* ── FLASH MESSAGES ── */
+.flash { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-bottom: 16px; }
+.flash-ok  { background: var(--green-lt); color: var(--green); }
+.flash-err { background: var(--red-lt);   color: var(--red);   }
+
+/* ── LAYOUT ── */
+.profile-layout { display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+.profile-main { display: flex; flex-direction: column; gap: 16px; }
+.profile-side { display: flex; flex-direction: column; gap: 16px; }
+
+/* ── CARD ── */
+.card { background: var(--surface); border-radius: var(--r); border: 1px solid var(--border); box-shadow: var(--shadow); overflow: hidden; }
+.card-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px 14px; border-bottom: 1px solid var(--border); }
+.card-title { font-size: 13px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.card-title .icon { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+.icon-green { background: var(--green-lt); color: var(--green); }
+.icon-blue  { background: var(--blue-lt);  color: var(--blue);  }
+.icon-amber { background: var(--amber-lt); color: var(--amber); }
+.icon-red   { background: var(--red-lt);   color: var(--red);   }
+.card-body  { padding: 20px; }
+
+/* ── AVATAR + INFO ── */
+.profile-hero { display: flex; align-items: center; gap: 16px; padding: 20px; border-bottom: 1px solid var(--border); }
+.avatar { width: 56px; height: 56px; border-radius: 50%; background: linear-gradient(135deg, var(--green), #0d7a44); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 700; flex-shrink: 0; letter-spacing: -.5px; }
+.profile-hero-info h2 { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
+.profile-hero-info span { font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace; }
+.role-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 700; margin-left: 8px; }
+.role-owner { background: var(--amber-lt); color: var(--amber); }
+.role-staff { background: var(--blue-lt);  color: var(--blue);  }
+
+/* ── PROFILE FIELDS ── */
+.field-list { display: flex; flex-direction: column; }
+.field-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 20px; border-bottom: 1px solid var(--border); }
+.field-row:last-child { border-bottom: none; }
+.field-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+.field-val   { font-size: 13px; color: var(--text); font-weight: 500; text-align: right; }
+.field-val.mono { font-family: 'DM Mono', monospace; font-size: 12px; }
+
+/* ── ACTION BUTTONS ── */
+.action-bar { display: flex; gap: 8px; padding: 14px 20px; flex-wrap: wrap; border-top: 1px solid var(--border); }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 7px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all .15s; font-family: 'DM Sans', sans-serif; }
+.btn-primary { background: var(--green); color: #fff; }
+.btn-primary:hover { opacity: .88; }
+.btn-ghost   { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+.btn-ghost:hover { background: var(--border); }
+.btn-danger  { background: var(--red-lt); color: var(--red); border: 1px solid rgba(217,48,37,.15); }
+.btn-danger:hover { background: var(--red); color: #fff; }
+.btn-sm { padding: 5px 12px; font-size: 12px; }
+
+/* ── INLINE FORMS ── */
+.inline-form { padding: 20px; border-top: 1px solid var(--border); display: none; }
+.form-section-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 14px; }
+.form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.form-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.form-group label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.form-group input, .form-group select {
+  width: 100%; padding: 9px 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--surface2);
+  font-size: 13px; color: var(--text); font-family: 'DM Sans', sans-serif;
+  transition: border-color .15s;
 }
+.form-group input:focus, .form-group select:focus { outline: none; border-color: var(--green); background: var(--surface); }
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 38px; }
+.pw-eye { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--muted); font-size: 13px; }
+.pw-eye:hover { color: var(--text); }
+.strength-bar { height: 4px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+.strength-fill { height: 100%; width: 0; border-radius: 4px; transition: width .3s, background .3s; }
+.strength-note { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.username-note { font-size: 11px; color: var(--muted); padding: 8px 0; }
+.username-note strong { color: var(--text); font-family: 'DM Mono', monospace; }
+.form-actions { display: flex; gap: 8px; margin-top: 4px; }
 
-.sidebar-logo {
-  padding: 20px;
-  text-align: center;
-  border-bottom: 1px solid rgba(15,23,42,0.1);
+/* ── SIDE CARDS ── */
+.info-row { display: flex; justify-content: space-between; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.info-row:last-child { border-bottom: none; }
+.info-row .ik { font-size: 12px; font-weight: 600; color: var(--muted); }
+.info-row .iv { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--text); }
+.sensor-val { display: flex; align-items: baseline; gap: 3px; }
+.sensor-val .num { font-size: 20px; font-weight: 700; font-family: 'DM Mono', monospace; color: var(--text); }
+.sensor-val .unit { font-size: 12px; color: var(--muted); }
+.sensor-row { display: flex; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+.sensor-item { flex: 1; }
+.sensor-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
+
+/* ── ACTIVITY LOG ── */
+.log-list { display: flex; flex-direction: column; }
+.log-item { display: flex; gap: 10px; padding: 10px 20px; border-bottom: 1px solid var(--border); align-items: flex-start; }
+.log-item:last-child { border-bottom: none; }
+.log-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; margin-top: 5px; }
+.log-action { font-size: 12.5px; font-weight: 500; color: var(--text); line-height: 1.4; }
+.log-time   { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 2px; }
+.empty-state { text-align: center; padding: 28px 20px; color: var(--muted); }
+.empty-state i { font-size: 22px; display: block; margin-bottom: 6px; opacity: .35; }
+.empty-state span { font-size: 12px; }
+
+/* ── USER MGMT TABLES ── */
+.full-width { grid-column: 1 / -1; }
+table.mgmt { width: 100%; border-collapse: collapse; font-size: 13px; }
+.mgmt thead th { text-align: left; padding: 9px 14px; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; background: var(--surface2); border-bottom: 1px solid var(--border); white-space: nowrap; }
+.mgmt tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.mgmt tbody tr:last-child td { border-bottom: none; }
+.mgmt tbody tr:hover { background: var(--surface2); }
+.mgmt td.name-col { font-weight: 600; }
+.mgmt td.mono-col { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+.pill-pending { background: var(--amber-lt); color: var(--amber); }
+.pill-owner   { background: var(--amber-lt); color: var(--amber); }
+.pill-staff   { background: var(--blue-lt);  color: var(--blue);  }
+td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+/* ── MODAL ── */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 200; }
+.modal-backdrop.open { display: flex; }
+.modal { background: var(--surface); border-radius: var(--r); padding: 24px; width: 500px; max-width: 94vw; box-shadow: var(--shadow-lg); position: relative; max-height: 90vh; overflow-y: auto; }
+.modal-close { position: absolute; top: 14px; right: 16px; background: none; border: none; font-size: 18px; color: var(--muted); cursor: pointer; }
+.modal-close:hover { color: var(--text); }
+.modal h3 { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 18px; }
+.modal-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.modal-msg { font-size: 12px; font-weight: 600; margin-top: 8px; }
+.modal-msg.ok  { color: var(--green); }
+.modal-msg.err { color: var(--red);   }
+
+@media (max-width: 900px) {
+  .profile-layout { grid-template-columns: 1fr; }
+  .form-grid-2 { grid-template-columns: 1fr; }
 }
-.sidebar-logo img {
-  width: 60px;
-  height: 60px;
-  border-radius: 6px;
-}
-
-.sidebar-nav { padding: 20px 0; }
-.sidebar-nav a {
-  display: block;
-  padding: 12px 20px;
-  color: #495057;
-  text-decoration: none;
-  font-weight: 600;
-  border-left: 3px solid transparent;
-}
-.sidebar-nav a:hover {
-  background: rgba(15,23,42,0.05);
-  color: #0f172a;
-  border-left-color: #1e40af;
-}
-.sidebar-nav a.active {
-  background: rgba(30,64,175,0.1);
-  color: #1e40af;
-  border-left-color: #1e40af;
-}
-
-.topbar {
-  background: white;
-  color: black;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:16px 22px;
-  position:sticky;
-  top:0;
-  z-index:40;
-  border-bottom:1px solid rgba(15,23,42,0.04);
-  margin-left:250px;
-}
-.topbar h2 { color: black; }
-
-.main-content {
-  margin-left:250px;
-  padding:26px;
-  max-width:1100px;
-}
-
-/* cards */
-.card{background:var(--panel);padding:18px;border-radius:12px;margin-bottom:18px;
-      box-shadow:var(--panel-shadow); border:1px solid rgba(15,23,42,0.03);}
-
-.profile-grid{display:grid; grid-template-columns:1fr 380px; gap:18px;}
-.profile-item{display:flex; justify-content:space-between; padding:10px 0;
-             border-bottom:1px solid rgba(255, 255, 255, 0.06);}
-.profile-item:last-child{border-bottom:none;}
-
-.label{font-weight:700;}
-.value{color:var(--muted);}
-
-input, select{width:100%; padding:10px; border-radius:8px; border:1px solid rgba(15,23,42,0.08);}
-.btn{padding:10px 14px; border-radius:8px; cursor:pointer; font-weight:700;
-     background:var(--accent); color:white; border:none;}
-.btn-muted{background:#eee;color:#333;}
-.message-error{color:#ef4444;font-weight:700;}
-.message-success{color:#16a34a;font-weight:700;}
-
-/* small form styling */
-.form-row{display:flex; gap:12px;}
-.form-row .col{flex:1;}
-.form-actions{display:flex; gap:8px; margin-top:12px;}
-.small-note{font-size:13px;color:var(--muted); margin-top:6px;}
-
-/* modal styles */
-.modal-backdrop{
-  position:fixed; inset:0; background:rgba(8,10,12,0.45); display:none; align-items:center; justify-content:center; z-index:120;
-}
-.modal { width:520px; background:var(--panel); border-radius:12px; padding:18px; box-shadow:var(--panel-shadow); }
-.modal h3 { margin-top:0; color:var(--accent); }
-.modal .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-.modal .small-note { font-size:12px; color:var(--muted); margin-top:6px; }
-.modal .actions { display:flex; gap:8px; margin-top:12px; justify-content:flex-end; }
-.modal .close-btn { background:#eee; color:#333; padding:8px 12px; border-radius:8px; border:none; cursor:pointer; }
-
-/* inline small helper for success inside modal */
-.modal .success-inline{ color: #16a34a; font-weight:700; margin-top:8px; }
-.modal .error-inline{ color: #ef4444; font-weight:700; margin-top:8px; }
-
-/* avatar styles */
-.avatar {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-  font-weight: bold;
-  margin: 0 auto 20px;
-  text-transform: uppercase;
-}
-
 </style>
 </head>
 <body>
 
-<!-- SIDEBAR -->
-<div class="sidebar">
+<!-- ── SIDEBAR ── -->
+<aside class="sidebar">
   <div class="sidebar-logo">
-    <img src="assets/img/logo.png" alt="Logo">
+    <img src="assets/img/logo.png" alt="logo">
+    <div>
+      <div class="sidebar-logo-text">MushroomOS</div>
+      <div class="sidebar-logo-sub">Cultivation System</div>
+    </div>
   </div>
   <nav class="sidebar-nav">
-      <a href="dashboard.php"><i class="fas fa-tachometer-alt"></i> Dashboard</a>
-      <a href="reports.php"><i class="fas fa-chart-bar"></i> Reports</a>
-      <a class="active" href="profile.php"><i class="fas fa-user"></i> System Profile</a>
-      <a href="logout.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
+    <a href="dashboard.php"><i class="fas fa-table-cells-large"></i> Dashboard</a>
+    <a href="reports.php"><i class="fas fa-chart-line"></i> Reports</a>
+    <a href="profile.php" class="active"><i class="fas fa-sliders"></i> System Profile</a>
+    <a href="logout.php"><i class="fas fa-arrow-right-from-bracket"></i> Logout</a>
   </nav>
-</div>
+</aside>
 
-<!-- TOPBAR -->
-<div class="topbar">
-  <h2>System Profile</h2>
-  <div style="display:flex; align-items:center; gap:14px;">
-        <span id="phTime" data-server-ts="<?= $server_ts_ms ?>" class="muted-small" style="white-space:nowrap;">
-          <?= htmlspecialchars($server_time_formatted) ?>
-        </span>
-  </div>
-</div>
+<!-- ── MAIN ── -->
+<main class="main">
+  <header class="topbar">
+    <span class="topbar-title">System Profile</span>
+    <span class="topbar-time" id="phTime" data-server-ts="<?= $server_ts_ms ?>"><?= htmlspecialchars($server_time_formatted) ?></span>
+  </header>
 
-<!-- MAIN -->
-<div class="main-content">
+  <div class="page">
 
-  <?php if (!empty($success)): ?>
-    <div class="message-success"><?= htmlspecialchars($success) ?></div>
-  <?php endif; ?>
+    <!-- Flash messages -->
+    <?php if ($success): ?>
+      <div class="flash flash-ok"><i class="fas fa-check-circle"></i> <?= htmlspecialchars($success) ?></div>
+    <?php endif; ?>
+    <?php foreach ($errors as $e): ?>
+      <div class="flash flash-err"><i class="fas fa-triangle-exclamation"></i> <?= htmlspecialchars($e) ?></div>
+    <?php endforeach; ?>
 
-  <?php foreach ($errors as $e): ?>
-    <div class="message-error"><?= htmlspecialchars($e) ?></div>
-  <?php endforeach; ?>
+    <div class="profile-layout">
 
-  <div class="profile-grid">
+      <!-- ── LEFT COLUMN ── -->
+      <div class="profile-main">
 
-    <!-- LEFT -->
-    <div class="card">
-      <h3>Profile Information</h3>
+        <!-- Profile Card -->
+        <div class="card">
+          <!-- Hero -->
+          <div class="profile-hero">
+            <div class="avatar"><?= htmlspecialchars($initials) ?></div>
+            <div class="profile-hero-info">
+              <h2>
+                <?= htmlspecialchars($user['fullname'] ?? '—') ?>
+                <span class="role-badge <?= $isOwner ? 'role-owner' : 'role-staff' ?>">
+                  <i class="fas fa-<?= $isOwner ? 'crown' : 'user' ?>" style="font-size:10px;"></i>
+                  <?= $isOwner ? 'Owner' : 'Staff' ?>
+                </span>
+              </h2>
+              <span>@<?= htmlspecialchars($user['username'] ?? '') ?></span>
+            </div>
+          </div>
 
-      <?php if ($user): ?>
-        <div class="avatar"><i class="fas fa-user-tie"></i></div>
-        <div class="profile-item"><span class="label">Full Name</span><span class="value"><?= htmlspecialchars($user['fullname']) ?></span></div>
-        <div class="profile-item"><span class="label">Email</span><span class="value"><?= htmlspecialchars($user['email']) ?></span></div>
-        <div class="profile-item"><span class="label">Phone</span><span class="value"><?= htmlspecialchars($user['phone']) ?></span></div>
-        <div class="profile-item"><span class="label">Username</span><span class="value"><?= htmlspecialchars($user['username']) ?></span></div>
-        <div class="profile-item"><span class="label">Member Since</span><span class="value"><?= htmlspecialchars($user['created_at']) ?></span></div>
+          <!-- Fields -->
+          <div class="field-list">
+            <div class="field-row">
+              <span class="field-label">Email</span>
+              <span class="field-val mono"><?= htmlspecialchars($user['email'] ?? '—') ?></span>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Phone</span>
+              <span class="field-val mono"><?= htmlspecialchars($user['phone'] ?? '—') ?></span>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Username</span>
+              <span class="field-val mono"><?= htmlspecialchars($user['username'] ?? '—') ?></span>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Member Since</span>
+              <span class="field-val mono"><?= htmlspecialchars($user['created_at'] ?? '—') ?></span>
+            </div>
+          </div>
 
-        <hr>
-        <div class="form-actions">
-          <button id="editToggle" class="btn">Edit Profile</button>
-          <button id="passwdToggle" class="btn btn-muted">Change Password</button>
+          <!-- Action Bar -->
+          <div class="action-bar">
+            <button class="btn btn-ghost" id="editToggle"><i class="fas fa-pen"></i> Edit Profile</button>
+            <button class="btn btn-ghost" id="passwdToggle"><i class="fas fa-lock"></i> Change Password</button>
+            <?php if ($isOwner): ?>
+              <button class="btn btn-primary" id="openAddUser"><i class="fas fa-user-plus"></i> Add User</button>
+            <?php endif; ?>
+          </div>
 
-          <!-- SHOW ADD USER BUTTON ONLY IF CURRENT SESSION ROLE IS OWNER -->
-          <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'owner'): ?>
-            <button id="openAddUser" class="btn" style="background:#2b7a2b;">Add User</button>
+          <!-- Edit Profile Form -->
+          <div class="inline-form" id="editForm">
+            <form method="POST">
+              <input type="hidden" name="update_profile" value="1">
+              <p class="form-section-title">Edit Profile</p>
+              <div class="form-grid-2">
+                <div class="form-group">
+                  <label>First Name</label>
+                  <input type="text" name="first_name" value="<?= htmlspecialchars($user['first_name'] ?? '') ?>" required>
+                </div>
+                <div class="form-group">
+                  <label>Middle Name</label>
+                  <input type="text" name="middle_name" value="<?= htmlspecialchars($user['middle_name'] ?? '') ?>">
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Last Name</label>
+                <input type="text" name="last_name" value="<?= htmlspecialchars($user['last_name'] ?? '') ?>" required>
+              </div>
+              <div class="form-grid-2">
+                <div class="form-group">
+                  <label>Email</label>
+                  <input type="email" name="email" value="<?= htmlspecialchars($user['email'] ?? '') ?>" required>
+                </div>
+                <div class="form-group">
+                  <label>Phone</label>
+                  <input type="tel" name="phone" value="<?= htmlspecialchars($user['phone'] ?? '') ?>" required>
+                </div>
+              </div>
+              <p class="username-note">Username: <strong><?= htmlspecialchars($user['username'] ?? '') ?></strong> — cannot be changed</p>
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="editCancel">Cancel</button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Change Password Form -->
+          <div class="inline-form" id="passwdForm">
+            <form method="POST">
+              <input type="hidden" name="change_password" value="1">
+              <p class="form-section-title">Change Password</p>
+              <div class="form-group">
+                <label>Current Password</label>
+                <div class="pw-wrap">
+                  <input type="password" name="current_password" id="current_password" required>
+                  <button type="button" class="pw-eye" data-target="current_password"><i class="fa fa-eye"></i></button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label>New Password</label>
+                <div class="pw-wrap">
+                  <input type="password" name="new_password" id="new_password" required>
+                  <button type="button" class="pw-eye" data-target="new_password"><i class="fa fa-eye"></i></button>
+                </div>
+                <div class="strength-bar"><div class="strength-fill" id="pw-fill"></div></div>
+                <div class="strength-note" id="pw-note">8+ chars, uppercase, lowercase, number, special character.</div>
+              </div>
+              <div class="form-group">
+                <label>Confirm Password</label>
+                <div class="pw-wrap">
+                  <input type="password" name="confirm_password" id="confirm_password" required>
+                  <button type="button" class="pw-eye" data-target="confirm_password"><i class="fa fa-eye"></i></button>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary btn-sm">Update Password</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="passwdCancel">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Owner: Pending Approvals -->
+        <?php if ($isOwner): ?>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="icon icon-amber"><i class="fas fa-user-clock"></i></span>
+              Pending Approvals
+            </div>
+            <span style="font-size:11px;color:var(--muted);"><?= count($pending_users) ?> pending</span>
+          </div>
+          <?php if (empty($pending_users)): ?>
+            <div class="empty-state"><i class="fas fa-check-circle"></i><span>No pending approvals.</span></div>
+          <?php else: ?>
+          <div style="overflow-x:auto;">
+            <table class="mgmt">
+              <thead><tr><th>Name</th><th>Username</th><th>Email</th><th>Role</th><th>Action</th></tr></thead>
+              <tbody>
+                <?php foreach ($pending_users as $u): ?>
+                <tr>
+                  <td class="name-col"><?= htmlspecialchars($u['fullname']) ?></td>
+                  <td class="mono-col"><?= htmlspecialchars($u['username']) ?></td>
+                  <td class="mono-col"><?= htmlspecialchars($u['email']) ?></td>
+                  <td><span class="pill pill-pending"><?= htmlspecialchars($u['role']) ?></span></td>
+                  <td>
+                    <div style="display:flex;gap:6px;">
+                      <form method="POST" style="display:inline;" onsubmit="return confirm('Approve this user?')">
+                        <input type="hidden" name="approve_user_id" value="<?= $u['id'] ?>">
+                        <button type="submit" name="approve_user" class="btn btn-primary btn-sm"><i class="fas fa-check"></i> Approve</button>
+                      </form>
+                      <form method="POST" style="display:inline;" onsubmit="return confirm('Reject and remove this user?')">
+                        <input type="hidden" name="reject_user_id" value="<?= $u['id'] ?>">
+                        <button type="submit" name="reject_user" class="btn btn-danger btn-sm"><i class="fas fa-times"></i> Reject</button>
+                      </form>
+                    </div>
+                  </td>
+                </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
           <?php endif; ?>
         </div>
 
-        <!-- EDIT FORM -->
-        <form method="POST" id="editForm" style="display:none;margin-top:15px;">
-          <input type="hidden" name="update_profile" value="1">
-
-          <div class="form-row">
-            <div class="col">
-              <label>First Name</label>
-              <input type="text" name="first_name" value="<?= htmlspecialchars($user['first_name']) ?>" required>
+        <!-- Owner: Manage Staff -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="icon icon-blue"><i class="fas fa-users"></i></span>
+              Manage Users
             </div>
-            <div class="col">
-              <label>Middle Name</label>
-              <input type="text" name="middle_name" value="<?= htmlspecialchars($user['middle_name']) ?>">
+            <span style="font-size:11px;color:var(--muted);"><?= count($staff_users) ?> staff</span>
+          </div>
+          <?php if (empty($staff_users)): ?>
+            <div class="empty-state"><i class="fas fa-users"></i><span>No staff users found.</span></div>
+          <?php else: ?>
+          <div style="overflow-x:auto;">
+            <table class="mgmt">
+              <thead><tr><th>Name</th><th>Username</th><th>Email</th><th>Role</th><th>Actions</th></tr></thead>
+              <tbody>
+                <?php foreach ($staff_users as $u): ?>
+                <tr>
+                  <td class="name-col"><?= htmlspecialchars($u['fullname']) ?></td>
+                  <td class="mono-col"><?= htmlspecialchars($u['username']) ?></td>
+                  <td class="mono-col"><?= htmlspecialchars($u['email']) ?></td>
+                  <td><span class="pill pill-staff"><?= htmlspecialchars($u['role']) ?></span></td>
+                  <td>
+                    <?php if ($u['id'] !== $user['id']): ?>
+                    <div style="display:flex;gap:6px;">
+                      <button class="btn btn-ghost btn-sm edit-user-btn"
+                        data-id="<?= $u['id'] ?>"
+                        data-first="<?= htmlspecialchars($u['first_name']??'') ?>"
+                        data-middle="<?= htmlspecialchars($u['middle_name']??'') ?>"
+                        data-last="<?= htmlspecialchars($u['last_name']) ?>"
+                        data-email="<?= htmlspecialchars($u['email']) ?>"
+                        data-phone="<?= htmlspecialchars($u['phone']??'') ?>"
+                        data-role="<?= htmlspecialchars($u['role']) ?>">
+                        <i class="fas fa-pen"></i> Edit
+                      </button>
+                      <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this user?')">
+                        <input type="hidden" name="delete_user_id" value="<?= $u['id'] ?>">
+                        <button type="submit" name="delete_user" class="btn btn-danger btn-sm"><i class="fas fa-trash"></i> Delete</button>
+                      </form>
+                    </div>
+                    <?php else: ?><span style="font-size:12px;color:var(--muted);">—</span><?php endif; ?>
+                  </td>
+                </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+          <?php endif; ?>
+        </div>
+        <?php endif; ?>
+
+      </div><!-- end profile-main -->
+
+      <!-- ── RIGHT SIDEBAR ── -->
+      <div class="profile-side">
+
+        <!-- System Info -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><span class="icon icon-blue"><i class="fas fa-server"></i></span> System Info</div>
+          </div>
+          <div class="card-body" style="padding:0 20px;">
+            <div class="info-row"><span class="ik">System</span><span class="iv">J.WHO Mushroom</span></div>
+            <div class="info-row"><span class="ik">Version</span><span class="iv">1.0.0</span></div>
+            <div class="info-row"><span class="ik">Database</span><span class="iv">mushroom_system</span></div>
+          </div>
+        </div>
+
+        <!-- Latest Sensor -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><span class="icon icon-green"><i class="fas fa-microchip"></i></span> Latest Sensor</div>
+          </div>
+          <?php if ($latest_sensor): ?>
+          <div class="sensor-row">
+            <div class="sensor-item">
+              <div class="sensor-label">Temperature</div>
+              <div class="sensor-val">
+                <span class="num"><?= number_format($latest_sensor['temperature'],1) ?></span>
+                <span class="unit">°C</span>
+              </div>
+            </div>
+            <div class="sensor-item">
+              <div class="sensor-label">Humidity</div>
+              <div class="sensor-val">
+                <span class="num"><?= number_format($latest_sensor['humidity'],1) ?></span>
+                <span class="unit">%</span>
+              </div>
             </div>
           </div>
-
-          <div style="margin-top:10px;">
-            <label>Last Name</label>
-            <input type="text" name="last_name" value="<?= htmlspecialchars($user['last_name']) ?>" required>
+          <div class="field-row" style="padding:10px 20px;">
+            <span class="field-label">Recorded At</span>
+            <span class="field-val mono" style="font-size:11px;"><?= htmlspecialchars($latest_sensor['timestamp']) ?></span>
           </div>
+          <?php else: ?>
+            <div class="empty-state"><i class="fas fa-microchip"></i><span>No sensor data.</span></div>
+          <?php endif; ?>
+        </div>
 
-          <div class="form-row" style="margin-top:10px;">
-            <div class="col">
-              <label>Email</label>
-              <input type="email" name="email" value="<?= htmlspecialchars($user['email']) ?>" required>
+        <!-- Activity Log -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><span class="icon icon-amber"><i class="fas fa-clock-rotate-left"></i></span> Activity Log</div>
+            <span style="font-size:11px;color:var(--muted);">Last 10</span>
+          </div>
+          <?php if (empty($logs)): ?>
+            <div class="empty-state"><i class="fas fa-clock"></i><span>No activity yet.</span></div>
+          <?php else: ?>
+          <div class="log-list">
+            <?php foreach ($logs as $log): ?>
+            <div class="log-item">
+              <div class="log-dot"></div>
+              <div>
+                <div class="log-action"><?= htmlspecialchars($log['action']) ?></div>
+                <div class="log-time"><?= htmlspecialchars($log['timestamp']) ?></div>
+              </div>
             </div>
-            <div class="col">
-              <label>Phone</label>
-              <input type="tel" name="phone" value="<?= htmlspecialchars($user['phone']) ?>" required>
-            </div>
+            <?php endforeach; ?>
           </div>
+          <?php endif; ?>
+        </div>
 
-          <div class="small-note">Username: <strong><?= htmlspecialchars($user['username']) ?></strong> (cannot be changed here)</div>
+      </div><!-- end profile-side -->
+    </div><!-- end profile-layout -->
+  </div><!-- end page -->
+</main>
 
-          <div class="form-actions">
-            <button type="submit" class="btn">Save</button>
-            <button type="button" id="editCancel" class="btn btn-muted">Cancel</button>
-          </div>
-        </form>
-
-        <!-- PASSWORD FORM -->
-        <form method="POST" id="passwdForm" style="display:none;margin-top:15px;">
-          <input type="hidden" name="change_password" value="1">
-
-          <div style="margin-top:6px;">
-            <label>Current Password</label>
-            <div style="position:relative;">
-              <input type="password" name="current_password" id="current_password" required style="width:100%; padding-right:40px;">
-              <button type="button" id="toggle_current_pw" style="position:absolute; right:8px; top:6px; border:none; background:transparent; cursor:pointer;">
-                <i class="fa fa-eye"></i>
-              </button>
-            </div>
-          </div>
-
-          <div style="margin-top:10px;">
-            <label>New Password</label>
-            <div style="position:relative;">
-              <input type="password" name="new_password" id="new_password" required style="width:100%; padding-right:40px;">
-              <button type="button" id="toggle_new_pw" style="position:absolute; right:8px; top:6px; border:none; background:transparent; cursor:pointer;">
-                <i class="fa fa-eye"></i>
-              </button>
-            </div>
-          </div>
-
-          <div style="margin-top:10px;">
-            <label>Confirm Password</label>
-            <div style="position:relative;">
-              <input type="password" name="confirm_password" id="confirm_password" required style="width:100%; padding-right:40px;">
-              <button type="button" id="toggle_confirm_pw" style="position:absolute; right:8px; top:6px; border:none; background:transparent; cursor:pointer;">
-                <i class="fa fa-eye"></i>
-              </button>
-            </div>
-          </div>
-
-          <div id="pw-strength" style="margin-top:8px;">
-            <div style="height:6px;background:#eee;border-radius:6px;overflow:hidden;">
-              <div id="pw-fill" style="width:0%;height:100%;background:red;transition:.3s;"></div>
-            </div>
-            <div class="small-note" id="pw-note">Password must be at least 8 chars, include uppercase, lowercase, number, and special char.</div>
-          </div>
-
-          <div class="form-actions">
-            <button type="submit" class="btn">Update Password</button>
-            <button type="button" id="passwdCancel" class="btn btn-muted">Cancel</button>
-          </div>
-        </form>
-
-      <?php endif; ?>
-    </div>
-
-    <!-- RIGHT SYSTEM INFO -->
-    <div class="card">
-      <h3>System Info</h3>
-      <p><strong>System:</strong> J.WHO Mushroom System<br>
-         <strong>Version:</strong> 1.0.0<br>
-         <strong>Database:</strong> mushroom_system</p>
-
-      <hr>
-      <h3>Latest Sensor</h3>
-      <?php
-      $ls = $conn->query("SELECT temperature, humidity, timestamp FROM sensor_data ORDER BY id DESC LIMIT 1");
-      if ($ls && $ls->num_rows > 0):
-        $s = $ls->fetch_assoc();
-      ?>
-        <p><strong>Temp:</strong> <?= htmlspecialchars($s['temperature']) ?>°C<br>
-           <strong>Hum:</strong> <?= htmlspecialchars($s['humidity']) ?>%<br>
-           <strong>At:</strong> <?= htmlspecialchars($s['timestamp']) ?></p>
-      <?php else: ?>
-        <p>No sensor data.</p>
-      <?php endif; ?>
-
-      <hr>
-      <h3>Activity Log</h3>
-      <?php
-      // Fetch last 10 activity logs for current user
-      $logs_query = $conn->prepare("SELECT action, timestamp FROM activity_logs WHERE user_id = ? ORDER BY timestamp DESC LIMIT 10");
-      if ($logs_query) {
-          $logs_query->bind_param("i", $user['id']);
-          $logs_query->execute();
-          $logs_result = $logs_query->get_result();
-          if ($logs_result->num_rows > 0) {
-              echo '<ul>';
-              while ($log = $logs_result->fetch_assoc()) {
-                  echo '<li><span class="value">' . htmlspecialchars($log['action']) . ' - ' . htmlspecialchars($log['timestamp']) . '</span></li>';
-              }
-              echo '</ul>';
-          } else {
-              echo '<p class="value">No activity logs found.</p>';
-          }
-          $logs_query->close();
-      } else {
-          echo '<p class="value">Unable to load activity logs.</p>';
-      }
-      ?>
-    </div>
-
-  </div>
-
-  <!-- USER MANAGEMENT CARD (OWNER ONLY) -->
-  <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'owner'): ?>
-
-    <!-- PENDING USERS APPROVAL -->
-    <div class="card">
-      <h3>Pending User Approvals</h3>
-      <table style="width:100%; border-collapse:collapse;">
-        <thead>
-          <tr style="border-bottom:1px solid #ddd;">
-            <th style="text-align:left; padding:8px;">Full Name</th>
-            <th style="text-align:left; padding:8px;">Username</th>
-            <th style="text-align:left; padding:8px;">Email</th>
-            <th style="text-align:left; padding:8px;">Role</th>
-            <th style="text-align:left; padding:8px;">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php
-          $pending_users = $conn->query("SELECT id, first_name, middle_name, last_name, fullname, username, email, phone, role FROM users WHERE verified = 0 ORDER BY id ASC");
-          if ($pending_users && $pending_users->num_rows > 0) {
-            while ($u = $pending_users->fetch_assoc()) {
-              echo '<tr style="border-bottom:1px solid #eee;">';
-              echo '<td style="padding:8px;">' . htmlspecialchars($u['fullname']) . '</td>';
-              echo '<td style="padding:8px;">' . htmlspecialchars($u['username']) . '</td>';
-              echo '<td style="padding:8px;">' . htmlspecialchars($u['email']) . '</td>';
-              echo '<td style="padding:8px;">' . htmlspecialchars($u['role']) . '</td>';
-              echo '<td style="padding:8px;">';
-              echo '<form method="POST" style="display:inline;" onsubmit="return confirm(\'Are you sure you want to approve this user?\');">';
-              echo '<input type="hidden" name="approve_user_id" value="' . $u['id'] . '">';
-              echo '<button type="submit" name="approve_user" class="btn" style="background:#16a34a;">Yes</button>';
-              echo '</form> ';
-              echo '<form method="POST" style="display:inline;" onsubmit="return confirm(\'Are you sure you want to reject this user?\');">';
-              echo '<input type="hidden" name="reject_user_id" value="' . $u['id'] . '">';
-              echo '<button type="submit" name="reject_user" class="btn" style="background:#ef4444;">No</button>';
-              echo '</form>';
-              echo '</td>';
-              echo '</tr>';
-            }
-          } else {
-            echo '<tr><td colspan="5" style="padding:8px; text-align:center;">No pending users.</td></tr>';
-          }
-          ?>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- EXISTING STAFF USERS MANAGEMENT -->
-    <div class="card">
-      <h3>Manage Users</h3>
-      <table style="width:100%; border-collapse:collapse;">
-        <thead>
-          <tr style="border-bottom:1px solid #ddd;">
-            <th style="text-align:left; padding:8px;">Full Name</th>
-            <th style="text-align:left; padding:8px;">Username</th>
-            <th style="text-align:left; padding:8px;">Email</th>
-            <th style="text-align:left; padding:8px;">Role</th>
-            <th style="text-align:left; padding:8px;">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php
-          $all_users = $conn->query("SELECT id, first_name, middle_name, last_name, fullname, username, email, phone, role FROM users WHERE role = 'staff' AND verified = 1 ORDER BY id ASC");
-          if ($all_users && $all_users->num_rows > 0) {
-            while ($u = $all_users->fetch_assoc()) {
-              echo '<tr style="border-bottom:1px solid #eee;">';
-              echo '<td style="padding:8px;">' . htmlspecialchars($u['fullname']) . '</td>';
-              echo '<td style="padding:8px;">' . htmlspecialchars($u['username']) . '</td>';
-              echo '<td style="padding:8px;">' . htmlspecialchars($u['email']) . '</td>';
-              echo '<td style="padding:8px;">' . htmlspecialchars($u['role']) . '</td>';
-              echo '<td style="padding:8px;">';
-              if ($u['id'] !== $user['id'] && $u['role'] !== 'owner') {
-                echo '<button class="btn btn-muted edit-user-btn" data-id="' . $u['id'] . '" data-fullname="' . htmlspecialchars($u['fullname']) . '" data-first="' . htmlspecialchars($u['first_name'] ?? '') . '" data-middle="' . htmlspecialchars($u['middle_name'] ?? '') . '" data-last="' . htmlspecialchars($u['last_name']) . '" data-email="' . htmlspecialchars($u['email']) . '" data-phone="' . htmlspecialchars($u['phone'] ?? '') . '" data-role="' . htmlspecialchars($u['role']) . '">Edit</button> ';
-                echo '<form method="POST" style="display:inline;" onsubmit="return confirm(\'Are you sure you want to delete this user?\');">';
-                echo '<input type="hidden" name="delete_user_id" value="' . $u['id'] . '">';
-                echo '<button type="submit" name="delete_user" class="btn" style="background:#ef4444;">Delete</button>';
-                echo '</form>';
-              } else {
-                echo 'N/A';
-              }
-              echo '</td>';
-              echo '</tr>';
-            }
-          } else {
-            echo '<tr><td colspan="5" style="padding:8px; text-align:center;">No users found.</td></tr>';
-          }
-          ?>
-        </tbody>
-      </table>
-    </div>
-  <?php endif; ?>
-</div>
-
-<!-- ADD USER MODAL -->
-<div id="modalBackdrop" class="modal-backdrop" aria-hidden="true">
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="addUserTitle">
-    <h3 id="addUserTitle">Add New User</h3>
-
-    <form id="addUserForm" method="POST">
+<!-- ── ADD USER MODAL ── -->
+<div id="addUserModal" class="modal-backdrop">
+  <div class="modal">
+    <button class="modal-close" data-close="addUserModal">&times;</button>
+    <h3><i class="fas fa-user-plus" style="color:var(--green);margin-right:8px;"></i>Add New User</h3>
+    <form method="POST" id="addUserForm">
       <input type="hidden" name="add_user" value="1">
-
-      <div class="grid-2">
-        <div>
-          <label>First Name</label>
-          <input type="text" name="a_first_name" required>
-        </div>
-        <div>
-          <label>Middle Name</label>
-          <input type="text" name="a_middle_name">
-        </div>
+      <div class="form-grid-2">
+        <div class="form-group"><label>First Name</label><input type="text" name="a_first_name" required></div>
+        <div class="form-group"><label>Middle Name</label><input type="text" name="a_middle_name"></div>
       </div>
-
-      <div style="margin-top:10px;">
-        <label>Last Name</label>
-        <input type="text" name="a_last_name" required>
+      <div class="form-group"><label>Last Name</label><input type="text" name="a_last_name" required></div>
+      <div class="form-grid-2">
+        <div class="form-group"><label>Email</label><input type="email" name="a_email" required></div>
+        <div class="form-group"><label>Phone</label><input type="text" name="a_phone"></div>
       </div>
-
-      <div class="grid-2" style="margin-top:10px;">
-        <div>
-          <label>Email</label>
-          <input type="email" name="a_email" required>
-        </div>
-        <div>
-          <label>Phone</label>
-          <input type="text" name="a_phone">
-        </div>
-      </div>
-
-      <div style="margin-top:10px;">
-        <label>Username</label>
-        <input type="text" name="a_username" required>
-      </div>
-
-      <div style="margin-top:10px;">
+      <div class="form-group"><label>Username</label><input type="text" name="a_username" required></div>
+      <div class="form-group">
         <label>Password</label>
-        <div style="position:relative;">
-          <input type="password" name="a_password" id="a_password" required style="width:100%; padding-right:40px;">
-          <button type="button" id="a_toggle_pw" style="position:absolute; right:8px; top:6px; border:none; background:transparent; cursor:pointer;">
-            <i class="fa fa-eye"></i>
-          </button>
+        <div class="pw-wrap">
+          <input type="password" name="a_password" id="a_password" required>
+          <button type="button" class="pw-eye" data-target="a_password"><i class="fa fa-eye"></i></button>
         </div>
-
-        <div style="margin-top:8px;">
-          <div style="height:6px;background:#eee;border-radius:6px;overflow:hidden;">
-            <div id="a_pw_fill" style="width:0%;height:100%;background:red;transition:.3s;"></div>
-          </div>
-          <div class="small-note" id="a_pw_note">At least 8 chars, uppercase, lowercase, number, special char.</div>
-        </div>
+        <div class="strength-bar"><div class="strength-fill" id="a-pw-fill"></div></div>
+        <div class="strength-note" id="a-pw-note">8+ chars, uppercase, lowercase, number, special character.</div>
       </div>
-
-      <div style="margin-top:10px;">
+      <div class="form-group">
         <label>Role</label>
-        <select name="a_role" required>
-          <option value="staff" selected>Staff</option>
-        </select>
+        <select name="a_role"><option value="staff" selected>Staff</option></select>
       </div>
-
-      <div class="actions">
-        <button type="button" class="close-btn" id="closeModal">Cancel</button>
-        <button type="submit" class="btn">Create User</button>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close="addUserModal">Cancel</button>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-user-plus"></i> Create User</button>
       </div>
-
-      <div id="modalMessages" style="margin-top:8px;"></div>
+      <div id="addModalMsg" class="modal-msg"></div>
     </form>
   </div>
 </div>
 
-<!-- EDIT USER MODAL -->
-<div id="editUserModalBackdrop" class="modal-backdrop" aria-hidden="true">
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="editUserTitle">
-    <h3 id="editUserTitle">Edit User</h3>
-
-    <form id="editUserForm" method="POST">
+<!-- ── EDIT USER MODAL ── -->
+<div id="editUserModal" class="modal-backdrop">
+  <div class="modal">
+    <button class="modal-close" data-close="editUserModal">&times;</button>
+    <h3><i class="fas fa-pen" style="color:var(--blue);margin-right:8px;"></i>Edit User</h3>
+    <form method="POST" id="editUserForm">
       <input type="hidden" name="edit_user" value="1">
       <input type="hidden" name="edit_user_id" id="edit_user_id">
-
-      <div class="grid-2">
-        <div>
-          <label>First Name</label>
-          <input type="text" name="e_first_name" id="e_first_name" required>
-        </div>
-        <div>
-          <label>Middle Name</label>
-          <input type="text" name="e_middle_name" id="e_middle_name">
-        </div>
+      <div class="form-grid-2">
+        <div class="form-group"><label>First Name</label><input type="text" name="e_first_name" id="e_first_name" required></div>
+        <div class="form-group"><label>Middle Name</label><input type="text" name="e_middle_name" id="e_middle_name"></div>
       </div>
-
-      <div style="margin-top:10px;">
-        <label>Last Name</label>
-        <input type="text" name="e_last_name" id="e_last_name" required>
+      <div class="form-group"><label>Last Name</label><input type="text" name="e_last_name" id="e_last_name" required></div>
+      <div class="form-grid-2">
+        <div class="form-group"><label>Email</label><input type="email" name="e_email" id="e_email" required></div>
+        <div class="form-group"><label>Phone</label><input type="text" name="e_phone" id="e_phone"></div>
       </div>
-
-      <div class="grid-2" style="margin-top:10px;">
-        <div>
-          <label>Email</label>
-          <input type="email" name="e_email" id="e_email" required>
-        </div>
-        <div>
-          <label>Phone</label>
-          <input type="text" name="e_phone" id="e_phone">
-        </div>
-      </div>
-
-      <div style="margin-top:10px;">
+      <div class="form-group">
         <label>Role</label>
-        <select name="e_role" id="e_role" required>
-          <option value="staff">Staff</option>
-          <option value="owner">Owner</option>
-        </select>
+        <select name="e_role" id="e_role"><option value="staff">Staff</option><option value="owner">Owner</option></select>
       </div>
-
-      <div class="actions">
-        <button type="button" class="close-btn" id="closeEditModal">Cancel</button>
-        <button type="submit" class="btn">Update User</button>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-close="editUserModal">Cancel</button>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-floppy-disk"></i> Update User</button>
       </div>
-
-      <div id="editModalMessages" style="margin-top:8px;"></div>
+      <div id="editModalMsg" class="modal-msg"></div>
     </form>
   </div>
 </div>
 
 <script>
-const editToggle = document.getElementById("editToggle");
-const passwdToggle = document.getElementById("passwdToggle");
-const editForm = document.getElementById("editForm");
-const passwdForm = document.getElementById("passwdForm");
-const editCancel = document.getElementById("editCancel");
-const passwdCancel = document.getElementById("passwdCancel");
+// ── PH Time ──
+(function(){
+  const el = document.getElementById('phTime');
+  if (!el) return;
+  let t = parseInt(el.dataset.serverTs, 10) || Date.now();
+  const fmt = ms => new Date(ms).toLocaleString('en-PH',{
+    timeZone:'Asia/Manila', month:'short', day:'numeric', year:'numeric',
+    hour:'numeric', minute:'2-digit', second:'2-digit', hour12:true
+  }).replace(',', ' —');
+  el.textContent = fmt(t);
+  setInterval(() => { t += 1000; el.textContent = fmt(t); }, 1000);
+})();
 
-editToggle.addEventListener("click", ()=> {
-  editForm.style.display = "block";
-  passwdForm.style.display = "none";
-  window.scrollTo({ top: editForm.offsetTop - 120, behavior: 'smooth' });
-});
-passwdToggle.addEventListener("click", ()=> {
-  passwdForm.style.display = "block";
-  editForm.style.display = "none";
-  window.scrollTo({ top: passwdForm.offsetTop - 120, behavior: 'smooth' });
-});
-editCancel.addEventListener("click", ()=> {
-  editForm.style.display = "none";
-});
-passwdCancel.addEventListener("click", ()=> {
-  passwdForm.style.display = "none";
-});
-
-// password strength meter for new password
-const newPw = document.getElementById("new_password");
-const pwFill = document.getElementById("pw-fill");
-const pwNote = document.getElementById("pw-note");
-
-if (newPw) {
-  newPw.addEventListener("input", () => {
-    let val = newPw.value;
-    let strength = 0;
-    if (val.match(/[a-z]/)) strength++;
-    if (val.match(/[A-Z]/)) strength++;
-    if (val.match(/[0-9]/)) strength++;
-    if (val.match(/[^a-zA-Z0-9]/)) strength++;
-    if (val.length >= 8) strength++;
-
-    let width = (strength / 5) * 100;
-    pwFill.style.width = width + "%";
-    if (strength <= 2) {
-      pwFill.style.background = "red";
-      pwNote.textContent = "Weak — add uppercase, numbers, special chars.";
-    } else if (strength === 3) {
-      pwFill.style.background = "orange";
-      pwNote.textContent = "Medium — try adding more characters and symbols.";
-    } else {
-      pwFill.style.background = "green";
-      pwNote.textContent = "Strong password.";
-    }
+// ── Password eye toggles ──
+document.querySelectorAll('.pw-eye').forEach(btn => {
+  btn.addEventListener('click', function() {
+    const inp = document.getElementById(this.dataset.target);
+    if (!inp) return;
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+    this.querySelector('i').classList.toggle('fa-eye');
+    this.querySelector('i').classList.toggle('fa-eye-slash');
   });
-}
-
-// server time display (keeps same logic)
-const ph = document.getElementById("phTime");
-const server = parseInt(ph.dataset.serverTs);
-const offset = Date.now() - server;
-setInterval(()=>{
-  const d = new Date(Date.now()-offset);
-  ph.textContent = d.toLocaleString("en-US",{month:"short",day:"numeric",year:"numeric",
-        hour:"numeric",minute:"2-digit",second:"2-digit",hour12:true}).replace(","," —");
-},1000);
-
-// ---------- Modal logic ----------
-const openAddUser = document.getElementById("openAddUser");
-const modalBackdrop = document.getElementById("modalBackdrop");
-const closeModal = document.getElementById("closeModal");
-const aTogglePw = document.getElementById("a_toggle_pw");
-const aPassword = document.getElementById("a_password");
-const aPwFill = document.getElementById("a_pw_fill");
-const aPwNote = document.getElementById("a_pw_note");
-const addUserForm = document.getElementById("addUserForm");
-const modalMessages = document.getElementById("modalMessages");
-
-if (openAddUser) {
-  openAddUser.addEventListener("click", (e)=> {
-    modalBackdrop.style.display = "flex";
-    modalBackdrop.setAttribute('aria-hidden','false');
-  });
-}
-
-if (closeModal) {
-  closeModal.addEventListener("click", ()=> {
-    modalBackdrop.style.display = "none";
-    modalBackdrop.setAttribute('aria-hidden','true');
-    modalMessages.innerHTML = "";
-    addUserForm.reset();
-    aPwFill.style.width = "0%";
-    aPwFill.style.background = "red";
-    aPwNote.textContent = "At least 8 chars, uppercase, lowercase, number, special char.";
-  });
-}
-
-// toggle add-user password visibility
-if (aTogglePw) {
-  aTogglePw.addEventListener("click", ()=> {
-    const show = aPassword.type === "password";
-    aPassword.type = show ? "text" : "password";
-    aTogglePw.querySelector("i").classList.toggle("fa-eye");
-    aTogglePw.querySelector("i").classList.toggle("fa-eye-slash");
-  });
-}
-
-// add-user password strength meter
-if (aPassword) {
-  aPassword.addEventListener("input", ()=> {
-    let val = aPassword.value;
-    let strength = 0;
-    if (val.match(/[a-z]/)) strength++;
-    if (val.match(/[A-Z]/)) strength++;
-    if (val.match(/[0-9]/)) strength++;
-    if (val.match(/[^a-zA-Z0-9]/)) strength++;
-    if (val.length >= 8) strength++;
-
-    let width = (strength / 5) * 100;
-    aPwFill.style.width = width + "%";
-    if (strength <= 2) {
-      aPwFill.style.background = "red";
-      aPwNote.textContent = "Weak — add uppercase, numbers, special chars.";
-    } else if (strength === 3) {
-      aPwFill.style.background = "orange";
-      aPwNote.textContent = "Medium — try adding more characters and symbols.";
-    } else {
-      aPwFill.style.background = "green";
-      aPwNote.textContent = "Strong password.";
-    }
-  });
-}
-
-// toggle password visibility for change password form
-const toggleCurrentPw = document.getElementById("toggle_current_pw");
-const currentPassword = document.getElementById("current_password");
-const toggleNewPw = document.getElementById("toggle_new_pw");
-const newPassword = document.getElementById("new_password");
-const toggleConfirmPw = document.getElementById("toggle_confirm_pw");
-const confirmPassword = document.getElementById("confirm_password");
-
-if (toggleCurrentPw) {
-  toggleCurrentPw.addEventListener("click", ()=> {
-    const show = currentPassword.type === "password";
-    currentPassword.type = show ? "text" : "password";
-    toggleCurrentPw.querySelector("i").classList.toggle("fa-eye");
-    toggleCurrentPw.querySelector("i").classList.toggle("fa-eye-slash");
-  });
-}
-
-if (toggleNewPw) {
-  toggleNewPw.addEventListener("click", ()=> {
-    const show = newPassword.type === "password";
-    newPassword.type = show ? "text" : "password";
-    toggleNewPw.querySelector("i").classList.toggle("fa-eye");
-    toggleNewPw.querySelector("i").classList.toggle("fa-eye-slash");
-  });
-}
-
-if (toggleConfirmPw) {
-  toggleConfirmPw.addEventListener("click", ()=> {
-    const show = confirmPassword.type === "password";
-    confirmPassword.type = show ? "text" : "password";
-    toggleConfirmPw.querySelector("i").classList.toggle("fa-eye");
-    toggleConfirmPw.querySelector("i").classList.toggle("fa-eye-slash");
-  });
-}
-
-// Optional: simple client-side feedback for add user submit (keeps server flow)
-addUserForm.addEventListener("submit", (e)=> {
-  // allow server to handle validation — but show waiting feedback
-  modalMessages.innerHTML = '<div class="small-note">Creating user…</div>';
 });
 
-// ---------- Edit User Modal Logic ----------
-const editUserModalBackdrop = document.getElementById("editUserModalBackdrop");
-const closeEditModal = document.getElementById("closeEditModal");
-const editUserForm = document.getElementById("editUserForm");
-const editModalMessages = document.getElementById("editModalMessages");
-
-// Open edit modal when edit button is clicked
-document.addEventListener("click", (e) => {
-  if (e.target.classList.contains("edit-user-btn")) {
-    const btn = e.target;
-    const userId = btn.dataset.id;
-    const first = btn.dataset.first || '';
-    const middle = btn.dataset.middle || '';
-    const last = btn.dataset.last || '';
-    const email = btn.dataset.email || '';
-    const phone = btn.dataset.phone || '';
-    const role = btn.dataset.role || 'staff';
-
-    // Populate form
-    document.getElementById("edit_user_id").value = userId;
-    document.getElementById("e_first_name").value = first;
-    document.getElementById("e_middle_name").value = middle;
-    document.getElementById("e_last_name").value = last;
-    document.getElementById("e_email").value = email;
-    document.getElementById("e_phone").value = phone;
-    document.getElementById("e_role").value = role;
-
-    // Show modal
-    editUserModalBackdrop.style.display = "flex";
-    editUserModalBackdrop.setAttribute('aria-hidden', 'false');
-  }
-});
-
-// Close edit modal
-if (closeEditModal) {
-  closeEditModal.addEventListener("click", () => {
-    editUserModalBackdrop.style.display = "none";
-    editUserModalBackdrop.setAttribute('aria-hidden', 'true');
-    editModalMessages.innerHTML = "";
-    editUserForm.reset();
+// ── Password strength ──
+function bindStrength(inputId, fillId, noteId) {
+  const inp = document.getElementById(inputId);
+  const fill = document.getElementById(fillId);
+  const note = document.getElementById(noteId);
+  if (!inp || !fill || !note) return;
+  inp.addEventListener('input', () => {
+    const v = inp.value; let s = 0;
+    if (v.match(/[a-z]/)) s++; if (v.match(/[A-Z]/)) s++; if (v.match(/[0-9]/)) s++; if (v.match(/[^\w]/)) s++; if (v.length >= 8) s++;
+    const w = (s / 5) * 100;
+    fill.style.width = w + '%';
+    if (s <= 2)      { fill.style.background = 'var(--red)';   note.textContent = 'Weak — add uppercase, numbers, special chars.'; }
+    else if (s === 3){ fill.style.background = 'var(--amber)'; note.textContent = 'Medium — add more variety.'; }
+    else             { fill.style.background = 'var(--green)'; note.textContent = 'Strong password.'; }
   });
 }
+bindStrength('new_password', 'pw-fill', 'pw-note');
+bindStrength('a_password', 'a-pw-fill', 'a-pw-note');
 
-  // Optional: simple client-side feedback for edit user submit
-  editUserForm.addEventListener("submit", (e) => {
-    // allow server to handle validation — but show waiting feedback
-    editModalMessages.innerHTML = '<div class="small-note">Updating user…</div>';
-  });
+// ── Inline forms (edit profile / change password) ──
+const editToggle  = document.getElementById('editToggle');
+const passwdToggle= document.getElementById('passwdToggle');
+const editForm    = document.getElementById('editForm');
+const passwdForm  = document.getElementById('passwdForm');
+const editCancel  = document.getElementById('editCancel');
+const passwdCancel= document.getElementById('passwdCancel');
+
+if (editToggle) editToggle.addEventListener('click', () => { editForm.style.display = editForm.style.display === 'block' ? 'none' : 'block'; passwdForm.style.display = 'none'; });
+if (passwdToggle) passwdToggle.addEventListener('click', () => { passwdForm.style.display = passwdForm.style.display === 'block' ? 'none' : 'block'; editForm.style.display = 'none'; });
+if (editCancel)   editCancel.addEventListener('click',   () => editForm.style.display = 'none');
+if (passwdCancel) passwdCancel.addEventListener('click', () => passwdForm.style.display = 'none');
+
+// ── Modal helpers ──
+function openModal(id)  { document.getElementById(id)?.classList.add('open'); }
+function closeModal(id) { document.getElementById(id)?.classList.remove('open'); }
+
+document.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', () => closeModal(el.dataset.close)));
+document.querySelectorAll('.modal-backdrop').forEach(bd => bd.addEventListener('click', e => { if (e.target === bd) bd.classList.remove('open'); }));
+
+const openAddUserBtn = document.getElementById('openAddUser');
+if (openAddUserBtn) openAddUserBtn.addEventListener('click', () => openModal('addUserModal'));
+
+document.getElementById('addUserForm')?.addEventListener('submit', () => {
+  document.getElementById('addModalMsg').textContent = 'Creating user…';
+  document.getElementById('addModalMsg').className = 'modal-msg ok';
+});
+
+// ── Edit user modal populate ──
+document.addEventListener('click', e => {
+  if (!e.target.closest('.edit-user-btn')) return;
+  const btn = e.target.closest('.edit-user-btn');
+  document.getElementById('edit_user_id').value  = btn.dataset.id;
+  document.getElementById('e_first_name').value  = btn.dataset.first  || '';
+  document.getElementById('e_middle_name').value = btn.dataset.middle || '';
+  document.getElementById('e_last_name').value   = btn.dataset.last   || '';
+  document.getElementById('e_email').value        = btn.dataset.email  || '';
+  document.getElementById('e_phone').value        = btn.dataset.phone  || '';
+  document.getElementById('e_role').value         = btn.dataset.role   || 'staff';
+  openModal('editUserModal');
+});
+
+document.getElementById('editUserForm')?.addEventListener('submit', () => {
+  document.getElementById('editModalMsg').textContent = 'Updating user…';
+  document.getElementById('editModalMsg').className = 'modal-msg ok';
+});
 </script>
 </body>
 </html>
