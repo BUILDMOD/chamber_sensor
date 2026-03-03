@@ -16,13 +16,13 @@ function sendEmail($to, $subject, $body) {
 
         // GMAIL ACCOUNT
         $mail->Username   = 'angelodominguiano12345@gmail.com';
-        $mail->Password   = 'bwrk bcmj dekg oqil'; // App Password
+        $mail->Password   = 'qasx fnct kunm hwas'; // App Password
 
         $mail->SMTPSecure = 'tls';
         $mail->Port       = 587;
 
         // SENDER
-        $mail->setFrom('angelodominguiano12345@gmail.com', 'Mushroom System');
+        $mail->setFrom('angelodominguiano12345@gmail.com', 'MushroomOS');
 
         // RECEIVER
         $mail->addAddress($to);
