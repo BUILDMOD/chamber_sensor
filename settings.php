@@ -26,69 +26,70 @@ $conn->query("CREATE TABLE IF NOT EXISTS notification_settings (
 )");
 
 // ── Seed defaults if empty ──
-$r=$conn->query("SELECT COUNT(*) as c FROM alert_thresholds");
-if($r && $r->fetch_assoc()['c']==0){
+$r = $conn->query("SELECT COUNT(*) as c FROM alert_thresholds");
+if ($r && $r->fetch_assoc()['c'] == 0) {
     $conn->query("INSERT INTO alert_thresholds (metric,min_value,max_value) VALUES ('temperature',22,28),('humidity',85,95)");
 }
 
-$errors=[]; $success='';
+$errors = []; $success = '';
 
 // ── Save Thresholds ──
-if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['save_thresholds'])){
-    if(!$isOwner){$errors[]='Access denied.';}else{
-        $metrics=['temperature','humidity'];
-        foreach($metrics as $m){
-            $min=floatval($_POST[$m.'_min']??0);
-            $max=floatval($_POST[$m.'_max']??0);
-            $enabled=isset($_POST[$m.'_enabled'])?1:0;
-            if($min>=$max){$errors[]=ucfirst($m).': min must be less than max.';}
-            else{
-                $s=$conn->prepare("INSERT INTO alert_thresholds (metric,min_value,max_value,enabled) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE min_value=VALUES(min_value),max_value=VALUES(max_value),enabled=VALUES(enabled)");
-                if($s){$s->bind_param("sddi",$m,$min,$max,$enabled);$s->execute();$s->close();}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_thresholds'])) {
+    if (!$isOwner) { $errors[] = 'Access denied.'; } else {
+        $metrics = ['temperature', 'humidity'];
+        foreach ($metrics as $m) {
+            $min     = floatval($_POST[$m . '_min'] ?? 0);
+            $max     = floatval($_POST[$m . '_max'] ?? 0);
+            $enabled = isset($_POST[$m . '_enabled']) ? 1 : 0;
+            if ($min >= $max) { $errors[] = ucfirst($m) . ': min must be less than max.'; }
+            else {
+                $s = $conn->prepare("INSERT INTO alert_thresholds (metric,min_value,max_value,enabled) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE min_value=VALUES(min_value),max_value=VALUES(max_value),enabled=VALUES(enabled)");
+                if ($s) { $s->bind_param("sddi", $m, $min, $max, $enabled); $s->execute(); $s->close(); }
             }
         }
-        if(empty($errors)) $success='Thresholds saved.';
+        if (empty($errors)) $success = 'Thresholds saved.';
     }
 }
 
 // ── Save SMTP Settings ──
-if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['save_smtp'])){
-    if(!$isOwner){$errors[]='Access denied.';}else{
-        $keys=['smtp_host','smtp_port','smtp_user','smtp_from_name','smtp_to_email','notify_temp','notify_hum','notify_offline','notify_cooldown_min'];
-        foreach($keys as $k){
-            $val=trim($_POST[$k]??'');
-            $s=$conn->prepare("INSERT INTO notification_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
-            if($s){$s->bind_param("ss",$k,$val);$s->execute();$s->close();}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['save_smtp']) || ($_POST['form_action'] ?? '') === 'save')) {
+    if (!$isOwner) { $errors[] = 'Access denied.'; } else {
+        $keys = ['smtp_host','smtp_port','smtp_user','smtp_from_name','smtp_to_email','notify_temp','notify_hum','notify_offline','notify_cooldown_min'];
+        foreach ($keys as $k) {
+            $val = trim($_POST[$k] ?? '');
+            $s = $conn->prepare("INSERT INTO notification_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
+            if ($s) { $s->bind_param("ss", $k, $val); $s->execute(); $s->close(); }
         }
         // Password only if provided
-        if(!empty($_POST['smtp_pass'])){
-            $pass=trim($_POST['smtp_pass']);
-            $s=$conn->prepare("INSERT INTO notification_settings (setting_key,setting_value) VALUES ('smtp_pass',?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
-            if($s){$s->bind_param("s",$pass);$s->execute();$s->close();}
+        if (!empty($_POST['smtp_pass'])) {
+            $pass = trim($_POST['smtp_pass']);
+            $s = $conn->prepare("INSERT INTO notification_settings (setting_key,setting_value) VALUES ('smtp_pass',?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
+            if ($s) { $s->bind_param("s", $pass); $s->execute(); $s->close(); }
         }
-        if(empty($errors)) $success='Notification settings saved.';
+        if (empty($errors)) $success = 'Notification settings saved.';
     }
 }
 
 // ── Send Test Email ──
-$test_result='';
-if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['send_test'])){
-    if(!$isOwner){$errors[]='Access denied.';}else{
-        // Fetch SMTP settings
-        $ns=[];
-        $r=$conn->query("SELECT setting_key,setting_value FROM notification_settings");
-        if($r) while($row=$r->fetch_assoc()) $ns[$row['setting_key']]=$row['setting_value'];
+$test_result = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['send_test']) || ($_POST['form_action'] ?? '') === 'test')) {
+    if (!$isOwner) { $errors[] = 'Access denied.'; } else {
 
-        $host=$ns['smtp_host']??''; $port=intval($ns['smtp_port']??587);
-        $user=$ns['smtp_user']??''; $pass=$ns['smtp_pass']??'';
-        $to=$ns['smtp_to_email']??''; $from_name=$ns['smtp_from_name']??'MushroomOS';
+        // Re-fetch latest saved settings from DB
+        $ns_test = [];
+        $r = $conn->query("SELECT setting_key,setting_value FROM notification_settings");
+        if ($r) while ($row = $r->fetch_assoc()) $ns_test[$row['setting_key']] = $row['setting_value'];
 
-        if(!$host||!$user||!$pass||!$to){
-            $test_result='error:SMTP settings incomplete. Please save your configuration first.';
+        $host      = $ns_test['smtp_host']      ?? '';
+        $port      = intval($ns_test['smtp_port'] ?? 587);
+        $user      = $ns_test['smtp_user']      ?? '';
+        $pass      = $ns_test['smtp_pass']      ?? '';
+        $to        = $ns_test['smtp_to_email']  ?? '';
+        $from_name = $ns_test['smtp_from_name'] ?? 'MushroomOS';
+
+        if (!$host || !$user || !$pass || !$to) {
+            $test_result = 'error:SMTP settings incomplete. Please save your configuration first.';
         } else {
-            $subject='MushroomOS — Test Notification';
-            $body="This is a test email from MushroomOS.\n\nIf you received this, your email notification settings are working correctly.\n\nSent: ".date('M j, Y h:i:s A T');
-
             require_once 'PHPMailer-master/src/PHPMailer.php';
             require_once 'PHPMailer-master/src/SMTP.php';
             require_once 'PHPMailer-master/src/Exception.php';
@@ -100,31 +101,38 @@ if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['send_test'])){
                 $mail->SMTPAuth   = true;
                 $mail->Username   = $user;
                 $mail->Password   = $pass;
-                $mail->SMTPSecure = 'tls';
+                $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS; // ✅ fixed constant
                 $mail->Port       = $port;
                 $mail->setFrom($user, $from_name);
                 $mail->addAddress($to);
-                $mail->Subject = $subject;
-                $mail->Body    = $body;
+                $mail->isHTML(true); // ✅ enable HTML
+                $mail->Subject = 'MushroomOS — Test Notification';
+                $mail->Body    = "
+                    <b>MushroomOS Test Email</b><br><br>
+                    If you received this, your email notification settings are working correctly.<br><br>
+                    <b>Sent:</b> " . date('M j, Y h:i:s A T') . "
+                ";
+                $mail->AltBody = "MushroomOS Test Email\n\nIf you received this, your email notification settings are working correctly.\n\nSent: " . date('M j, Y h:i:s A T'); // ✅ plain text fallback
                 $mail->send();
-                $test_result = 'ok:Test email sent to '.htmlspecialchars($to).'. Check your inbox.';
+                $test_result = 'ok:Test email sent to ' . htmlspecialchars($to) . '. Check your inbox.';
             } catch (Exception $e) {
-                $test_result = 'error:'.$mail->ErrorInfo;
+                error_log("Test email error: " . $mail->ErrorInfo);
+                $test_result = 'error:' . $mail->ErrorInfo;
             }
         }
     }
 }
 
-// ── Fetch current settings ──
-$thresholds=[];
-$r=$conn->query("SELECT * FROM alert_thresholds");
-if($r) while($row=$r->fetch_assoc()) $thresholds[$row['metric']]=$row;
+// ── Fetch current settings for display ──
+$thresholds = [];
+$r = $conn->query("SELECT * FROM alert_thresholds");
+if ($r) while ($row = $r->fetch_assoc()) $thresholds[$row['metric']] = $row;
 
-$ns=[];
-$r=$conn->query("SELECT setting_key,setting_value FROM notification_settings");
-if($r) while($row=$r->fetch_assoc()) $ns[$row['setting_key']]=$row['setting_value'];
+$ns = [];
+$r = $conn->query("SELECT setting_key,setting_value FROM notification_settings");
+if ($r) while ($row = $r->fetch_assoc()) $ns[$row['setting_key']] = $row['setting_value'];
 
-function ns($ns,$k,$default=''){return htmlspecialchars($ns[$k]??$default);}
+function ns($ns, $k, $default = '') { return htmlspecialchars($ns[$k] ?? $default); }
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -228,15 +236,15 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
   </header>
 
   <div class="page">
-    <?php if($success): ?><div class="flash flash-ok"><i class="fas fa-check-circle"></i> <?= htmlspecialchars($success) ?></div><?php endif; ?>
-    <?php foreach($errors as $e): ?><div class="flash flash-err"><i class="fas fa-triangle-exclamation"></i> <?= htmlspecialchars($e) ?></div><?php endforeach; ?>
-    <?php if(!empty($test_result)):
-      $tr=explode(':',$test_result,2);
-      $trclass=$tr[0]==='ok'?'flash-ok':'flash-err';
-      $tricon=$tr[0]==='ok'?'fa-envelope-circle-check':'fa-triangle-exclamation';
-    ?><div class="flash <?=$trclass?>"><i class="fas <?=$tricon?>"></i> <?= htmlspecialchars($tr[1]??$test_result) ?></div><?php endif; ?>
+    <?php if ($success): ?><div class="flash flash-ok"><i class="fas fa-check-circle"></i> <?= htmlspecialchars($success) ?></div><?php endif; ?>
+    <?php foreach ($errors as $e): ?><div class="flash flash-err"><i class="fas fa-triangle-exclamation"></i> <?= htmlspecialchars($e) ?></div><?php endforeach; ?>
+    <?php if (!empty($test_result)):
+      $tr = explode(':', $test_result, 2);
+      $trclass = $tr[0] === 'ok' ? 'flash-ok' : 'flash-err';
+      $tricon  = $tr[0] === 'ok' ? 'fa-envelope-circle-check' : 'fa-triangle-exclamation';
+    ?><div class="flash <?= $trclass ?>"><i class="fas <?= $tricon ?>"></i> <?= htmlspecialchars($tr[1] ?? $test_result) ?></div><?php endif; ?>
 
-    <?php if(!$isOwner): ?>
+    <?php if (!$isOwner): ?>
       <div class="access-notice"><i class="fas fa-lock"></i> Only the Owner can modify settings. You can view the current configuration below.</div>
     <?php endif; ?>
 
@@ -249,36 +257,33 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
       <div class="card-body">
         <form method="POST">
           <input type="hidden" name="save_thresholds" value="1">
-
-          <?php foreach(['temperature'=>['Temperature','°C','var(--red)'],'humidity'=>['Humidity','%','var(--blue)']] as $m=>[$label,$unit,$col]):
-            $t=$thresholds[$m]??['min_value'=>0,'max_value'=>100,'enabled'=>1];
+          <?php foreach (['temperature' => ['Temperature','°C','var(--red)'], 'humidity' => ['Humidity','%','var(--blue)']] as $m => [$label, $unit, $col]):
+            $t = $thresholds[$m] ?? ['min_value' => 0, 'max_value' => 100, 'enabled' => 1];
           ?>
           <div class="threshold-row">
             <div class="threshold-label">
-              <div class="dot" style="background:<?=$col?>;"></div>
-              <?=$label?>
+              <div class="dot" style="background:<?= $col ?>;"></div>
+              <?= $label ?>
             </div>
             <div class="form-group">
-              <label>Min (<?=$unit?>)</label>
-              <input type="number" name="<?=$m?>_min" step="0.1" value="<?=$t['min_value']?>" <?=!$isOwner?'disabled':''?> required>
+              <label>Min (<?= $unit ?>)</label>
+              <input type="number" name="<?= $m ?>_min" step="0.1" value="<?= $t['min_value'] ?>" <?= !$isOwner ? 'disabled' : '' ?> required>
             </div>
             <div class="form-group">
-              <label>Max (<?=$unit?>)</label>
-              <input type="number" name="<?=$m?>_max" step="0.1" value="<?=$t['max_value']?>" <?=!$isOwner?'disabled':''?> required>
+              <label>Max (<?= $unit ?>)</label>
+              <input type="number" name="<?= $m ?>_max" step="0.1" value="<?= $t['max_value'] ?>" <?= !$isOwner ? 'disabled' : '' ?> required>
             </div>
             <div class="form-group">
               <label>Enabled</label>
               <label class="toggle-switch" style="margin-top:6px;">
-                <input type="checkbox" name="<?=$m?>_enabled" value="1" <?=$t['enabled']?'checked':''?> <?=!$isOwner?'disabled':''?>>
+                <input type="checkbox" name="<?= $m ?>_enabled" value="1" <?= $t['enabled'] ? 'checked' : '' ?> <?= !$isOwner ? 'disabled' : '' ?>>
                 <span class="toggle-slider"></span>
               </label>
             </div>
           </div>
           <?php endforeach; ?>
-
-          <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">Alerts fire when readings stay outside the range. Current defaults: Temperature 22–28°C, Humidity 85–95%.</p>
-
-          <?php if($isOwner): ?>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">Alerts fire when readings stay outside the range. Defaults: Temperature 22–28°C, Humidity 85–95%.</p>
+          <?php if ($isOwner): ?>
           <button type="submit" class="btn btn-primary"><i class="fas fa-floppy-disk"></i> Save Thresholds</button>
           <?php endif; ?>
         </form>
@@ -292,60 +297,68 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
         <span style="font-size:11px;color:var(--muted);">SMTP configuration</span>
       </div>
       <div class="card-body">
-        <div class="info-box"><i class="fas fa-circle-info"></i>For reliable delivery, use an SMTP service like Gmail (smtp.gmail.com:587), Brevo, or Mailgun. For Gmail, use an App Password, not your main password.</div>
+        <div class="info-box"><i class="fas fa-circle-info"></i>Use Gmail with an App Password (not your real password). Enable 2-Step Verification on your Google account first, then generate an App Password at <b>myaccount.google.com/apppasswords</b>.</div>
 
-        <form method="POST">
-          <input type="hidden" name="save_smtp" value="1">
+        <!-- ✅ Single unified form for Save + Test -->
+        <form method="POST" id="smtpForm">
 
           <p class="section-title">SMTP Server</p>
           <div class="form-grid-3">
-            <div class="form-group"><label>SMTP Host</label><input type="text" name="smtp_host" value="<?=ns($ns,'smtp_host','smtp.gmail.com')?>" placeholder="smtp.gmail.com" <?=!$isOwner?'disabled':''?>></div>
-            <div class="form-group"><label>Port</label><input type="number" name="smtp_port" value="<?=ns($ns,'smtp_port','587')?>" placeholder="587" <?=!$isOwner?'disabled':''?>></div>
-            <div class="form-group"><label>From Name</label><input type="text" name="smtp_from_name" value="<?=ns($ns,'smtp_from_name','MushroomOS')?>" placeholder="MushroomOS" <?=!$isOwner?'disabled':''?>></div>
+            <div class="form-group"><label>SMTP Host</label><input type="text" name="smtp_host" value="<?= ns($ns,'smtp_host','smtp.gmail.com') ?>" placeholder="smtp.gmail.com" <?= !$isOwner ? 'disabled' : '' ?>></div>
+            <div class="form-group"><label>Port</label><input type="number" name="smtp_port" value="<?= ns($ns,'smtp_port','587') ?>" placeholder="587" <?= !$isOwner ? 'disabled' : '' ?>></div>
+            <div class="form-group"><label>From Name</label><input type="text" name="smtp_from_name" value="<?= ns($ns,'smtp_from_name','MushroomOS') ?>" placeholder="MushroomOS" <?= !$isOwner ? 'disabled' : '' ?>></div>
           </div>
           <div class="form-grid-2">
-            <div class="form-group"><label>SMTP Username (Email)</label><input type="email" name="smtp_user" value="<?=ns($ns,'smtp_user')?>" placeholder="your@gmail.com" <?=!$isOwner?'disabled':''?>></div>
-            <div class="form-group"><label>SMTP Password <?= $ns['smtp_pass']??false ? '<span style="color:var(--green);font-size:11px;">● saved</span>':'' ?></label><input type="password" name="smtp_pass" placeholder="Leave blank to keep current" <?=!$isOwner?'disabled':''?>></div>
+            <div class="form-group"><label>SMTP Username (Email)</label><input type="email" name="smtp_user" value="<?= ns($ns,'smtp_user') ?>" placeholder="your@gmail.com" <?= !$isOwner ? 'disabled' : '' ?>></div>
+            <div class="form-group">
+              <label>SMTP Password <?= ($ns['smtp_pass'] ?? false) ? '<span style="color:var(--green);font-size:11px;">● saved</span>' : '' ?></label>
+              <input type="password" name="smtp_pass" placeholder="Leave blank to keep current" <?= !$isOwner ? 'disabled' : '' ?>>
+            </div>
           </div>
 
           <p class="section-title" style="margin-top:4px;">Recipients & Triggers</p>
-          <div class="form-group" style="margin-bottom:14px;"><label>Send Alerts To (email)</label><input type="email" name="smtp_to_email" value="<?=ns($ns,'smtp_to_email')?>" placeholder="admin@example.com" <?=!$isOwner?'disabled':''?>></div>
+          <div class="form-group" style="margin-bottom:14px;">
+            <label>Send Alerts To (email)</label>
+            <input type="email" name="smtp_to_email" value="<?= ns($ns,'smtp_to_email') ?>" placeholder="admin@example.com" <?= !$isOwner ? 'disabled' : '' ?>>
+          </div>
 
           <div style="background:var(--surface2);border-radius:10px;padding:14px 16px;border:1px solid var(--border);margin-bottom:14px;">
             <p style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Send email when…</p>
             <div class="checkbox-row">
-              <input type="checkbox" id="nt" name="notify_temp" value="1" <?=($ns['notify_temp']??'1')==='1'?'checked':''?> <?=!$isOwner?'disabled':''?>>
+              <input type="checkbox" id="nt" name="notify_temp" value="1" <?= ($ns['notify_temp'] ?? '1') === '1' ? 'checked' : '' ?> <?= !$isOwner ? 'disabled' : '' ?>>
               <div><label for="nt">Temperature out of range</label><div class="sub">Alert when temp goes above or below thresholds</div></div>
             </div>
             <div class="checkbox-row">
-              <input type="checkbox" id="nh" name="notify_hum" value="1" <?=($ns['notify_hum']??'1')==='1'?'checked':''?> <?=!$isOwner?'disabled':''?>>
+              <input type="checkbox" id="nh" name="notify_hum" value="1" <?= ($ns['notify_hum'] ?? '1') === '1' ? 'checked' : '' ?> <?= !$isOwner ? 'disabled' : '' ?>>
               <div><label for="nh">Humidity out of range</label><div class="sub">Alert when humidity goes above or below thresholds</div></div>
             </div>
             <div class="checkbox-row">
-              <input type="checkbox" id="no" name="notify_offline" value="1" <?=($ns['notify_offline']??'1')==='1'?'checked':''?> <?=!$isOwner?'disabled':''?>>
+              <input type="checkbox" id="no" name="notify_offline" value="1" <?= ($ns['notify_offline'] ?? '1') === '1' ? 'checked' : '' ?> <?= !$isOwner ? 'disabled' : '' ?>>
               <div><label for="no">Sensor offline</label><div class="sub">Alert when no reading received for 5+ minutes</div></div>
             </div>
           </div>
 
           <div class="form-group" style="max-width:200px;margin-bottom:0;">
             <label>Cooldown Between Emails (min)</label>
-            <input type="number" name="notify_cooldown_min" min="1" max="1440" value="<?=ns($ns,'notify_cooldown_min','30')?>" <?=!$isOwner?'disabled':''?>>
+            <input type="number" name="notify_cooldown_min" min="1" max="1440" value="<?= ns($ns,'notify_cooldown_min','30') ?>" <?= !$isOwner ? 'disabled' : '' ?>>
           </div>
 
-          <?php if($isOwner): ?>
+          <!-- ✅ Hidden field — set by JS to distinguish Save vs Test -->
+          <input type="hidden" name="form_action" id="formAction" value="">
+
+          <?php if ($isOwner): ?>
           <div class="form-footer">
             <div style="display:flex;gap:10px;">
-              <button type="submit" class="btn btn-primary"><i class="fas fa-floppy-disk"></i> Save Settings</button>
-              <button type="submit" name="send_test" formaction="settings.php" class="btn btn-blue" form="testForm"><i class="fas fa-paper-plane"></i> Send Test Email</button>
+              <button type="button" class="btn btn-primary" onclick="submitSmtp('save')">
+                <i class="fas fa-floppy-disk"></i> Save Settings
+              </button>
+              <button type="button" class="btn btn-blue" onclick="submitSmtp('test')">
+                <i class="fas fa-paper-plane"></i> Send Test Email
+              </button>
             </div>
             <span style="font-size:12px;color:var(--muted);">Powered by PHPMailer.</span>
           </div>
           <?php endif; ?>
-        </form>
-
-        <!-- Separate test form -->
-        <form id="testForm" method="POST" style="display:none;">
-          <input type="hidden" name="send_test" value="1">
         </form>
       </div>
     </div>
@@ -356,30 +369,29 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
         <div class="card-title"><span class="icon icon-green"><i class="fas fa-code"></i></span> Integration Guide</div>
       </div>
       <div class="card-body">
-        <p class="section-title">Installing PHPMailer (recommended)</p>
-        <div style="background:#0d1117;border-radius:8px;padding:14px 18px;font-family:'DM Mono',monospace;font-size:12px;color:#e6edf3;line-height:1.8;margin-bottom:14px;">
-          <span style="color:#79c0ff;">composer</span> require phpmailer/phpmailer<br>
-          <span style="color:#6e7681;"># or download from github.com/PHPMailer/PHPMailer</span>
-        </div>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:10px;">Then create <code style="font-family:'DM Mono';background:var(--surface2);padding:2px 6px;border-radius:4px;font-size:12px;">includes/send_alert_email.php</code> with this template:</p>
+        <p class="section-title">send_email.php template used by this system</p>
         <div style="background:#0d1117;border-radius:8px;padding:14px 18px;font-family:'DM Mono',monospace;font-size:12px;color:#e6edf3;line-height:1.8;overflow-x:auto;">
 <pre style="margin:0;white-space:pre-wrap;"><span style="color:#ff7b72;">use</span> <span style="color:#79c0ff;">PHPMailer\PHPMailer\PHPMailer</span>;
-<span style="color:#ff7b72;">require</span> <span style="color:#a5d6ff;">'vendor/autoload.php'</span>;
+<span style="color:#ff7b72;">require</span> <span style="color:#a5d6ff;">'PHPMailer-master/src/PHPMailer.php'</span>;
+<span style="color:#ff7b72;">require</span> <span style="color:#a5d6ff;">'PHPMailer-master/src/SMTP.php'</span>;
+<span style="color:#ff7b72;">require</span> <span style="color:#a5d6ff;">'PHPMailer-master/src/Exception.php'</span>;
 
-<span style="color:#ff7b72;">function</span> <span style="color:#d2a8ff;">sendAlertEmail</span>($subject, $body, $settings) {
+<span style="color:#ff7b72;">function</span> <span style="color:#d2a8ff;">sendEmail</span>($to, $subject, $body) {
   $mail = <span style="color:#ff7b72;">new</span> PHPMailer(<span style="color:#79c0ff;">true</span>);
   $mail->isSMTP();
-  $mail->Host       = $settings[<span style="color:#a5d6ff;">'smtp_host'</span>];
+  $mail->Host       = <span style="color:#a5d6ff;">'smtp.gmail.com'</span>;
   $mail->SMTPAuth   = <span style="color:#79c0ff;">true</span>;
-  $mail->Username   = $settings[<span style="color:#a5d6ff;">'smtp_user'</span>];
-  $mail->Password   = $settings[<span style="color:#a5d6ff;">'smtp_pass'</span>];
-  $mail->SMTPSecure = <span style="color:#a5d6ff;">'tls'</span>;
-  $mail->Port       = $settings[<span style="color:#a5d6ff;">'smtp_port'</span>];
-  $mail->setFrom($settings[<span style="color:#a5d6ff;">'smtp_user'</span>], $settings[<span style="color:#a5d6ff;">'smtp_from_name'</span>]);
-  $mail->addAddress($settings[<span style="color:#a5d6ff;">'smtp_to_email'</span>]);
+  $mail->Username   = <span style="color:#a5d6ff;">'your@gmail.com'</span>;
+  $mail->Password   = <span style="color:#a5d6ff;">'your-app-password'</span>;
+  $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+  $mail->Port       = <span style="color:#79c0ff;">587</span>;
+  $mail->setFrom(<span style="color:#a5d6ff;">'your@gmail.com'</span>, <span style="color:#a5d6ff;">'MushroomOS'</span>);
+  $mail->addAddress($to);
+  $mail->isHTML(<span style="color:#79c0ff;">true</span>);
   $mail->Subject = $subject;
   $mail->Body    = $body;
-  <span style="color:#ff7b72;">return</span> $mail->send();
+  $mail->AltBody = strip_tags($body);
+  <span style="color:#ff7b72;">return</span> $mail->send() ? <span style="color:#a5d6ff;">"SUCCESS"</span> : <span style="color:#a5d6ff;">"FAILED"</span>;
 }</pre>
         </div>
       </div>
@@ -389,20 +401,30 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
 </main>
 
 <script>
+// Clock
 (function(){
-  const el=document.getElementById('phTime');if(!el)return;
-  let t=parseInt(el.dataset.serverTs,10)||Date.now();
-  const fmt=ms=>new Date(ms).toLocaleString('en-PH',{timeZone:'Asia/Manila',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true}).replace(',',' —');
-  el.textContent=fmt(t);setInterval(()=>{t+=1000;el.textContent=fmt(t);},1000);
+  const el = document.getElementById('phTime'); if (!el) return;
+  let t = parseInt(el.dataset.serverTs, 10) || Date.now();
+  const fmt = ms => new Date(ms).toLocaleString('en-PH', {
+    timeZone:'Asia/Manila', month:'short', day:'numeric', year:'numeric',
+    hour:'numeric', minute:'2-digit', second:'2-digit', hour12:true
+  }).replace(',', ' —');
+  el.textContent = fmt(t);
+  setInterval(() => { t += 1000; el.textContent = fmt(t); }, 1000);
 })();
 
-// Test email button submits the hidden form
-document.querySelectorAll('[form=testForm]').forEach(btn=>{
-  btn.addEventListener('click',e=>{
-    e.preventDefault();
-    if(confirm('Send a test email to the configured address?')) document.getElementById('testForm').submit();
-  });
-});
+// ✅ Fixed: single form, hidden field tells PHP what action to run
+function submitSmtp(action) {
+  if (action === 'test') {
+    if (!confirm('Send a test email to the configured address?')) return;
+    document.getElementById('formAction').value = 'test';
+  } else {
+    document.getElementById('formAction').value = 'save';
+  }
+  document.getElementById('smtpForm').submit();
+}
 </script>
+
+
 </body>
 </html>

@@ -81,7 +81,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     Thank you!<br>
                     <b>J.WHO Mushroom Farm</b>
                 ";
-                sendEmail($email, $subject, $body);
+
+                // ✅ Capture result — if email fails it's logged, but registration still succeeds
+                $emailResult = sendEmail($email, $subject, $body);
+                if ($emailResult !== "SUCCESS") {
+                    error_log("Registration email failed for $email: " . $emailResult);
+                }
 
                 $success = "Account created! Redirecting...";
                 header("refresh:2; url=index.php");

@@ -114,30 +114,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['image'])) {
     exit;
 }
 
-// Handle GET request - return recent analyses
+// Handle GET request - return recent analyses for dashboard display
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     header('Content-Type: application/json');
-    
+
     $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 10;
-    $limit = min($limit, 50); // Max 50 records
-    
-    $sql = "SELECT * FROM image_analysis ORDER BY analyzed_at DESC LIMIT ?";
+    $limit = min($limit, 50);
+
+    $sql = "SELECT id, image_path, diameter_cm, estimated_size_cm, harvest_status, confidence_score, analysis_notes, analyzed_at FROM image_analysis ORDER BY analyzed_at DESC LIMIT ?";
     $stmt = $conn->prepare($sql);
     $stmt->bind_param("i", $limit);
     $stmt->execute();
     $result = $stmt->get_result();
-    
+
     $analyses = [];
     while ($row = $result->fetch_assoc()) {
+        // Make image_path web-accessible (strip leading path if needed)
+        $row['image_path'] = ltrim($row['image_path'], './');
         $analyses[] = $row;
     }
-    
+
     echo json_encode([
         "success" => true,
-        "count" => count($analyses),
-        "data" => $analyses
+        "count"   => count($analyses),
+        "data"    => $analyses
     ]);
-    
+
     $stmt->close();
     $conn->close();
     exit;
