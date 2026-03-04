@@ -159,6 +159,7 @@ function navUrl($view, $year, $month, $day) {
     .sidebar-nav a i{width:16px;text-align:center;font-size:13px;}
     .sidebar-nav a:hover{background:var(--surface2);color:var(--text);}
     .sidebar-nav a.active{background:var(--green-lt);color:var(--green);font-weight:600;}
+.sidebar-nav .nav-bottom{margin-top:auto;padding-top:8px;border-top:1px solid var(--border);}
 
     .main{margin-left:220px;min-height:100vh;}
 
@@ -315,7 +316,7 @@ function navUrl($view, $year, $month, $day) {
     <a href="logs.php"><i class="fas fa-list-check"></i> Logs</a>
     <a href="settings.php"><i class="fas fa-gear"></i> Settings</a>
     <a href="profile.php"><i class="fas fa-sliders"></i> System Profile</a>
-    <a href="logout.php"><i class="fas fa-arrow-right-from-bracket"></i> Logout</a>
+    <div class="nav-bottom"><a href="logout.php"><i class="fas fa-arrow-right-from-bracket"></i> Logout</a></div>
   </nav>
 </aside>
 

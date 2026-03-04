@@ -143,11 +143,12 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 .sidebar-logo img{width:36px;height:36px;border-radius:8px;}
 .sidebar-logo-text{font-size:14px;font-weight:700;color:var(--text);line-height:1.2;}
 .sidebar-logo-sub{font-size:11px;color:var(--muted);}
-.sidebar-nav{flex:1;padding:16px 12px;display:flex;flex-direction:column;gap:2px;}
+.sidebar-nav{flex:1;padding:12px 10px;display:flex;flex-direction:column;gap:1px;overflow-y:auto;}
 .sidebar-nav a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:var(--muted);text-decoration:none;font-size:13.5px;font-weight:500;transition:all .15s;}
 .sidebar-nav a i{width:16px;text-align:center;font-size:13px;}
 .sidebar-nav a:hover{background:var(--surface2);color:var(--text);}
 .sidebar-nav a.active{background:var(--green-lt);color:var(--green);font-weight:600;}
+.sidebar-nav .nav-bottom{margin-top:auto;padding-top:8px;border-top:1px solid var(--border);}
 .main{margin-left:220px;min-height:100vh;}
 .topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:40;}
 .topbar-title{font-size:15px;font-weight:700;color:var(--text);}
@@ -247,7 +248,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
     <a href="logs.php"><i class="fas fa-list-check"></i> Logs</a>
     <a href="settings.php"><i class="fas fa-gear"></i> Settings</a>
     <a href="profile.php"><i class="fas fa-sliders"></i> System Profile</a>
-    <a href="logout.php"><i class="fas fa-arrow-right-from-bracket"></i> Logout</a>
+    <div class="nav-bottom"><a href="logout.php"><i class="fas fa-arrow-right-from-bracket"></i> Logout</a></div>
   </nav>
 </aside>
 
