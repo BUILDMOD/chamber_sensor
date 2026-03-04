@@ -14,15 +14,18 @@ function sendEmail($to, $subject, $body) {
         $mail->Host       = 'smtp.gmail.com';
         $mail->SMTPAuth   = true;
 
-        // GMAIL ACCOUNT
+        // ⚠️ IMPORTANT: Replace with your NEW App Password after revoking the exposed one
         $mail->Username   = 'angelodominguiano12345@gmail.com';
-        $mail->Password   = 'qasx fnct kunm hwas'; // App Password
+        $mail->Password   = 'fwfe vphq cvok hzbh'; // <-- update this
 
-        $mail->SMTPSecure = 'tls';
+        $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS; // 'tls'
         $mail->Port       = 587;
 
+        // Remove or set to 0 after confirming emails work
+        $mail->SMTPDebug  = 0; // Set to 2 temporarily if still not working
+
         // SENDER
-        $mail->setFrom('angelodominguiano12345@gmail.com', 'MushroomOS');
+        $mail->setFrom('angelodominguiano12345@gmail.com', 'J.WHO Mushroom Farm');
 
         // RECEIVER
         $mail->addAddress($to);
@@ -31,10 +34,12 @@ function sendEmail($to, $subject, $body) {
         $mail->isHTML(true);
         $mail->Subject = $subject;
         $mail->Body    = $body;
+        $mail->AltBody = strip_tags($body); // Plain text fallback (helps avoid spam)
 
         $mail->send();
         return "SUCCESS";
     } catch (Exception $e) {
+        error_log("PHPMailer Error: " . $mail->ErrorInfo);
         return "ERROR: " . $mail->ErrorInfo;
     }
 }

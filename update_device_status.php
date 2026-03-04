@@ -86,6 +86,41 @@ if (!$ok) {
     exit;
 }
 
+// ── Log each toggled device to device_logs ──
+$conn->query("CREATE TABLE IF NOT EXISTS device_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    device VARCHAR(30) NOT NULL,
+    action ENUM('ON','OFF') NOT NULL,
+    trigger_type ENUM('auto','manual','schedule') NOT NULL DEFAULT 'manual',
+    trigger_detail VARCHAR(100),
+    duration_seconds INT DEFAULT NULL,
+    logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)");
+
+// Determine which devices were explicitly set in this request
+$loggable = ['mist' => $mist, 'fan' => $fan, 'heater' => $heater, 'sprayer' => $sprayer];
+
+// If toggled via ?device=xxx, log that specific device
+if (isset($input['device'])) {
+    $toggled_device = $input['device'];
+    if (array_key_exists($toggled_device, $loggable) && $loggable[$toggled_device] !== null) {
+        $action = $loggable[$toggled_device] ? 'ON' : 'OFF';
+        $detail = 'Manual toggle via control panel';
+        $ls = $conn->prepare("INSERT INTO device_logs (device, action, trigger_type, trigger_detail) VALUES (?, ?, 'manual', ?)");
+        if ($ls) { $ls->bind_param("sss", $toggled_device, $action, $detail); $ls->execute(); $ls->close(); }
+    }
+} else {
+    // Log any explicitly set device fields (e.g. from direct JSON POST)
+    foreach ($loggable as $dev => $val) {
+        if ($val !== null) {
+            $action = $val ? 'ON' : 'OFF';
+            $detail = 'Manual toggle via control panel';
+            $ls = $conn->prepare("INSERT INTO device_logs (device, action, trigger_type, trigger_detail) VALUES (?, ?, 'manual', ?)");
+            if ($ls) { $ls->bind_param("sss", $dev, $action, $detail); $ls->execute(); $ls->close(); }
+        }
+    }
+}
+
 // Return updated row
 $row = $conn->query("SELECT manual_mode, mist, fan, heater, sprayer, exhaust, updated_at FROM device_status WHERE id = 1 LIMIT 1")->fetch_assoc();
 
