@@ -202,12 +202,14 @@ body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); col
 
 /* ── SIDEBAR ── */
 .sidebar { position: fixed; inset: 0 auto 0 0; width: 220px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 50; }
-.sidebar-logo { padding: 22px 20px 18px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
+.sidebar-logo { padding: 22px 20px 18px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); position: relative; }
+    .sidebar-close{display:none;position:absolute;top:50%;right:14px;transform:translateY(-50%);width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);align-items:center;justify-content:center;cursor:pointer;color:var(--muted);font-size:13px;transition:all .15s;}
+    .sidebar-close:hover{background:var(--red-lt);color:var(--red);border-color:var(--red);}
 .sidebar-logo img { width: 36px; height: 36px; border-radius: 8px; }
 .sidebar-logo-text { font-size: 14px; font-weight: 700; color: var(--text); line-height: 1.2; }
 .sidebar-logo-sub  { font-size: 11px; color: var(--muted); }
-.sidebar-nav { flex: 1; padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; overflow-y: auto; }
-.sidebar-nav a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13px; font-weight: 500; transition: all .15s; white-space: nowrap; }
+.sidebar-nav{flex:1;padding:12px 10px;display:flex;flex-direction:column;gap:1px;overflow-y:auto;}
+.sidebar-nav a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:var(--muted);text-decoration:none;font-size:13.5px;font-weight:500;transition:all .15s;}
 .sidebar-nav a i { width: 16px; text-align: center; font-size: 13px; }
 .sidebar-nav a:hover  { background: var(--surface2); color: var(--text); }
 .sidebar-nav a.active { background: var(--green-lt); color: var(--green); font-weight: 600; }
@@ -215,7 +217,7 @@ body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); col
 
 /* ── MAIN ── */
 .main { margin-left: 220px; min-height: 100vh; width: calc(100% - 220px); box-sizing: border-box; }
-.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 28px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 40; }
+.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 28px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 30; }
 .topbar-title { font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -.2px; }
 .topbar-time { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); background: var(--surface2); padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); }
 .page { padding: 24px 28px; max-width: 1280px; width: 100%; box-sizing: border-box; }
@@ -255,7 +257,7 @@ body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); col
 .field-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 20px; border-bottom: 1px solid var(--border); }
 .field-row:last-child { border-bottom: none; }
 .field-label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
-.field-val   { font-size: 13px; color: var(--text); font-weight: 500; text-align: right; }
+.field-val   { font-size: 13px; color: var(--text); font-weight: 500; text-align: right; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .field-val.mono { font-family: 'DM Mono', monospace; font-size: 12px; }
 
 /* ── ACTION BUTTONS ── */
@@ -341,9 +343,164 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
   .profile-layout { grid-template-columns: 1fr; }
   .form-grid-2 { grid-template-columns: 1fr; }
 }
+
+    /* ============================================================
+       RESPONSIVE / MOBILE
+       ============================================================ */
+
+    /* Hamburger button */
+    .hamburger{
+      display:none;position:fixed;top:4px;left:10px;z-index:500;
+      width:38px;height:38px;border-radius:9px;
+      background:var(--surface);border:1px solid var(--border);
+      box-shadow:var(--shadow);
+      align-items:center;justify-content:center;
+      cursor:pointer;flex-direction:column;gap:4px;padding:9px;
+      touch-action:manipulation;
+      pointer-events:auto;
+    }
+    .hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
+    .hamburger.open span:nth-child(1){transform:translateY(6px) rotate(45deg);}
+    .hamburger.open span:nth-child(2){opacity:0;transform:scaleX(0);}
+    .hamburger.open span:nth-child(3){transform:translateY(-6px) rotate(-45deg);}
+
+    /* Overlay behind sidebar */
+    .sidebar-overlay{
+      display:none;position:fixed;inset:0;
+      background:rgba(0,0,0,.4);z-index:99;
+      backdrop-filter:blur(3px);
+      -webkit-backdrop-filter:blur(3px);
+    }
+    .sidebar-overlay.open{display:block;}
+
+    @media(max-width:768px){
+      /* Show hamburger */
+      .hamburger{display:flex;}
+      .sidebar-close{display:flex;}
+
+      /* Sidebar slides in */
+      .sidebar{
+        transform:translateX(-100%);
+        transition:transform .28s cubic-bezier(.4,0,.2,1);
+        z-index:100;
+        box-shadow:4px 0 24px rgba(0,0,0,.12);
+      }
+      .sidebar.open{transform:translateX(0);}
+
+      /* Main fills full width */
+      .main{margin-left:0!important;width:100%!important;overflow-x:hidden;}
+
+      /* Topbar — room for hamburger on left */
+      .topbar{padding:0 10px 0 58px;height:52px;gap:6px;}
+      .topbar-title{font-size:14px;}
+      .topbar-right{gap:6px;}
+      .topbar-time{font-size:11px;padding:4px 10px;}
+      .user-badge{padding:4px 10px;font-size:11px;}
+      .user-badge .role-pill{display:none;}
+      /* Hide button text labels on mobile, show icon only */
+      .btn-label{display:none;}
+      .btn{padding:7px 10px;gap:0;}
+      .topbar .btn{min-width:34px;justify-content:center;}
+
+      /* Page & grid padding */
+      .page{padding:14px!important;}
+      .grid{padding:14px!important;gap:10px!important;}
+
+      /* All columns go full width */
+      .col-3,.col-4,.col-5,.col-6,.col-7,.col-8,.col-9,.col-12{grid-column:span 12!important;}
+
+      /* Stats row — 2 columns on tablet, handled below for phone */
+      .stats-row{grid-template-columns:1fr 1fr!important;gap:10px;}
+
+      /* Gauges — side by side and compact */
+      .gauges-row{flex-direction:row;gap:8px;}
+      .gauge-item{flex:1;padding:10px 6px;}
+      .gauge-wrap{width:100px;height:62px;}
+      .gauge-val{font-size:15px;}
+      .gauge-label{font-size:10px;}
+      .gauge-status{font-size:10px;}
+
+      /* Cards */
+      .card-header{flex-wrap:wrap;gap:8px;padding:12px 16px 10px;}
+      .card-body{padding:12px 16px!important;}
+      .card-title{font-size:12px;}
+
+      /* Filters */
+      .filter-bar{flex-direction:column;align-items:stretch!important;gap:8px;}
+      .filter-bar select,.filter-bar input[type=date]{width:100%;font-size:12px;}
+
+      /* Profile layout */
+      .profile-layout{grid-template-columns:1fr!important;}
+      .form-grid-2,.form-grid-3{grid-template-columns:1fr!important;}
+      /* Profile page mobile fixes */
+      .profile-hero{padding:14px;}
+      .profile-hero-info h2{font-size:14px;}
+      .field-row{padding:9px 14px;}
+      .field-label{font-size:11px;}
+      .field-val{font-size:12px;max-width:55%;}
+      .field-val.mono{font-size:11px;}
+      .action-bar{padding:10px 14px;gap:6px;}
+      .action-bar .btn{flex:1;justify-content:center;}
+      /* Manage users table scroll */
+      .card .card-body{overflow-x:auto;}
+      .tbl{min-width:420px;font-size:12px;}
+      .tbl thead th,.tbl tbody td{padding:8px 10px;}
+
+      /* Tabs */
+      .tab-bar{overflow-x:auto;width:100%;-webkit-overflow-scrolling:touch;}
+      .tab{padding:6px 14px;font-size:12px;}
+
+      /* Tables — horizontal scroll */
+      div[style*="overflow-x"]{overflow-x:auto!important;-webkit-overflow-scrolling:touch;}
+      table.tbl{font-size:12px;min-width:480px;}
+      .tbl thead th,.tbl tbody td{padding:8px 10px;}
+
+      /* Devices */
+      .device-row{padding:8px 10px;}
+      .device-name{font-size:12px;}
+      .mode-row{padding:8px 12px;}
+
+      /* Sensor status bar */
+      .sensor-status-bar{flex-wrap:wrap;gap:6px;padding:10px 14px;}
+      .sensor-reading{font-size:12px;}
+
+      /* Stat cards */
+      .stat-card{padding:12px 14px;gap:10px;}
+      .stat-icon{width:36px;height:36px;font-size:14px;}
+      .stat-val{font-size:18px;}
+      .stat-label{font-size:10px;}
+    }
+
+    @media(max-width:480px){
+      /* Single column stats on small phones */
+      .stats-row{grid-template-columns:1fr!important;}
+
+      /* Topbar compact */
+      .topbar{height:48px;}
+      .topbar-title{font-size:13px;}
+      .topbar-time{display:none;}
+
+      /* Gauges still side by side but smaller */
+      .gauge-wrap{width:88px;height:55px;}
+      .gauge-val{font-size:13px;}
+
+      /* Page */
+      .page{padding:10px!important;}
+      .grid{padding:10px!important;gap:8px!important;}
+
+      /* Buttons */
+      .btn{padding:7px 12px;font-size:12px;}
+      .btn-sm{padding:4px 8px;font-size:11px;}
+    }
+
 </style>
 </head>
 <body>
+<button class="hamburger" id="hamburger" aria-label="Menu">
+  <span></span><span></span><span></span>
+</button>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
 
 <!-- ── SIDEBAR ── -->
 <aside class="sidebar">
@@ -353,6 +510,7 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
       <div class="sidebar-logo-text">MushroomOS</div>
       <div class="sidebar-logo-sub">Cultivation System</div>
     </div>
+    <button class="sidebar-close" id="sidebarClose" aria-label="Close menu"><i class="fas fa-xmark"></i></button>
   </div>
   <nav class="sidebar-nav">
     <a href="dashboard.php"><i class="fas fa-table-cells-large"></i> Dashboard</a>
@@ -426,10 +584,10 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
 
           <!-- Action Bar -->
           <div class="action-bar">
-            <button class="btn btn-ghost" id="editToggle"><i class="fas fa-pen"></i> Edit Profile</button>
-            <button class="btn btn-ghost" id="passwdToggle"><i class="fas fa-lock"></i> Change Password</button>
+            <button class="btn btn-ghost" id="editToggle"><i class="fas fa-pen"></i><span class="btn-label"> Edit Profile</span></button>
+            <button class="btn btn-ghost" id="passwdToggle"><i class="fas fa-lock"></i><span class="btn-label"> Change Password</span></button>
             <?php if ($isOwner): ?>
-              <button class="btn btn-primary" id="openAddUser"><i class="fas fa-user-plus"></i> Add User</button>
+              <button class="btn btn-primary" id="openAddUser"><i class="fas fa-user-plus"></i><span class="btn-label"> Add User</span></button>
             <?php endif; ?>
           </div>
 
@@ -811,6 +969,34 @@ document.getElementById('editUserForm')?.addEventListener('submit', () => {
   document.getElementById('editModalMsg').textContent = 'Updating user…';
   document.getElementById('editModalMsg').className = 'modal-msg ok';
 });
+
+// ── Mobile sidebar toggle ──
+(function(){
+  const hamburger = document.getElementById('hamburger');
+  const sidebar   = document.querySelector('.sidebar');
+  const overlay   = document.getElementById('sidebarOverlay');
+  if(!hamburger||!sidebar||!overlay) return;
+
+  function openSidebar(){
+    sidebar.classList.add('open');
+    overlay.classList.add('open');
+    hamburger.classList.add('open');
+  }
+  function closeSidebar(){
+    sidebar.classList.remove('open');
+    overlay.classList.remove('open');
+    hamburger.classList.remove('open');
+  }
+
+  hamburger.addEventListener('click', ()=> sidebar.classList.contains('open') ? closeSidebar() : openSidebar());
+  overlay.addEventListener('click', closeSidebar);
+
+  // Close sidebar when a nav link is tapped on mobile
+  sidebar.querySelectorAll('.sidebar-nav a').forEach(a => {
+    a.addEventListener('click', ()=>{ if(window.innerWidth<=768) closeSidebar(); });
+  });
+})();
+
 </script>
 </body>
 </html>

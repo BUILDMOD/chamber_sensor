@@ -148,7 +148,9 @@ function ns($ns, $k, $default = '') { return htmlspecialchars($ns[$k] ?? $defaul
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;}
 .sidebar{position:fixed;inset:0 auto 0 0;width:220px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:50;}
-.sidebar-logo{padding:22px 20px 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);}
+.sidebar-logo{padding:22px 20px 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);position:relative;}
+    .sidebar-close{display:none;position:absolute;top:50%;right:14px;transform:translateY(-50%);width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);align-items:center;justify-content:center;cursor:pointer;color:var(--muted);font-size:13px;transition:all .15s;}
+    .sidebar-close:hover{background:var(--red-lt);color:var(--red);border-color:var(--red);}
 .sidebar-logo img{width:36px;height:36px;border-radius:8px;}
 .sidebar-logo-text{font-size:14px;font-weight:700;color:var(--text);line-height:1.2;}
 .sidebar-logo-sub{font-size:11px;color:var(--muted);}
@@ -158,11 +160,11 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 .sidebar-nav a:hover{background:var(--surface2);color:var(--text);}
 .sidebar-nav a.active{background:var(--green-lt);color:var(--green);font-weight:600;}
 .sidebar-nav .nav-bottom{margin-top:auto;padding-top:8px;border-top:1px solid var(--border);}
-.main{margin-left:220px;min-height:100vh;}
-.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:40;}
+.main{margin-left:220px;min-height:100vh;width:calc(100% - 220px);box-sizing:border-box;}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:30;}
 .topbar-title{font-size:15px;font-weight:700;color:var(--text);}
 .topbar-time{font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);background:var(--surface2);padding:5px 12px;border-radius:20px;border:1px solid var(--border);}
-.page{padding:24px 28px;max-width:900px;}
+.page{padding:24px 28px;max-width:1280px;width:100%;box-sizing:border-box;}
 .flash{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:8px;font-size:13px;font-weight:600;margin-bottom:16px;}
 .flash-ok{background:var(--green-lt);color:var(--green);}
 .flash-err{background:var(--red-lt);color:var(--red);}
@@ -185,6 +187,8 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 .form-group input:focus,.form-group select:focus{outline:none;border-color:var(--green);background:var(--surface);}
 .form-group input:disabled{opacity:.5;cursor:not-allowed;}
 .form-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
+.form-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding-top:4px;}
+.form-footer-btns{display:flex;gap:10px;flex-wrap:wrap;}
 .form-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px;}
 .checkbox-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);}
 .checkbox-row:last-child{border-bottom:none;}
@@ -209,14 +213,165 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
 .toggle-switch input:checked+.toggle-slider::before{transform:translateX(16px);}
 .access-notice{background:var(--amber-lt);border:1px solid rgba(180,83,9,.15);border-radius:8px;padding:14px 16px;font-size:13px;color:var(--amber);display:flex;align-items:center;gap:10px;}
 @media(max-width:700px){.threshold-row{grid-template-columns:1fr;}.form-grid-2,.form-grid-3{grid-template-columns:1fr;}}
+
+    /* ============================================================
+       RESPONSIVE / MOBILE
+       ============================================================ */
+
+    /* Hamburger button */
+    .hamburger{
+      display:none;position:fixed;top:4px;left:10px;z-index:500;
+      width:38px;height:38px;border-radius:9px;
+      background:var(--surface);border:1px solid var(--border);
+      box-shadow:var(--shadow);
+      align-items:center;justify-content:center;
+      cursor:pointer;flex-direction:column;gap:4px;padding:9px;
+      touch-action:manipulation;
+      pointer-events:auto;
+    }
+    .hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
+    .hamburger.open span:nth-child(1){transform:translateY(6px) rotate(45deg);}
+    .hamburger.open span:nth-child(2){opacity:0;transform:scaleX(0);}
+    .hamburger.open span:nth-child(3){transform:translateY(-6px) rotate(-45deg);}
+
+    /* Overlay behind sidebar */
+    .sidebar-overlay{
+      display:none;position:fixed;inset:0;
+      background:rgba(0,0,0,.4);z-index:99;
+      backdrop-filter:blur(3px);
+      -webkit-backdrop-filter:blur(3px);
+    }
+    .sidebar-overlay.open{display:block;}
+
+    @media(max-width:768px){
+      /* Show hamburger */
+      .hamburger{display:flex;}
+      .sidebar-close{display:flex;}
+
+      /* Sidebar slides in */
+      .sidebar{
+        transform:translateX(-100%);
+        transition:transform .28s cubic-bezier(.4,0,.2,1);
+        z-index:100;
+        box-shadow:4px 0 24px rgba(0,0,0,.12);
+      }
+      .sidebar.open{transform:translateX(0);}
+
+      /* Main fills full width */
+      .main{margin-left:0!important;width:100%!important;overflow-x:hidden;}
+
+      /* Topbar — room for hamburger on left */
+      .topbar{padding:0 10px 0 58px;height:52px;gap:6px;}
+      .topbar-title{font-size:14px;}
+      .topbar-right{gap:6px;}
+      .topbar-time{font-size:11px;padding:4px 10px;}
+      .user-badge{padding:4px 10px;font-size:11px;}
+      .user-badge .role-pill{display:none;}
+      /* Hide button text labels on mobile, show icon only */
+      .btn-label{display:none;}
+      .btn{padding:7px 10px;gap:0;}
+      .topbar .btn{min-width:34px;justify-content:center;}
+
+      /* Page & grid padding */
+      .page{padding:14px!important;}
+      .grid{padding:14px!important;gap:10px!important;}
+
+      /* All columns go full width */
+      .col-3,.col-4,.col-5,.col-6,.col-7,.col-8,.col-9,.col-12{grid-column:span 12!important;}
+
+      /* Stats row — 2 columns on tablet, handled below for phone */
+      .stats-row{grid-template-columns:1fr 1fr!important;gap:10px;}
+
+      /* Gauges — side by side and compact */
+      .gauges-row{flex-direction:row;gap:8px;}
+      .gauge-item{flex:1;padding:10px 6px;}
+      .gauge-wrap{width:100px;height:62px;}
+      .gauge-val{font-size:15px;}
+      .gauge-label{font-size:10px;}
+      .gauge-status{font-size:10px;}
+
+      /* Cards */
+      .card-header{flex-wrap:wrap;gap:8px;padding:12px 16px 10px;}
+      .card-body{padding:12px 16px!important;}
+      .card-title{font-size:12px;}
+
+      /* Filters */
+      .filter-bar{flex-direction:column;align-items:stretch!important;gap:8px;}
+      .filter-bar select,.filter-bar input[type=date]{width:100%;font-size:12px;}
+
+      /* Profile layout */
+      .profile-layout{grid-template-columns:1fr!important;}
+      .form-grid-2,.form-grid-3{grid-template-columns:1fr!important;}
+      /* Settings: full-width buttons on mobile */
+      .form-footer{flex-direction:column!important;align-items:stretch!important;}
+      .form-footer-btns{flex-direction:row!important;width:100%;}
+      .form-footer-btns .btn{flex:1;justify-content:center;}
+      .form-footer span{text-align:center;font-size:11px;}
+      /* Threshold row single column */
+      .threshold-row{grid-template-columns:1fr 1fr!important;gap:8px!important;}
+      .threshold-row>*:first-child{grid-column:span 2;}
+
+      /* Tabs */
+      .tab-bar{overflow-x:auto;width:100%;-webkit-overflow-scrolling:touch;}
+      .tab{padding:6px 14px;font-size:12px;}
+
+      /* Tables — horizontal scroll */
+      div[style*="overflow-x"]{overflow-x:auto!important;-webkit-overflow-scrolling:touch;}
+      table.tbl{font-size:12px;min-width:480px;}
+      .tbl thead th,.tbl tbody td{padding:8px 10px;}
+
+      /* Devices */
+      .device-row{padding:8px 10px;}
+      .device-name{font-size:12px;}
+      .mode-row{padding:8px 12px;}
+
+      /* Sensor status bar */
+      .sensor-status-bar{flex-wrap:wrap;gap:6px;padding:10px 14px;}
+      .sensor-reading{font-size:12px;}
+
+      /* Stat cards */
+      .stat-card{padding:12px 14px;gap:10px;}
+      .stat-icon{width:36px;height:36px;font-size:14px;}
+      .stat-val{font-size:18px;}
+      .stat-label{font-size:10px;}
+    }
+
+    @media(max-width:480px){
+      /* Single column stats on small phones */
+      .stats-row{grid-template-columns:1fr!important;}
+
+      /* Topbar compact */
+      .topbar{height:48px;}
+      .topbar-title{font-size:13px;}
+      .topbar-time{display:none;}
+
+      /* Gauges still side by side but smaller */
+      .gauge-wrap{width:88px;height:55px;}
+      .gauge-val{font-size:13px;}
+
+      /* Page */
+      .page{padding:10px!important;}
+      .grid{padding:10px!important;gap:8px!important;}
+
+      /* Buttons */
+      .btn{padding:7px 12px;font-size:12px;}
+      .btn-sm{padding:4px 8px;font-size:11px;}
+    }
+
 </style>
 </head>
 <body>
+<button class="hamburger" id="hamburger" aria-label="Menu">
+  <span></span><span></span><span></span>
+</button>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
 
 <aside class="sidebar">
   <div class="sidebar-logo">
     <img src="assets/img/logo.png" alt="logo">
     <div><div class="sidebar-logo-text">MushroomOS</div><div class="sidebar-logo-sub">Cultivation System</div></div>
+    <button class="sidebar-close" id="sidebarClose" aria-label="Close menu"><i class="fas fa-xmark"></i></button>
   </div>
   <nav class="sidebar-nav">
     <a href="dashboard.php"><i class="fas fa-table-cells-large"></i> Dashboard</a>
@@ -284,7 +439,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
           <?php endforeach; ?>
           <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">Alerts fire when readings stay outside the range. Defaults: Temperature 22–28°C, Humidity 85–95%.</p>
           <?php if ($isOwner): ?>
-          <button type="submit" class="btn btn-primary"><i class="fas fa-floppy-disk"></i> Save Thresholds</button>
+          <button type="submit" class="btn btn-primary"><i class="fas fa-floppy-disk"></i><span class="btn-label"> Save Thresholds</span></button>
           <?php endif; ?>
         </form>
       </div>
@@ -348,12 +503,12 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
 
           <?php if ($isOwner): ?>
           <div class="form-footer">
-            <div style="display:flex;gap:10px;">
+            <div class="form-footer-btns">
               <button type="button" class="btn btn-primary" onclick="submitSmtp('save')">
-                <i class="fas fa-floppy-disk"></i> Save Settings
+                <i class="fas fa-floppy-disk"></i><span class="btn-label"> Save Settings</span>
               </button>
               <button type="button" class="btn btn-blue" onclick="submitSmtp('test')">
-                <i class="fas fa-paper-plane"></i> Send Test Email
+                <i class="fas fa-paper-plane"></i><span class="btn-label"> Send Test Email</span>
               </button>
             </div>
             <span style="font-size:12px;color:var(--muted);">Powered by PHPMailer.</span>
@@ -423,6 +578,34 @@ function submitSmtp(action) {
   }
   document.getElementById('smtpForm').submit();
 }
+
+// ── Mobile sidebar toggle ──
+(function(){
+  const hamburger = document.getElementById('hamburger');
+  const sidebar   = document.querySelector('.sidebar');
+  const overlay   = document.getElementById('sidebarOverlay');
+  if(!hamburger||!sidebar||!overlay) return;
+
+  function openSidebar(){
+    sidebar.classList.add('open');
+    overlay.classList.add('open');
+    hamburger.classList.add('open');
+  }
+  function closeSidebar(){
+    sidebar.classList.remove('open');
+    overlay.classList.remove('open');
+    hamburger.classList.remove('open');
+  }
+
+  hamburger.addEventListener('click', ()=> sidebar.classList.contains('open') ? closeSidebar() : openSidebar());
+  overlay.addEventListener('click', closeSidebar);
+
+  // Close sidebar when a nav link is tapped on mobile
+  sidebar.querySelectorAll('.sidebar-nav a').forEach(a => {
+    a.addEventListener('click', ()=>{ if(window.innerWidth<=768) closeSidebar(); });
+  });
+})();
+
 </script>
 
 
