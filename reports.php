@@ -150,7 +150,9 @@ function navUrl($view, $year, $month, $day) {
 
     /* SIDEBAR */
     .sidebar{position:fixed;inset:0 auto 0 0;width:220px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:50;}
-    .sidebar-logo{padding:22px 20px 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);}
+    .sidebar-logo{padding:22px 20px 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);position:relative;}
+    .sidebar-close{display:none;position:absolute;top:50%;right:14px;transform:translateY(-50%);width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);align-items:center;justify-content:center;cursor:pointer;color:var(--muted);font-size:13px;transition:all .15s;}
+    .sidebar-close:hover{background:var(--red-lt);color:var(--red);border-color:var(--red);}
     .sidebar-logo img{width:36px;height:36px;border-radius:8px;}
     .sidebar-logo-text{font-size:14px;font-weight:700;color:var(--text);line-height:1.2;}
     .sidebar-logo-sub{font-size:11px;color:var(--muted);}
@@ -161,14 +163,14 @@ function navUrl($view, $year, $month, $day) {
     .sidebar-nav a.active{background:var(--green-lt);color:var(--green);font-weight:600;}
 .sidebar-nav .nav-bottom{margin-top:auto;padding-top:8px;border-top:1px solid var(--border);}
 
-    .main{margin-left:220px;min-height:100vh;}
+    .main{margin-left:220px;min-height:100vh;width:calc(100% - 220px);box-sizing:border-box;}
 
-    .topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:40;}
+    .topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:30;}
     .topbar-title{font-size:15px;font-weight:700;color:var(--text);letter-spacing:-.2px;}
     .topbar-right{display:flex;align-items:center;gap:10px;}
     .topbar-time{font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);background:var(--surface2);padding:5px 12px;border-radius:20px;border:1px solid var(--border);}
 
-    .page{padding:24px 28px;max-width:1280px;display:flex;flex-direction:column;gap:16px;}
+    .page{padding:24px 28px;max-width:1280px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:16px;}
 
     /* ── CALENDAR NAV ── */
     .cal-nav{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden;}
@@ -295,9 +297,167 @@ function navUrl($view, $year, $month, $day) {
     .cal-legend{display:flex;align-items:center;gap:16px;padding:10px 18px;border-top:1px solid var(--border);background:var(--surface2);}
     .cal-legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);}
     .cal-legend-dot{width:10px;height:10px;border-radius:3px;}
-  </style>
+  
+    /* ============================================================
+       RESPONSIVE / MOBILE
+       ============================================================ */
+
+    /* Hamburger button */
+    .hamburger{
+      display:none;position:fixed;top:4px;left:10px;z-index:600;pointer-events:auto;
+      width:38px;height:38px;border-radius:9px;
+      background:var(--surface);border:1px solid var(--border);
+      box-shadow:var(--shadow);
+      align-items:center;justify-content:center;
+      cursor:pointer;flex-direction:column;gap:4px;padding:9px;
+      touch-action:manipulation;
+    }
+    .hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
+    .hamburger.open span:nth-child(1){transform:translateY(6px) rotate(45deg);}
+    .hamburger.open span:nth-child(2){opacity:0;transform:scaleX(0);}
+    .hamburger.open span:nth-child(3){transform:translateY(-6px) rotate(-45deg);}
+
+    /* Overlay behind sidebar */
+    .sidebar-overlay{
+      display:none;position:fixed;inset:0;
+      background:rgba(0,0,0,.4);z-index:99;
+      backdrop-filter:blur(3px);
+      -webkit-backdrop-filter:blur(3px);
+    }
+    .sidebar-overlay.open{display:block;}
+
+    @media(max-width:768px){
+      /* Hamburger visible */
+      .hamburger{display:flex;}
+
+      /* Sidebar slides in */
+      .sidebar{
+        transform:translateX(-100%);
+        transition:transform .28s cubic-bezier(.4,0,.2,1);
+        z-index:100;
+        box-shadow:4px 0 24px rgba(0,0,0,.12);
+      }
+      .sidebar.open{transform:translateX(0);}
+
+      /* Main fills full width */
+      .main{margin-left:0!important;width:100%!important;}
+
+      /* Topbar */
+      .topbar{padding:0 10px 0 58px;height:52px;position:fixed!important;top:0;left:0;right:0;z-index:40;}
+      .topbar-title{font-size:14px;}
+      .topbar-time{font-size:11px;padding:4px 10px;}
+
+      /* Page — push down so hamburger isn't covered by cal-nav */
+      .page{padding:8px!important;padding-top:64px!important;gap:8px!important;overflow-x:hidden;}
+
+      /* ── Calendar Nav ── */
+      .cal-nav-top{padding:8px 12px;flex-wrap:wrap;gap:6px;}
+      .cal-nav-label{font-size:13px;}
+      .cal-nav-controls{gap:4px;}
+      .cal-view-tab{padding:4px 10px;font-size:11px;}
+      .cal-arrow{width:28px;height:28px;font-size:11px;}
+
+      /* Year view: 3 columns on tablet */
+      .cal-year-grid{grid-template-columns:repeat(3,1fr);}
+      .cal-month-tile{padding:10px 12px;}
+      .cmt-name{font-size:11px;}
+      .cmt-stat{font-size:10px;}
+
+      /* Month view: days compact */
+      .cal-month-grid-wrap{padding:6px 10px 10px;}
+      .cal-day{min-height:40px;padding:3px 4px;}
+      .cd-num{font-size:10px;}
+      .cd-temp{font-size:11px;}
+      .cd-hum{font-size:9px;}
+      .cal-dow{font-size:9px;}
+
+      /* Day view */
+      .day-view-wrap{padding:10px 12px;}
+      .day-stat-row{gap:8px;}
+      .day-stat{padding:10px 12px;min-width:0;}
+      .day-stat-label{font-size:10px;}
+      .day-stat-val{font-size:18px;}
+
+      /* Stat strip — stack vertically */
+      .stat-strip{flex-direction:column;}
+      .stat-item{padding:10px 14px;border-right:none;border-bottom:1px solid var(--border);}
+      .stat-item:last-child{border-bottom:none;}
+      .stat-val{font-size:18px;}
+      .stat-label{font-size:10px;}
+
+      /* Health section */
+      .health-wrap{flex-direction:column;align-items:flex-start;padding:10px 12px;gap:10px;}
+      .health-circle{width:90px;height:90px;}
+      .health-score-num{font-size:18px;}
+      .health-details{width:100%;}
+
+      /* Chart */
+      .chart-wrap{padding:10px;}
+      .chart-wrap canvas{max-height:180px;}
+
+      /* Summary box */
+      .summary-box{padding:10px 12px;}
+      .summary-rows{gap:14px;}
+      .summary-row .s-val{font-size:14px;}
+
+      /* Card headers */
+      .card-header{flex-wrap:wrap;gap:6px;padding:10px 12px 8px;}
+      .card-title{font-size:12px;}
+      .card-sub{font-size:11px;}
+
+      /* CSV button */
+      .csv-btn{padding:5px 10px;font-size:11px;}
+
+      /* Tables */
+      .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+      table{min-width:460px;font-size:12px;}
+      thead th{padding:8px 10px;font-size:10px;}
+      tbody td{padding:8px 10px;font-size:11px;}
+
+      /* Legend */
+      .cal-legend{flex-wrap:wrap;gap:8px;padding:8px 12px;}
+      .cal-legend-item{font-size:10px;}
+    }
+
+    @media(max-width:480px){
+      .topbar{height:48px;position:fixed!important;top:0;left:0;right:0;}
+      .topbar-title{font-size:13px;}
+      .topbar-time{display:none;}
+
+      .page{padding:6px!important;padding-top:58px!important;gap:6px!important;overflow-x:hidden;}
+
+      /* Year view: 2 columns on small phone */
+      .cal-year-grid{grid-template-columns:repeat(2,1fr);}
+      .cal-month-tile{padding:6px 8px;}
+
+      /* Month view: ultra compact */
+      .cal-day{min-height:38px;padding:3px 4px;}
+      .cd-temp{font-size:10px;}
+      .cd-hum{display:none;}
+
+      /* Day stats: 2 col grid */
+      .day-stat-row{display:grid;grid-template-columns:1fr 1fr;}
+      .day-stat-val{font-size:16px;}
+
+      /* Health */
+      .health-circle{width:80px;height:80px;}
+      .health-score-num{font-size:16px;}
+
+      /* Chart smaller */
+      .chart-wrap canvas{max-height:150px;}
+
+      /* Summary rows: 2 col grid */
+      .summary-rows{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    }
+
+</style>
 </head>
 <body>
+<button class="hamburger" id="hamburger" aria-label="Menu">
+  <span></span><span></span><span></span>
+</button>
+<div class="sidebar-overlay" id="sidebarOverlay"></div>
+
 
 <!-- SIDEBAR -->
 <aside class="sidebar">
@@ -307,6 +467,7 @@ function navUrl($view, $year, $month, $day) {
       <div class="sidebar-logo-text">MushroomOS</div>
       <div class="sidebar-logo-sub">Cultivation System</div>
     </div>
+    <button class="sidebar-close" id="sidebarClose" aria-label="Close menu"><i class="fas fa-xmark"></i></button>
   </div>
   <nav class="sidebar-nav">
     <a href="dashboard.php"><i class="fas fa-table-cells-large"></i> Dashboard</a>
@@ -731,6 +892,38 @@ if (isset($_GET['export']) && $_GET['export'] === 'sensor_csv' && !empty($data))
     options:{responsive:true,maintainAspectRatio:true,interaction:{mode:'index',intersect:false},plugins:{legend:{labels:{font:{family:'DM Sans',size:12},color:'#6e7681',boxWidth:12,boxHeight:12}},tooltip:{backgroundColor:'#fff',borderColor:'rgba(0,0,0,0.08)',borderWidth:1,titleColor:'#0d1117',bodyColor:'#6e7681',padding:12,cornerRadius:8,callbacks:{label:ctx=>{const v=ctx.parsed.y;return` ${ctx.dataset.label}: ${v>=0?'+':''}${v.toFixed(2)}`;}}}}},scales:{x:{grid:{display:false},ticks:{font:{family:'DM Sans',size:11},color:'#6e7681'}},y:{position:'left',grid:{color:'rgba(0,0,0,0.05)'},ticks:{font:{family:'DM Mono',size:11},color:'#6e7681',callback:v=>(v>=0?'+':'')+v.toFixed(1)+'°'}},y1:{position:'right',grid:{drawOnChartArea:false},ticks:{font:{family:'DM Mono',size:11},color:'#6e7681',callback:v=>(v>=0?'+':'')+v.toFixed(1)+'%'}}}}
   });
 })();
+
+// ── Mobile sidebar toggle ──
+document.addEventListener('DOMContentLoaded', function(){
+  const hamburger = document.getElementById('hamburger');
+  const sidebar   = document.querySelector('.sidebar');
+  const overlay   = document.getElementById('sidebarOverlay');
+  if(!hamburger || !sidebar || !overlay) return;
+
+  function openSidebar(){
+    sidebar.classList.add('open');
+    overlay.classList.add('open');
+    hamburger.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+  function closeSidebar(){
+    sidebar.classList.remove('open');
+    overlay.classList.remove('open');
+    hamburger.classList.remove('open');
+    document.body.style.overflow = '';
+  }
+
+  hamburger.addEventListener('click', function(e){
+    e.stopPropagation();
+    sidebar.classList.contains('open') ? closeSidebar() : openSidebar();
+  });
+  overlay.addEventListener('click', closeSidebar);
+
+  sidebar.querySelectorAll('.sidebar-nav a').forEach(function(a){
+    a.addEventListener('click', function(){ if(window.innerWidth<=768) closeSidebar(); });
+  });
+});
+
 </script>
 </body>
 </html>
