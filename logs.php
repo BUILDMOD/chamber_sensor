@@ -103,7 +103,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 .sidebar-logo img{width:36px;height:36px;border-radius:8px;}
 .sidebar-logo-text{font-size:14px;font-weight:700;color:var(--text);line-height:1.2;}
 .sidebar-logo-sub{font-size:11px;color:var(--muted);}
-.sidebar-nav{flex:1;padding:12px 10px;display:flex;flex-direction:column;gap:1px;overflow-y:auto;}
+.sidebar-nav{flex:1;padding:16px 12px;display:flex;flex-direction:column;gap:2px;}
 .sidebar-nav a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:var(--muted);text-decoration:none;font-size:13.5px;font-weight:500;transition:all .15s;}
 .sidebar-nav a i{width:16px;text-align:center;font-size:13px;}
 .sidebar-nav a:hover{background:var(--surface2);color:var(--text);}
@@ -175,7 +175,6 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
   <nav class="sidebar-nav">
     <a href="dashboard.php"><i class="fas fa-table-cells-large"></i> Dashboard</a>
     <a href="reports.php"><i class="fas fa-chart-line"></i> Reports</a>
-    <a href="harvest.php"><i class="fas fa-seedling"></i> Harvest & Batches</a>
     <a href="automation.php"><i class="fas fa-robot"></i> Automation</a>
     <a href="logs.php" class="active"><i class="fas fa-list-check"></i> Logs</a>
     <a href="settings.php"><i class="fas fa-gear"></i> Settings</a>

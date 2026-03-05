@@ -12,11 +12,7 @@ if (!$currentUsername) { header('Location: index.php'); exit; }
 function logActivity($conn, $userId, $action) {
     $ip = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
 
-    // Write to activity_logs (used by profile sidebar)
-    $stmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, ip_address) VALUES (?, ?, ?)");
-    if ($stmt) { $stmt->bind_param("iss", $userId, $action, $ip); $stmt->execute(); $stmt->close(); }
-
-    // Bug 4 fix: also write to system_logs (read by logs.php)
+    // Write to system_logs (read by logs.php)
     $conn->query("CREATE TABLE IF NOT EXISTS system_logs (
         id INT AUTO_INCREMENT PRIMARY KEY,
         event_type VARCHAR(50) NOT NULL,
@@ -155,13 +151,6 @@ $latest_sensor = null;
 $ls = $conn->query("SELECT temperature, humidity, timestamp FROM sensor_data ORDER BY id DESC LIMIT 1");
 if ($ls && $ls->num_rows > 0) $latest_sensor = $ls->fetch_assoc();
 
-// Activity logs
-$logs = [];
-if ($user) {
-    $lq = $conn->prepare("SELECT action, timestamp FROM activity_logs WHERE user_id = ? ORDER BY timestamp DESC LIMIT 10");
-    if ($lq) { $lq->bind_param("i",$user['id']); $lq->execute(); $lr=$lq->get_result(); while ($row=$lr->fetch_assoc()) $logs[]=$row; $lq->close(); }
-}
-
 // Pending users
 $pending_users = [];
 if (isset($_SESSION['role']) && $_SESSION['role'] === 'owner') {
@@ -222,14 +211,14 @@ body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); col
 .sidebar-nav a i { width: 16px; text-align: center; font-size: 13px; }
 .sidebar-nav a:hover  { background: var(--surface2); color: var(--text); }
 .sidebar-nav a.active { background: var(--green-lt); color: var(--green); font-weight: 600; }
-.sidebar-nav .nav-bottom{margin-top:auto;padding-top:8px;border-top:1px solid var(--border);}
+.sidebar-nav .nav-bottom { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); }
 
 /* ── MAIN ── */
-.main { margin-left: 220px; min-height: 100vh; }
+.main { margin-left: 220px; min-height: 100vh; width: calc(100% - 220px); box-sizing: border-box; }
 .topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 28px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 40; }
 .topbar-title { font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -.2px; }
 .topbar-time { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--muted); background: var(--surface2); padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); }
-.page { padding: 24px 28px; max-width: 1200px; }
+.page { padding: 24px 28px; max-width: 1280px; width: 100%; box-sizing: border-box; }
 
 /* ── FLASH MESSAGES ── */
 .flash { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; margin-bottom: 16px; }
@@ -317,12 +306,6 @@ body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); col
 .sensor-label { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
 
 /* ── ACTIVITY LOG ── */
-.log-list { display: flex; flex-direction: column; }
-.log-item { display: flex; gap: 10px; padding: 10px 20px; border-bottom: 1px solid var(--border); align-items: flex-start; }
-.log-item:last-child { border-bottom: none; }
-.log-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; margin-top: 5px; }
-.log-action { font-size: 12.5px; font-weight: 500; color: var(--text); line-height: 1.4; }
-.log-time   { font-size: 11px; color: var(--muted); font-family: 'DM Mono', monospace; margin-top: 2px; }
 .empty-state { text-align: center; padding: 28px 20px; color: var(--muted); }
 .empty-state i { font-size: 22px; display: block; margin-bottom: 6px; opacity: .35; }
 .empty-state span { font-size: 12px; }
@@ -374,7 +357,6 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
   <nav class="sidebar-nav">
     <a href="dashboard.php"><i class="fas fa-table-cells-large"></i> Dashboard</a>
     <a href="reports.php"><i class="fas fa-chart-line"></i> Reports</a>
-    <a href="harvest.php"><i class="fas fa-seedling"></i> Harvest & Batches</a>
     <a href="automation.php"><i class="fas fa-robot"></i> Automation</a>
     <a href="logs.php"><i class="fas fa-list-check"></i> Logs</a>
     <a href="settings.php"><i class="fas fa-gear"></i> Settings</a>
@@ -665,30 +647,6 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
             <div class="empty-state"><i class="fas fa-microchip"></i><span>No sensor data.</span></div>
           <?php endif; ?>
         </div>
-
-        <!-- Activity Log -->
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title"><span class="icon icon-amber"><i class="fas fa-clock-rotate-left"></i></span> Activity Log</div>
-            <span style="font-size:11px;color:var(--muted);">Last 10</span>
-          </div>
-          <?php if (empty($logs)): ?>
-            <div class="empty-state"><i class="fas fa-clock"></i><span>No activity yet.</span></div>
-          <?php else: ?>
-          <div class="log-list">
-            <?php foreach ($logs as $log): ?>
-            <div class="log-item">
-              <div class="log-dot"></div>
-              <div>
-                <div class="log-action"><?= htmlspecialchars($log['action']) ?></div>
-                <div class="log-time"><?= htmlspecialchars($log['timestamp']) ?></div>
-              </div>
-            </div>
-            <?php endforeach; ?>
-          </div>
-          <?php endif; ?>
-        </div>
-
       </div><!-- end profile-side -->
     </div><!-- end profile-layout -->
   </div><!-- end page -->

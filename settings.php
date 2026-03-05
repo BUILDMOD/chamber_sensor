@@ -221,7 +221,6 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
   <nav class="sidebar-nav">
     <a href="dashboard.php"><i class="fas fa-table-cells-large"></i> Dashboard</a>
     <a href="reports.php"><i class="fas fa-chart-line"></i> Reports</a>
-    <a href="harvest.php"><i class="fas fa-seedling"></i> Harvest & Batches</a>
     <a href="automation.php"><i class="fas fa-robot"></i> Automation</a>
     <a href="logs.php"><i class="fas fa-list-check"></i> Logs</a>
     <a href="settings.php" class="active"><i class="fas fa-gear"></i> Settings</a>
