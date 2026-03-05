@@ -338,6 +338,8 @@ function navUrl($view, $year, $month, $day) {
         box-shadow:4px 0 24px rgba(0,0,0,.12);
       }
       .sidebar.open{transform:translateX(0);}
+      .hamburger.open{display:none!important;}
+      .sidebar.open ~ * .hamburger, .hamburger.open{opacity:0;pointer-events:none;}
 
       /* Main fills full width */
       .main{margin-left:0!important;width:100%!important;}
@@ -894,10 +896,11 @@ if (isset($_GET['export']) && $_GET['export'] === 'sensor_csv' && !empty($data))
 })();
 
 // ── Mobile sidebar toggle ──
-document.addEventListener('DOMContentLoaded', function(){
+(function(){
   const hamburger = document.getElementById('hamburger');
   const sidebar   = document.querySelector('.sidebar');
   const overlay   = document.getElementById('sidebarOverlay');
+  const closeBtn  = document.getElementById('sidebarClose');
   if(!hamburger || !sidebar || !overlay) return;
 
   function openSidebar(){
@@ -917,12 +920,13 @@ document.addEventListener('DOMContentLoaded', function(){
     e.stopPropagation();
     sidebar.classList.contains('open') ? closeSidebar() : openSidebar();
   });
+  if(closeBtn) closeBtn.addEventListener('click', closeSidebar);
   overlay.addEventListener('click', closeSidebar);
 
   sidebar.querySelectorAll('.sidebar-nav a').forEach(function(a){
     a.addEventListener('click', function(){ if(window.innerWidth<=768) closeSidebar(); });
   });
-});
+})();
 
 </script>
 </body>
