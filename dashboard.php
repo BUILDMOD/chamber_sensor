@@ -61,7 +61,7 @@ $isOwner = $sessionRole === 'owner';
     .sidebar-nav a i{width:16px;text-align:center;font-size:13px;}
     .sidebar-nav a:hover{background:var(--surface2);color:var(--text);}
     .sidebar-nav a.active{background:var(--green-lt);color:var(--green);font-weight:600;}
-.sidebar-nav .nav-bottom{margin-top:auto;padding-top:8px;border-top:1px solid var(--border);}
+    .sidebar-nav .nav-bottom{margin-top:auto;padding-top:8px;border-top:1px solid var(--border);}
 
     /* MAIN */
     .main{margin-left:220px;min-height:100vh;}
@@ -216,6 +216,23 @@ $isOwner = $sessionRole === 'owner';
     .leg-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
     .legend-row span{font-size:12px;color:var(--muted);}
 
+
+
+
+    /* RECORD FORM */
+    .rec-form{display:flex;flex-direction:column;gap:8px;padding:12px;background:var(--surface2);border-radius:8px;margin-bottom:12px;border:1px solid var(--border);}
+    .rec-form-row{display:flex;gap:8px;align-items:center;}
+    .rec-form label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;}
+    .rec-form input[type=number],.rec-form select,.rec-form textarea{flex:1;padding:6px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface);font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;transition:border-color .15s;}
+    .rec-form input:focus,.rec-form select:focus,.rec-form textarea:focus{border-color:var(--green);}
+    .rec-form textarea{resize:none;height:54px;line-height:1.4;}
+    .btn-save-rec{display:inline-flex;align-items:center;gap:6px;padding:7px 16px;border-radius:7px;background:var(--green);color:#fff;font-size:12px;font-weight:700;border:none;cursor:pointer;transition:opacity .15s;font-family:'DM Sans',sans-serif;}
+    .btn-save-rec:hover{opacity:.88;}
+    .btn-save-rec:disabled{opacity:.5;cursor:not-allowed;}
+    .rec-form-msg{font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;display:none;}
+    .rec-form-msg.ok{background:var(--green-lt);color:var(--green);display:block;}
+    .rec-form-msg.err{background:var(--red-lt);color:var(--red);display:block;}
+
     @media(max-width:1024px){.col-3,.col-4,.col-5,.col-6,.col-7{grid-column:span 12;}}
   </style>
 </head>
@@ -233,7 +250,6 @@ $isOwner = $sessionRole === 'owner';
   <nav class="sidebar-nav">
     <a href="dashboard.php" class="active"><i class="fas fa-table-cells-large"></i> Dashboard</a>
     <a href="reports.php"><i class="fas fa-chart-line"></i> Reports</a>
-    <a href="harvest.php"><i class="fas fa-seedling"></i> Harvest & Batches</a>
     <a href="automation.php"><i class="fas fa-robot"></i> Automation</a>
     <a href="logs.php"><i class="fas fa-list-check"></i> Logs</a>
     <a href="settings.php"><i class="fas fa-gear"></i> Settings</a>
@@ -334,17 +350,47 @@ $isOwner = $sessionRole === 'owner';
         </div>
       </div>
       <div class="card-body" style="padding:14px 16px;">
+
+        <!-- Log Form -->
+        <div class="rec-form" id="recForm" style="display:none;">
+          <div class="rec-form-row">
+            <label>Date</label>
+            <span id="recFormDateLabel" style="font-size:12px;font-weight:600;color:var(--text);flex:1;"></span>
+          </div>
+          <div class="rec-form-row">
+            <label>Count</label>
+            <input type="number" id="recCount" min="0" placeholder="e.g. 12">
+            <label style="margin-left:8px;">Stage</label>
+            <select id="recStage">
+              <option value="Spawn Run">Spawn Run</option>
+              <option value="Pinning">Pinning</option>
+              <option value="Fruiting">Fruiting</option>
+              <option value="Harvest">Harvest</option>
+            </select>
+          </div>
+          <div class="rec-form-row">
+            <label>Notes</label>
+            <textarea id="recNotes" placeholder="Optional notes…"></textarea>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <button class="btn-save-rec" id="recSaveBtn"><i class="fas fa-plus"></i> Save Record</button>
+            <span class="rec-form-msg" id="recFormMsg"></span>
+          </div>
+        </div>
+
+        <!-- Records View -->
         <div id="recDetail">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
             <span style="font-size:12px;font-weight:700;color:var(--text);" id="recDetailTitle">
-              Select a date to view records
+              Select a date to view or log records
             </span>
             <button class="detail-clear-btn" id="recClearBtn" style="display:none;">✕ Clear</button>
           </div>
           <div id="recDetailBody">
-            <div class="empty-state"><i class="fas fa-seedling"></i><span>Pick a date above to see records.</span></div>
+            <div class="empty-state"><i class="fas fa-seedling"></i><span>Pick a date above to see or add records.</span></div>
           </div>
         </div>
+
       </div>
     </div>
 
@@ -585,37 +631,106 @@ loadCameraImages();
 setInterval(loadCameraImages,10000);
 
 // ── Records Date Picker ──
-const recPicker = $$('recDatePicker');
-recPicker.addEventListener('change', async function(){
-  const date = this.value;
-  if(!date){ clearRec(); return; }
+// ── Monthly Records ──
+let currentRecDate = null;
+
+async function loadRecords(date) {
   const month = date.slice(0,7);
   const res = await fetch(`get_calendar_data.php?type=records&month=${month}`,{cache:'no-store'});
   const json = await res.json();
   const allData = json.data||[];
-  const dayRecords = allData.filter(r=>r.record_date===date);
-  const d = new Date(date+'T00:00');
-  const label = d.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'});
-  $$('recDetailTitle').textContent = `Records — ${label}`;
-  $$('recClearBtn').style.display = '';
-  $$('recDetailBody').innerHTML = dayRecords.length
+  return allData.filter(r=>r.record_date===date);
+}
+
+function renderRecords(records) {
+  $$('recDetailBody').innerHTML = records.length
     ? `<table class="rec-detail-table">
         <thead><tr><th>Count</th><th>Stage</th><th>Notes</th></tr></thead>
-        <tbody>${dayRecords.map(r=>`<tr>
+        <tbody>${records.map(r=>`<tr>
           <td><span class="count-badge">${r.mushroom_count}</span></td>
           <td><span class="stage-badge">${r.growth_stage}</span></td>
           <td style="color:var(--muted);">${r.notes||'—'}</td>
         </tr>`).join('')}</tbody>
       </table>`
-    : `<p style="font-size:12px;color:var(--muted);padding:8px 0;">No records found for this date.</p>`;
+    : `<p style="font-size:12px;color:var(--muted);padding:8px 0;">No records yet for this date.</p>`;
+}
+
+const recPicker = $$('recDatePicker');
+recPicker.addEventListener('change', async function(){
+  const date = this.value;
+  if(!date){ clearRec(); return; }
+  currentRecDate = date;
+  const d = new Date(date+'T00:00');
+  const label = d.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'});
+  $$('recDetailTitle').textContent = `Records — ${label}`;
+  $$('recClearBtn').style.display = '';
+  // Show log form
+  $$('recForm').style.display = '';
+  $$('recFormDateLabel').textContent = label;
+  $$('recCount').value = '';
+  $$('recNotes').value = '';
+  $$('recFormMsg').className = 'rec-form-msg';
+  $$('recFormMsg').textContent = '';
+  // Load existing records
+  const records = await loadRecords(date);
+  renderRecords(records);
 });
+
 function clearRec(){
   recPicker.value='';
-  $$('recDetailTitle').textContent='Select a date to view records';
+  currentRecDate = null;
+  $$('recDetailTitle').textContent='Select a date to view or log records';
   $$('recClearBtn').style.display='none';
-  $$('recDetailBody').innerHTML='<div class="empty-state"><i class="fas fa-seedling"></i><span>Pick a date above to see records.</span></div>';
+  $$('recForm').style.display='none';
+  $$('recDetailBody').innerHTML='<div class="empty-state"><i class="fas fa-seedling"></i><span>Pick a date above to see or add records.</span></div>';
 }
 $$('recClearBtn').addEventListener('click', clearRec);
+
+// Save record
+$$('recSaveBtn').addEventListener('click', async function(){
+  if (!currentRecDate) return;
+  const count = $$('recCount').value.trim();
+  const stage = $$('recStage').value;
+  const notes = $$('recNotes').value.trim();
+
+  if (!count || isNaN(count) || parseInt(count) < 0) {
+    $$('recFormMsg').className = 'rec-form-msg err';
+    $$('recFormMsg').textContent = 'Please enter a valid mushroom count.';
+    return;
+  }
+
+  this.disabled = true;
+  this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+
+  try {
+    const body = new URLSearchParams({
+      record_date: currentRecDate,
+      mushroom_count: parseInt(count),
+      growth_stage: stage,
+      notes: notes
+    });
+    const r = await fetch('save_record.php', {method:'POST', body});
+    const d = await r.json();
+
+    if (d.success) {
+      $$('recFormMsg').className = 'rec-form-msg ok';
+      $$('recFormMsg').textContent = '✓ Record saved!';
+      $$('recCount').value = '';
+      $$('recNotes').value = '';
+      // Reload records for this date
+      const records = await loadRecords(currentRecDate);
+      renderRecords(records);
+    } else {
+      throw new Error(d.error||'Save failed');
+    }
+  } catch(e) {
+    $$('recFormMsg').className = 'rec-form-msg err';
+    $$('recFormMsg').textContent = '✗ ' + e.message;
+  }
+
+  this.disabled = false;
+  this.innerHTML = '<i class="fas fa-plus"></i> Save Record';
+});
 
 // ── Camera Date Picker ──
 const camPicker = $$('camDatePicker');
@@ -653,6 +768,8 @@ function bindModal(triggerIds,modalId){
 bindModal(['statusInfoIcon'],'statusInfoModal');
 bindModal(['deviceInfoIcon'],'deviceInfoModal');
 bindModal(['alertInfoIcon'],'alertInfoModal');
+
+
 </script>
 </body>
 </html>
