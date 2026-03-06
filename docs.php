@@ -1,524 +1,672 @@
 <?php  
 include 'includes/db_connect.php';
+include 'send_email.php';
 session_start();
+
+$login_error = "";
+$reg_error   = "";
+$reg_success = "";
+
+/* ── LOGIN ── */
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['modal_login'])) {
+    $username = mysqli_real_escape_string($conn, $_POST['username']);
+    $password = $_POST['password'];
+    $stmt = $conn->prepare("SELECT id,fullname,username,password,role,verified FROM users WHERE username=? LIMIT 1");
+    $stmt->bind_param("s", $username);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result && $result->num_rows == 1) {
+        $row = $result->fetch_assoc();
+        if (password_verify($password, $row['password'])) {
+            if ($row['verified'] == 1 || $row['role'] == 'owner') {
+                $_SESSION['user']     = $row['username'];
+                $_SESSION['role']     = $row['role'];
+                $_SESSION['fullname'] = $row['fullname'];
+                $ip  = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+                $usr = $row['username'];
+                $desc = "User '{$usr}' logged in successfully.";
+                $evt = 'login';
+                $ls = $conn->prepare("INSERT INTO system_logs (event_type,description,user,ip_address) VALUES (?,?,?,?)");
+                if ($ls) { $ls->bind_param("ssss",$evt,$desc,$usr,$ip); $ls->execute(); $ls->close(); }
+                header("Location: dashboard.php"); exit;
+            } else { $login_error = "Your account is pending approval."; }
+        } else { $login_error = "Invalid username or password."; }
+    } else { $login_error = "Invalid username or password."; }
+}
+
+/* ── REGISTER ── */
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['modal_register'])) {
+    $first  = mysqli_real_escape_string($conn, $_POST['first_name']);
+    $middle = mysqli_real_escape_string($conn, $_POST['middle_name']);
+    $last   = mysqli_real_escape_string($conn, $_POST['last_name']);
+    $suffix = mysqli_real_escape_string($conn, $_POST['suffix'] ?? '');
+    $fullname = trim($first." ".($middle?$middle." ":"").$last.($suffix?", ".$suffix:""));
+    $email    = mysqli_real_escape_string($conn, $_POST['email']);
+    $phone    = mysqli_real_escape_string($conn, $_POST['phone']);
+    $username = mysqli_real_escape_string($conn, $_POST['username']);
+    $password_raw = $_POST['reg_password'];
+    $role = "staff";
+
+    if (!preg_match("/^[A-Za-z\s]+$/", $first))        { $reg_error = "First name must contain letters only."; }
+    elseif (!empty($middle) && !preg_match("/^[A-Za-z\s]+$/", $middle)) { $reg_error = "Middle name must contain letters only."; }
+    elseif (!preg_match("/^[A-Za-z\s]+$/", $last))      { $reg_error = "Last name must contain letters only."; }
+    elseif (!preg_match("/^[0-9]+$/", $phone))           { $reg_error = "Phone number must contain numbers only."; }
+    elseif (!preg_match("/^[A-Za-z0-9]+$/", $username)) { $reg_error = "Username must contain letters and numbers only."; }
+
+    if (empty($reg_error)) {
+        $up = preg_match('@[A-Z]@',$password_raw);
+        $lo = preg_match('@[a-z]@',$password_raw);
+        $nm = preg_match('@[0-9]@',$password_raw);
+        $sp = preg_match('@[^\w]@',$password_raw);
+        $ml = strlen($password_raw) >= 8;
+        if (!$up||!$lo||!$nm||!$sp||!$ml)
+            $reg_error = "Password must be 8+ chars with uppercase, lowercase, number, and special character.";
+    }
+
+    if (empty($reg_error)) {
+        $password = password_hash($password_raw, PASSWORD_DEFAULT);
+        $check = $conn->prepare("SELECT id FROM users WHERE username=? OR email=?");
+        $check->bind_param("ss",$username,$email);
+        $check->execute(); $check->store_result();
+        if ($check->num_rows > 0) {
+            $reg_error = "Username or Email already exists.";
+        } else {
+            // Auto-add suffix column if it doesn't exist
+            $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS suffix VARCHAR(20) NOT NULL DEFAULT '' AFTER last_name");
+            $stmt = $conn->prepare("INSERT INTO users (first_name,middle_name,last_name,suffix,fullname,email,phone,username,password,role,verified) VALUES (?,?,?,?,?,?,?,?,?,?,0)");
+            if ($stmt) {
+                $stmt->bind_param("ssssssssss",$first,$middle,$last,$suffix,$fullname,$email,$phone,$username,$password,$role);
+                $stmt->execute();
+                $subject = "Welcome to J.WHO Mushroom System!";
+                $body = "Hello <b>$fullname</b>,<br><br>Your account has been created.<br><b>Username:</b> $username<br><b>Role:</b> $role<br><br>Thank you!<br><b>J.WHO Mushroom Farm</b>";
+                $emailResult = sendEmail($email,$subject,$body);
+                if ($emailResult !== "SUCCESS") error_log("Reg email failed for $email: ".$emailResult);
+                $reg_success = "Account created! An admin will approve your access.";
+            } else { $reg_error = "Database error: ".$conn->error; }
+        }
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>System Documentation — J WHO? Mushroom Incubation System</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<title>System Guide — J WHO? Mushroom Incubation</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400;1,600&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 <style>
-  :root {
-    --ink: #0f0e0c;
-    --cream: #f5f0e8;
-    --moss: #2e4a2e;
-    --sage: #6b8f5e;
-    --spore: #c4a96d;
-    --fog: rgba(245,240,232,0.06);
-  }
+:root{
+  --ivory:#f6f1e7;--ivory2:#ede7d6;--ink:#18201a;
+  --charcoal:#2e3830;--forest:#2b4d30;--fern:#4a7a50;
+  --moss:#7aab70;--moss-lt:#c2dabb;--amber:#c8883a;
+  --amber-lt:#f5dfa8;--line:rgba(24,32,26,0.12);--r:12px;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--ivory);color:var(--ink);font-family:'Outfit',sans-serif;overflow-x:hidden;min-height:100vh;}
+body::after{content:'';position:fixed;inset:0;z-index:9998;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23g)' opacity='0.04'/%3E%3C/svg%3E");opacity:.6;}
 
-  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:600;height:66px;display:flex;align-items:center;justify-content:space-between;padding:0 44px;background:rgba(18,26,18,0.55);backdrop-filter:blur(22px) saturate(1.2);border-bottom:1px solid rgba(255,255,255,0.08);min-width:0;}
+.nav-logo{display:flex;align-items:center;gap:13px;text-decoration:none;flex-shrink:0;min-width:0;}
+.nav-logo img{width:38px;height:38px;border-radius:50%;object-fit:cover;border:2px solid rgba(194,218,187,0.4);box-shadow:0 2px 10px rgba(0,0,0,.3);}
+.logo-text{font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;color:#fff;letter-spacing:-.01em;line-height:1;}
+.logo-sub{display:block;font-size:9px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--moss);margin-top:2px;}
+.nav-right{display:flex;align-items:center;gap:10px;flex-shrink:0;margin-left:auto;}
+.nav-clock{display:flex;flex-direction:column;align-items:flex-end;margin-right:6px;line-height:1.3;}
+.nc-time{font-size:13px;font-weight:600;color:rgba(255,255,255,.9);font-variant-numeric:tabular-nums;letter-spacing:.02em;}
+.nc-date{font-size:10px;color:rgba(255,255,255,.4);letter-spacing:.03em;}
+.nav-sep{width:1px;height:28px;background:rgba(255,255,255,.12);flex-shrink:0;margin:0 4px;}
+.nl{font-size:13px;font-weight:500;color:rgba(255,255,255,.75);text-decoration:none;padding:8px 18px;border-radius:100px;border:1px solid rgba(255,255,255,.22);transition:background .2s,color .2s,border-color .2s;white-space:nowrap;cursor:pointer;background:transparent;font-family:'Outfit',sans-serif;}
+.nl:hover{background:rgba(255,255,255,.08);color:#fff;border-color:rgba(255,255,255,.4);}
+.nl-cta{background:var(--forest)!important;color:#fff!important;border-color:var(--fern)!important;font-weight:600;box-shadow:0 4px 16px rgba(43,77,48,.35);}
+.nl-cta:hover{background:var(--fern)!important;transform:translateY(-1px);box-shadow:0 8px 24px rgba(43,77,48,.45)!important;border-color:var(--moss)!important;}
 
-  body {
-    background: var(--ink);
-    color: var(--cream);
-    font-family: 'DM Mono', monospace;
-    overflow-x: hidden;
-    min-height: 100vh;
-  }
+/* ── SHARED MODAL BASE ── */
+.modal-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(10,18,10,0.75);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;pointer-events:none;transition:opacity .3s ease;}
+.modal-backdrop.open{opacity:1;pointer-events:all;}
+.modal{background:rgba(20,30,20,0.97);border:1px solid rgba(255,255,255,0.10);border-radius:22px;padding:36px 32px 28px;width:100%;box-shadow:0 32px 80px rgba(0,0,0,.65);transform:translateY(28px) scale(0.97);transition:transform .38s cubic-bezier(.22,1,.36,1),opacity .3s;opacity:0;position:relative;overflow-y:auto;max-height:90vh;}
+.modal-backdrop.open .modal{transform:translateY(0) scale(1);opacity:1;}
+.modal-close{position:absolute;top:14px;right:16px;background:none;border:none;color:rgba(255,255,255,.3);font-size:20px;cursor:pointer;transition:color .2s;line-height:1;padding:4px;}
+.modal-close:hover{color:rgba(255,255,255,.7);}
+.modal-logo{display:flex;align-items:center;gap:10px;margin-bottom:20px;}
+.modal-logo img{width:34px;height:34px;border-radius:50%;border:2px solid rgba(194,218,187,.3);}
+.modal-logo-text{font-family:'Cormorant Garamond',serif;font-size:17px;font-weight:600;color:#fff;line-height:1;}
+.modal-logo-sub{font-size:9px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--moss);display:block;margin-top:2px;}
+.modal-title{font-family:'Cormorant Garamond',serif;font-size:26px;font-weight:400;color:#fff;margin-bottom:4px;letter-spacing:-.01em;}
+.modal-sub{font-size:12px;color:rgba(255,255,255,.35);margin-bottom:20px;}
+.m-error{font-size:12px;color:#f08080;background:rgba(192,57,43,.15);border:1px solid rgba(192,57,43,.25);border-radius:8px;padding:9px 12px;margin-bottom:14px;}
+.m-success{font-size:12px;color:#9affb5;background:rgba(74,124,74,.2);border:1px solid rgba(74,124,74,.35);border-radius:8px;padding:9px 12px;margin-bottom:14px;}
+.mfield{margin-bottom:11px;}
+.mfield label{display:block;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:5px;}
+.mfield-wrap{position:relative;}
+.mfield input,.mfield select{width:100%;padding:10px 36px 10px 13px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.11);border-radius:10px;color:#fff;font-family:'Outfit',sans-serif;font-size:13.5px;outline:none;transition:border-color .2s,background .2s;-webkit-appearance:none;}
+.mfield input::placeholder{color:rgba(255,255,255,.2);}
+.mfield input:focus,.mfield select:focus{border-color:rgba(122,171,112,.5);background:rgba(255,255,255,.09);}
+.mfield select option{background:#1e3020;color:#fff;}
+.mfield-icon{position:absolute;right:11px;top:50%;transform:translateY(-50%);color:rgba(255,255,255,.22);font-size:12px;pointer-events:none;}
+.toggle-pw{pointer-events:all;cursor:pointer;transition:color .2s;}
+.toggle-pw:hover{color:var(--moss);}
+.mgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.str-bar{height:3px;background:rgba(255,255,255,.08);border-radius:3px;margin-top:5px;overflow:hidden;}
+.str-fill{height:100%;width:0;border-radius:3px;transition:width .3s,background .3s;}
+.modal-btn{width:100%;padding:12px;background:linear-gradient(135deg,var(--forest),var(--fern));border:none;border-radius:10px;color:#fff;font-family:'Outfit',sans-serif;font-size:14px;font-weight:600;cursor:pointer;margin-top:8px;transition:opacity .2s,transform .2s;letter-spacing:.02em;}
+.modal-btn:hover{opacity:.88;transform:translateY(-1px);}
+.modal-switch{margin-top:18px;text-align:center;font-size:12px;color:rgba(255,255,255,.3);}
+.modal-switch a{color:var(--moss);text-decoration:none;cursor:pointer;}
+.modal-switch a:hover{color:var(--moss-lt);}
 
-  /* ── NAV ── */
-  nav {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 18px 48px;
-    border-bottom: 1px solid rgba(245,240,232,0.07);
-    backdrop-filter: blur(14px);
-    background: rgba(15,14,12,0.65);
-  }
+/* Modal info card */
+.modal-info-card{
+  margin-top:14px;
+  border:1px solid rgba(122,171,112,0.2);
+  border-radius:10px;
+  overflow:hidden;
+  cursor:pointer;
+  transition:border-color .2s;
+  background:rgba(122,171,112,0.05);
+}
+.modal-info-card:hover{border-color:rgba(122,171,112,0.35);}
+.mic-header{
+  display:flex;align-items:center;gap:8px;
+  padding:9px 13px;
+  user-select:none;
+}
+.mic-icon{color:var(--moss);font-size:13px;flex-shrink:0;}
+.mic-label{flex:1;font-size:11px;font-weight:600;color:rgba(255,255,255,.45);letter-spacing:.04em;text-transform:uppercase;}
+.mic-arrow{color:rgba(255,255,255,.25);font-size:10px;transition:transform .25s;}
+.modal-info-card.expanded .mic-arrow{transform:rotate(180deg);}
+.mic-body{
+  max-height:0;overflow:hidden;
+  transition:max-height .3s ease, padding .3s ease;
+  padding:0 13px;
+}
+.modal-info-card.expanded .mic-body{
+  max-height:120px;
+  padding:0 13px 12px;
+}
+.mic-row{
+  display:flex;align-items:center;gap:10px;
+  padding:6px 0;
+  border-top:1px solid rgba(255,255,255,.06);
+  font-size:11.5px;
+  color:rgba(255,255,255,.38);
+  line-height:1.5;
+}
+.mic-row:first-child{border-top:none;}
+.mic-badge{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:10px;font-weight:700;letter-spacing:.06em;
+  padding:2px 8px;border-radius:100px;
+  flex-shrink:0;white-space:nowrap;
+}
+.mic-staff{background:rgba(122,171,112,.15);color:var(--moss);}
+.mic-owner{background:rgba(200,136,58,.15);color:var(--amber);}
+.mic-text strong{color:rgba(255,255,255,.6);}
 
-  .nav-brand { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
-  .nav-brand img { width: 42px; height: 42px; object-fit: contain; }
-  .nav-brand-text {
-    font-family: 'Syne', sans-serif;
-    font-size: 15px; font-weight: 700;
-    letter-spacing: 0.06em; text-transform: uppercase;
-    color: var(--cream); line-height: 1.3;
-  }
-  .nav-brand-sub {
-    display: block; font-family: 'DM Mono', monospace;
-    font-size: 10px; font-weight: 300;
-    letter-spacing: 0.15em; color: var(--spore); text-transform: uppercase;
-  }
+#loginModal .modal{max-width:360px;}
+#registerModal .modal{max-width:420px;}
 
-  /* PH Time */
-  .ph-time-chip {
-    display: flex; flex-direction: column; align-items: flex-end;
-    flex-shrink: 0; line-height: 1.4;
-  }
-  .ph-time-value {
-    font-size: 13px; font-weight: 500;
-    color: rgba(245,240,232,0.8);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.03em;
-  }
-  .ph-time-date {
-    font-size: 11px;
-    color: rgba(245,240,232,0.35);
-    letter-spacing: 0.03em;
-  }
+/* PAGE HEADER */
+.page-header{position:relative;min-height:340px;display:flex;flex-direction:column;justify-content:flex-end;overflow:hidden;}
+.ph-bg{position:absolute;inset:0;z-index:0;background:url('assets/img/bg-mushroom.jpg') center/cover no-repeat;}
+.ph-overlay{position:absolute;inset:0;z-index:1;background:linear-gradient(to right,rgba(18,32,18,0.88) 0%,rgba(18,32,18,0.55) 60%,rgba(18,32,18,0.3) 100%),linear-gradient(to top,rgba(18,32,18,0.7) 0%,transparent 55%);}
+.ph-deco{position:absolute;bottom:-60px;right:-30px;z-index:2;font-family:'Cormorant Garamond',serif;font-size:320px;font-weight:300;font-style:italic;color:rgba(255,255,255,.04);line-height:1;pointer-events:none;user-select:none;}
+.ph-inner{position:relative;z-index:3;max-width:1200px;margin:0 auto;width:100%;padding:100px 44px 52px;display:flex;align-items:flex-end;justify-content:space-between;gap:40px;}
+.ph-eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:10px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--moss);margin-bottom:16px;animation:fadeUp .7s .1s both;}
+.ph-eyebrow::before{content:'';width:20px;height:1px;background:var(--moss);}
+.ph-title{font-family:'Cormorant Garamond',serif;font-size:clamp(44px,5.5vw,74px);font-weight:300;line-height:1.05;letter-spacing:-.03em;color:#fff;animation:fadeUp .7s .2s both;}
+.ph-title em{font-style:italic;color:var(--moss);}
+.ph-sub{font-size:14px;line-height:1.75;color:rgba(255,255,255,.5);max-width:480px;margin-top:12px;animation:fadeUp .7s .3s both;}
+.ph-count{flex-shrink:0;text-align:right;animation:fadeUp .7s .35s both;}
+.ph-num{font-family:'Cormorant Garamond',serif;font-size:120px;font-weight:300;font-style:italic;color:rgba(255,255,255,.07);line-height:1;user-select:none;}
+.ph-num-lbl{font-size:10px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:rgba(255,255,255,.25);margin-top:-12px;}
 
-  .nav-actions { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
-  .pill-btn {
-    font-family: 'DM Mono', monospace;
-    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
-    padding: 9px 22px; border-radius: 100px;
-    border: 1px solid rgba(245,240,232,0.2);
-    background: transparent; color: var(--cream);
-    cursor: pointer; transition: all 0.25s ease;
-    text-decoration: none; display: inline-block; white-space: nowrap;
-  }
-  .pill-btn:hover { background: var(--fog); border-color: var(--spore); color: var(--spore); }
-  .pill-btn.filled { background: var(--spore); border-color: var(--spore); color: var(--ink); font-weight: 500; }
-  .pill-btn.filled:hover { background: #d4b97d; transform: translateY(-1px); box-shadow: 0 8px 24px rgba(196,169,109,0.3); }
+/* TAB BAR */
+.tab-bar{background:var(--charcoal);border-bottom:1px solid rgba(255,255,255,.08);overflow-x:auto;position:sticky;top:66px;z-index:100;scrollbar-width:none;}
+.tab-bar::-webkit-scrollbar{display:none;}
+.tab-inner{max-width:none;padding:0 44px;display:flex;gap:0;width:max-content;min-width:100%;}
+.tab-link{display:flex;align-items:center;gap:7px;padding:14px 18px;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.4);text-decoration:none;border-bottom:2px solid transparent;white-space:nowrap;transition:color .2s,border-color .2s;flex-shrink:0;}
+.tab-link:last-child{padding-right:44px;}
+.tab-link:hover{color:rgba(255,255,255,.75);}
+.tab-link.active{color:var(--moss);border-bottom-color:var(--moss);}
+.tab-num{font-size:10px;background:rgba(255,255,255,.08);border-radius:100px;padding:1px 7px;font-variant-numeric:tabular-nums;}
 
-  /* ── PAGE HEADER ── */
-  .page-header {
-    position: relative; overflow: hidden;
-    padding: 140px 64px 80px;
-    border-bottom: 1px solid rgba(245,240,232,0.07);
-  }
+/* MAIN LAYOUT */
+.main-wrap{max-width:1200px;margin:0 auto;padding:0 44px 80px;display:grid;grid-template-columns:260px 1fr;gap:40px;align-items:start;}
+.sidebar{padding-top:40px;position:sticky;top:calc(66px + 50px);max-height:calc(100vh - 140px);overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--line) transparent;}
+.sidebar::-webkit-scrollbar{width:3px;}
+.sidebar::-webkit-scrollbar-thumb{background:var(--line);border-radius:2px;}
+.sidebar-label{font-size:9px;font-weight:700;letter-spacing:.25em;text-transform:uppercase;color:#8a9485;margin-bottom:14px;}
+.sidebar-list{list-style:none;display:flex;flex-direction:column;gap:1px;}
+.sl a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:9px;font-size:13px;font-weight:400;color:#6a7a6a;text-decoration:none;transition:all .18s;}
+.sl a:hover{background:var(--ivory2);color:var(--ink);}
+.sl a.active{background:rgba(74,122,80,.1);color:var(--fern);font-weight:600;}
+.sl-num{font-size:10px;color:var(--amber);font-variant-numeric:tabular-nums;width:18px;flex-shrink:0;}
+.sl-ico{font-size:14px;width:20px;text-align:center;}
+.content{padding-top:40px;}
 
-  .page-header-bg {
-    position: absolute; inset: 0;
-    background: url('assets/img/bg-mushroom.jpg') center 40%/cover no-repeat;
-    opacity: 0.07; filter: grayscale(40%); z-index: 0;
-  }
-  .page-header-blob {
-    position: absolute; top: -20%; right: 0;
-    width: 50vw; height: 120%;
-    background: radial-gradient(ellipse at 70% 50%, rgba(46,74,46,0.3) 0%, transparent 70%);
-    z-index: 1; pointer-events: none;
-  }
+/* STEP CARDS */
+.step-card{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;margin-bottom:16px;opacity:0;transform:translateY(14px);transition:opacity .4s ease,transform .4s ease,box-shadow .2s;scroll-margin-top:132px;}
+.step-card.visible{opacity:1;transform:translateY(0);}
+.step-card:hover{box-shadow:0 8px 32px rgba(24,32,26,.07);}
+.step-card-header{display:flex;align-items:stretch;border-bottom:1px solid var(--line);}
+.step-number{display:flex;align-items:center;justify-content:center;min-width:68px;font-family:'Cormorant Garamond',serif;font-size:32px;font-weight:300;font-style:italic;color:#fff;background:var(--forest);padding:16px;flex-shrink:0;}
+.step-header-content{flex:1;padding:18px 22px 16px;display:flex;align-items:center;justify-content:space-between;gap:16px;}
+.step-tag{font-size:9px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--amber);}
+.step-title{font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:400;color:var(--ink);letter-spacing:-.01em;margin-top:3px;}
+.step-icon-wrap{width:44px;height:44px;border-radius:12px;background:var(--ivory);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;}
+.step-body{padding:24px 26px;font-size:14px;line-height:1.8;color:#5a6a5a;}
+.step-body ul{list-style:none;display:flex;flex-direction:column;gap:10px;}
+.step-body li{padding-left:18px;position:relative;}
+.step-body li::before{content:'—';position:absolute;left:0;color:var(--moss-lt);font-size:12px;top:4px;}
+.step-body strong{color:var(--ink);font-weight:600;}
+.callout{margin-top:18px;padding:14px 18px;background:var(--amber-lt);border-left:3px solid var(--amber);border-radius:0 10px 10px 0;font-size:13px;color:#7a5020;line-height:1.65;}
 
-  .page-header-inner {
-    position: relative; z-index: 2;
-    max-width: 1100px; margin: 0 auto;
-    display: flex; align-items: flex-end; justify-content: space-between; gap: 40px;
-  }
+/* FOOTER */
+footer{background:var(--charcoal);padding:28px 44px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,.06);}
+.foot-copy{font-size:12px;color:rgba(255,255,255,.35);}
+.foot-brand{font-family:'Cormorant Garamond',serif;font-size:16px;font-weight:600;font-style:italic;color:rgba(255,255,255,.5);}
 
-  .page-eyebrow {
-    font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
-    color: var(--spore); margin-bottom: 14px;
-    display: flex; align-items: center; gap: 10px;
-    animation: fadeSlideUp 0.7s 0.1s both;
-  }
-  .page-eyebrow::before { content: ''; width: 20px; height: 1px; background: var(--spore); }
+@keyframes fadeUp{from{opacity:0;transform:translateY(18px);}to{opacity:1;transform:translateY(0);}}
 
-  .page-title {
-    font-family: 'DM Serif Display', serif;
-    font-size: clamp(40px, 4.5vw, 64px);
-    line-height: 1.08; font-weight: 400;
-    animation: fadeSlideUp 0.7s 0.2s both;
-  }
-  .page-title em { font-style: italic; color: var(--sage); }
+@media(max-width:1024px){.main-wrap{grid-template-columns:1fr;padding:0 32px 60px;}.sidebar{display:none;}.ph-inner{flex-direction:column;gap:0;padding:100px 32px 44px;}.ph-count{display:none;}.tab-inner{padding:0 24px;}}
+@media(max-width:768px){nav{padding:0 20px;}.nc-date{display:none;}.ph-inner{padding:90px 24px 40px;}.ph-title{font-size:44px;}.main-wrap{padding:0 24px 60px;}}
+@media(max-width:540px){.nav-clock{display:none;}.nav-sep{display:none;}footer{padding:20px 24px;flex-direction:column;gap:8px;text-align:center;}.mgrid{grid-template-columns:1fr;}}
 
-  .page-subtitle {
-    margin-top: 16px; font-size: 14px; line-height: 1.75;
-    color: rgba(245,240,232,0.5); max-width: 480px;
-    animation: fadeSlideUp 0.7s 0.3s both;
-  }
-
-  .page-header-meta {
-    flex-shrink: 0; text-align: right;
-    animation: fadeSlideUp 0.7s 0.35s both;
-  }
-  .meta-count {
-    font-family: 'DM Serif Display', serif;
-    font-size: 96px; line-height: 1;
-    color: rgba(245,240,232,0.05); letter-spacing: -0.02em;
-    user-select: none;
-  }
-  .meta-label {
-    font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
-    color: rgba(245,240,232,0.25); margin-top: -8px;
-  }
-
-  /* ── MAIN CONTENT ── */
-  .docs-layout {
-    max-width: 1100px; margin: 0 auto;
-    display: grid; grid-template-columns: 220px 1fr;
-    gap: 0; min-height: calc(100vh - 300px);
-  }
-
-  /* Sidebar TOC */
-  .toc {
-    border-right: 1px solid rgba(245,240,232,0.07);
-    padding: 48px 32px 48px 0;
-    position: sticky; top: 80px;
-    align-self: start; height: calc(100vh - 100px);
-    overflow-y: auto;
-  }
-  .toc::-webkit-scrollbar { width: 3px; }
-  .toc::-webkit-scrollbar-track { background: transparent; }
-  .toc::-webkit-scrollbar-thumb { background: rgba(245,240,232,0.1); border-radius: 2px; }
-
-  .toc-label {
-    font-size: 9px; letter-spacing: 0.25em; text-transform: uppercase;
-    color: rgba(245,240,232,0.25); margin-bottom: 20px; padding-left: 16px;
-  }
-  .toc-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
-  .toc-item a {
-    display: flex; align-items: center; gap: 10px;
-    padding: 8px 16px; border-radius: 6px;
-    font-size: 12px; letter-spacing: 0.04em;
-    color: rgba(245,240,232,0.4);
-    text-decoration: none; transition: all 0.2s;
-  }
-  .toc-item a:hover { background: rgba(245,240,232,0.04); color: var(--cream); }
-  .toc-item a.active { background: rgba(107,143,94,0.1); color: var(--sage); }
-  .toc-num { font-size: 10px; color: var(--spore); opacity: 0.6; width: 18px; flex-shrink: 0; }
-
-  /* Steps content */
-  .steps-content {
-    padding: 48px 0 80px 56px;
-  }
-
-  .steps-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 2px;
-    background: rgba(245,240,232,0.06);
-    border: 1px solid rgba(245,240,232,0.06);
-    border-radius: 16px;
-    overflow: hidden;
-  }
-
-  .step-card {
-    background: var(--ink);
-    padding: 40px;
-    position: relative; transition: background 0.3s ease; overflow: hidden;
-  }
-  .step-card::before {
-    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-    background: linear-gradient(90deg, var(--moss), transparent);
-    transform: scaleX(0); transform-origin: left; transition: transform 0.4s ease;
-  }
-  .step-card:hover { background: rgba(46,74,46,0.08); }
-  .step-card:hover::before { transform: scaleX(1); }
-
-  .step-num { font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: 0.15em; color: var(--spore); opacity: 0.7; margin-bottom: 14px; }
-  .step-icon { font-size: 28px; margin-bottom: 16px; display: block; }
-  .step-heading { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 700; color: var(--cream); margin-bottom: 14px; letter-spacing: -0.01em; }
-  .step-body { font-size: 13px; line-height: 1.8; color: rgba(245,240,232,0.55); }
-  .step-body ul { list-style: none; display: flex; flex-direction: column; gap: 6px; }
-  .step-body li { padding-left: 14px; position: relative; }
-  .step-body li::before { content: '→'; position: absolute; left: 0; color: var(--sage); font-size: 11px; }
-  .step-body strong { color: rgba(245,240,232,0.8); font-weight: 500; }
-
-  .callout {
-    display: flex; gap: 12px; align-items: flex-start;
-    background: rgba(196,169,109,0.07);
-    border: 1px solid rgba(196,169,109,0.2);
-    border-radius: 8px; padding: 14px 16px; margin-top: 16px;
-    font-size: 13px; line-height: 1.6; color: rgba(245,240,232,0.6);
-  }
-  .callout::before { content: '◆'; color: var(--spore); font-size: 10px; margin-top: 3px; flex-shrink: 0; }
-
-  /* ── FOOTER ── */
-  footer {
-    border-top: 1px solid rgba(245,240,232,0.07);
-    padding: 24px 48px;
-    display: flex; align-items: center; justify-content: space-between;
-    background: rgba(0,0,0,0.3);
-  }
-  .footer-copy { font-size: 12px; letter-spacing: 0.06em; color: rgba(245,240,232,0.3); }
-  .footer-brand { font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 600; color: rgba(245,240,232,0.2); letter-spacing: 0.1em; text-transform: uppercase; }
-
-  @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-
-  /* ── RESPONSIVE ── */
-  @media (max-width: 1100px) {
-    nav { padding: 16px 32px; }
-    .ph-time-chip { display: none; }
-    .page-header { padding: 130px 40px 64px; }
-    .docs-layout { grid-template-columns: 1fr; }
-    .toc { display: none; }
-    .steps-content { padding: 40px 40px 64px; }
-  }
-  @media (max-width: 768px) {
-    .steps-grid { grid-template-columns: 1fr; }
-    .page-header-meta { display: none; }
-    .page-header { padding: 120px 24px 56px; }
-    .steps-content { padding: 32px 24px 56px; }
-    nav { padding: 14px 20px; }
-    .nav-brand-text { font-size: 13px; }
-    .pill-btn { padding: 7px 14px; font-size: 10px; }
-    footer { padding: 18px 24px; flex-direction: column; gap: 6px; text-align: center; }
-    .step-card { padding: 28px 24px; }
-  }
+/* ── SCROLL-TO-TOP FAB ── */
+.scroll-top{
+  position:fixed;
+  bottom:28px;right:28px;
+  z-index:900;
+  width:44px;height:44px;
+  background:var(--forest);
+  border:1px solid var(--fern);
+  border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;
+  box-shadow:0 4px 20px rgba(0,0,0,.35);
+  opacity:0;pointer-events:none;
+  transform:translateY(12px);
+  transition:opacity .3s,transform .3s,background .2s;
+  color:#fff;font-size:16px;
+}
+.scroll-top.show{opacity:1;pointer-events:all;transform:translateY(0);}
+.scroll-top:hover{background:var(--fern);box-shadow:0 8px 28px rgba(43,77,48,.5);}
 </style>
 </head>
 <body>
 
-<!-- ── NAV ── -->
+<!-- NAV -->
 <nav>
-  <div class="nav-brand">
+  <a href="homepage.php" class="nav-logo">
     <img src="assets/img/logo.png" alt="Logo">
-    <div>
-      <div class="nav-brand-text">J WHO?</div>
-      <span class="nav-brand-sub">Mushroom Incubation</span>
+    <div><span class="logo-text">J WHO?</span><span class="logo-sub">Mushroom Incubation</span></div>
+  </a>
+  <div class="nav-right">
+    <div class="nav-clock">
+      <span class="nc-time" id="phTime">--:-- --</span>
+      <span class="nc-date" id="phDate">--- --, ----</span>
     </div>
-  </div>
-
-  <div class="nav-actions">
-    <div class="ph-time-chip">
-      <span class="ph-time-value" id="phTime">--:-- --</span>
-      <span class="ph-time-date" id="phDate">---, --- --, ----</span>
-    </div>
-    <a href="homepage.php" class="pill-btn">← Home</a>
-    <a href="index.php" class="pill-btn filled">Log In</a>
+    <div class="nav-sep"></div>
+    <a href="homepage.php" class="nl">← Home</a>
+    <button class="nl nl-cta" onclick="openLogin()">Log In →</button>
   </div>
 </nav>
 
-<!-- ── PAGE HEADER ── -->
-<header class="page-header">
-  <div class="page-header-bg"></div>
-  <div class="page-header-blob"></div>
-  <div class="page-header-inner">
-    <div>
-      <div class="page-eyebrow">System Documentation</div>
-      <h1 class="page-title">How to use<br><em>the system</em></h1>
-      <p class="page-subtitle">
-        Everything you need to monitor, control, and maintain your
-        mushroom incubation chamber — from first login to harvest.
-      </p>
+<!-- ══════════ LOGIN MODAL ══════════ -->
+<div class="modal-backdrop" id="loginModal" onclick="handleBackdrop(event,'loginModal')">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('loginModal')">&times;</button>
+    <div class="modal-logo">
+      <img src="assets/img/logo.png" alt="">
+      <div><span class="modal-logo-text">J WHO?</span><span class="modal-logo-sub">Mushroom Incubation</span></div>
     </div>
-    <div class="page-header-meta">
-      <div class="meta-count">10</div>
-      <div class="meta-label">Sections</div>
+    <div class="modal-title">Welcome back</div>
+    <div class="modal-sub">Sign in to access your dashboard</div>
+
+    <?php if (!empty($login_error)): ?>
+      <div class="m-error"><?= htmlspecialchars($login_error) ?></div>
+    <?php endif; ?>
+
+    <form method="POST">
+      <input type="hidden" name="modal_login" value="1">
+      <div class="mfield">
+        <label>Username</label>
+        <div class="mfield-wrap">
+          <input type="text" name="username" placeholder="Enter your username" required autocomplete="username">
+          <span class="mfield-icon"><i class="fa fa-user"></i></span>
+        </div>
+      </div>
+      <div class="mfield">
+        <label>Password</label>
+        <div class="mfield-wrap">
+          <input type="password" id="loginPw" name="password" placeholder="Enter your password" required autocomplete="current-password">
+          <span class="mfield-icon toggle-pw" onclick="togglePw('loginPw','loginPwEye')"><i class="fa fa-eye" id="loginPwEye"></i></span>
+        </div>
+      </div>
+      <button type="submit" class="modal-btn">Sign In</button>
+    </form>
+    <div class="modal-switch">Don't have an account? <a onclick="switchTo('registerModal')">Create one</a></div>
+  </div>
+</div>
+
+<!-- ══════════ REGISTER MODAL ══════════ -->
+<div class="modal-backdrop" id="registerModal" onclick="handleBackdrop(event,'registerModal')">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('registerModal')">&times;</button>
+    <div class="modal-logo">
+      <img src="assets/img/logo.png" alt="">
+      <div><span class="modal-logo-text">J WHO?</span><span class="modal-logo-sub">Mushroom Incubation</span></div>
+    </div>
+    <div class="modal-title">Create account</div>
+    <div class="modal-sub">Join J WHO? Mushroom Incubation System</div>
+
+    <?php if (!empty($reg_error)): ?>
+      <div class="m-error"><?= htmlspecialchars($reg_error) ?></div>
+    <?php endif; ?>
+    <?php if (!empty($reg_success)): ?>
+      <div class="m-success"><?= htmlspecialchars($reg_success) ?></div>
+    <?php endif; ?>
+
+    <form method="POST">
+      <input type="hidden" name="modal_register" value="1">
+      <div class="mgrid">
+        <div class="mfield">
+          <label>First Name</label>
+          <div class="mfield-wrap"><input type="text" name="first_name" placeholder="First name" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')"></div>
+        </div>
+        <div class="mfield">
+          <label>Middle Name</label>
+          <div class="mfield-wrap"><input type="text" name="middle_name" placeholder="Middle (optional)" oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')"></div>
+        </div>
+      </div>
+      <div class="mfield">
+        <label>Last Name</label>
+        <div class="mfield-wrap"><input type="text" name="last_name" placeholder="Last name" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')"></div>
+      </div>
+      <div class="mfield">
+        <label>Suffix <span style="font-weight:400;opacity:.5;">(e.g. Jr., Sr., III)</span></label>
+        <div class="mfield-wrap">
+          <input type="text" name="suffix" placeholder="Optional">
+        </div>
+      </div>
+      <div class="mgrid">
+        <div class="mfield">
+          <label>Email</label>
+          <div class="mfield-wrap">
+            <input type="email" name="email" placeholder="Email address" required>
+            <span class="mfield-icon"><i class="fa fa-envelope"></i></span>
+          </div>
+        </div>
+        <div class="mfield">
+          <label>Phone</label>
+          <div class="mfield-wrap">
+            <input type="text" name="phone" placeholder="Phone number" required maxlength="11" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+            <span class="mfield-icon"><i class="fa fa-phone"></i></span>
+          </div>
+        </div>
+      </div>
+      <div class="mfield">
+        <label>Username</label>
+        <div class="mfield-wrap">
+          <input type="text" name="username" placeholder="Choose a username" required oninput="this.value=this.value.replace(/[^A-Za-z0-9]/g,'')">
+          <span class="mfield-icon"><i class="fa fa-user"></i></span>
+        </div>
+      </div>
+      <div class="mfield">
+        <label>Password</label>
+        <div class="mfield-wrap">
+          <input type="password" id="regPw" name="reg_password" placeholder="Create a password" required oninput="checkStrength(this.value)">
+          <span class="mfield-icon toggle-pw" onclick="togglePw('regPw','regPwEye')"><i class="fa fa-eye" id="regPwEye"></i></span>
+        </div>
+        <div class="str-bar"><div class="str-fill" id="strFill"></div></div>
+      </div>
+      <button type="submit" class="modal-btn">Create Account</button>
+    </form>
+    <div class="modal-switch">Already have an account? <a onclick="switchTo('loginModal')">Sign in</a></div>
+  </div>
+</div>
+
+<!-- PAGE HEADER -->
+<header class="page-header">
+  <div class="ph-bg"></div>
+  <div class="ph-overlay"></div>
+  <div class="ph-deco">G</div>
+  <div class="ph-inner">
+    <div>
+      <div class="ph-eyebrow">📖 System Documentation</div>
+      <h1 class="ph-title">The Complete<br><em>Usage Guide</em></h1>
+      <p class="ph-sub">Everything you need to know — from first login to harvest analytics, in ten clear sections.</p>
+    </div>
+    <div class="ph-count">
+      <div class="ph-num">10</div>
+      <div class="ph-num-lbl">Sections</div>
     </div>
   </div>
 </header>
 
-<!-- ── DOCS LAYOUT ── -->
-<div class="docs-layout">
+<!-- TAB BAR -->
+<div class="tab-bar">
+  <div class="tab-inner">
+    <a href="#s1"  class="tab-link active"><span class="tab-num">01</span> Setup</a>
+    <a href="#s2"  class="tab-link"><span class="tab-num">02</span> Dashboard</a>
+    <a href="#s3"  class="tab-link"><span class="tab-num">03</span> Environment</a>
+    <a href="#s4"  class="tab-link"><span class="tab-num">04</span> Control</a>
+    <a href="#s5"  class="tab-link"><span class="tab-num">05</span> Records</a>
+    <a href="#s6"  class="tab-link"><span class="tab-num">06</span> Reports</a>
+    <a href="#s7"  class="tab-link"><span class="tab-num">07</span> Profile</a>
+    <a href="#s8"  class="tab-link"><span class="tab-num">08</span> Practices</a>
+    <a href="#s9"  class="tab-link"><span class="tab-num">09</span> Troubleshoot</a>
+    <a href="#s10" class="tab-link"><span class="tab-num">10</span> Safety</a>
+  </div>
+</div>
 
-  <!-- Sidebar TOC -->
-  <aside class="toc">
-    <div class="toc-label">Contents</div>
-    <ul class="toc-list">
-      <li class="toc-item"><a href="#s1"><span class="toc-num">01</span> Getting Started</a></li>
-      <li class="toc-item"><a href="#s2"><span class="toc-num">02</span> Dashboard</a></li>
-      <li class="toc-item"><a href="#s3"><span class="toc-num">03</span> Environment</a></li>
-      <li class="toc-item"><a href="#s4"><span class="toc-num">04</span> Device Control</a></li>
-      <li class="toc-item"><a href="#s5"><span class="toc-num">05</span> Growth Records</a></li>
-      <li class="toc-item"><a href="#s6"><span class="toc-num">06</span> Reports</a></li>
-      <li class="toc-item"><a href="#s7"><span class="toc-num">07</span> Profile</a></li>
-      <li class="toc-item"><a href="#s8"><span class="toc-num">08</span> Best Practices</a></li>
-      <li class="toc-item"><a href="#s9"><span class="toc-num">09</span> Troubleshooting</a></li>
-      <li class="toc-item"><a href="#s10"><span class="toc-num">10</span> Safety</a></li>
+<!-- MAIN -->
+<div class="main-wrap">
+  <aside class="sidebar">
+    <div class="sidebar-label">Contents</div>
+    <ul class="sidebar-list">
+      <li class="sl"><a href="#s1"><span class="sl-num">01</span><span class="sl-ico">🚀</span>Getting Started</a></li>
+      <li class="sl"><a href="#s2"><span class="sl-num">02</span><span class="sl-ico">📊</span>Dashboard</a></li>
+      <li class="sl"><a href="#s3"><span class="sl-num">03</span><span class="sl-ico">🌡️</span>Environment</a></li>
+      <li class="sl"><a href="#s4"><span class="sl-num">04</span><span class="sl-ico">⚙️</span>Device Control</a></li>
+      <li class="sl"><a href="#s5"><span class="sl-num">05</span><span class="sl-ico">🍄</span>Growth Records</a></li>
+      <li class="sl"><a href="#s6"><span class="sl-num">06</span><span class="sl-ico">📈</span>Reports</a></li>
+      <li class="sl"><a href="#s7"><span class="sl-num">07</span><span class="sl-ico">👤</span>Profile</a></li>
+      <li class="sl"><a href="#s8"><span class="sl-num">08</span><span class="sl-ico">✅</span>Best Practices</a></li>
+      <li class="sl"><a href="#s9"><span class="sl-num">09</span><span class="sl-ico">🔧</span>Troubleshooting</a></li>
+      <li class="sl"><a href="#s10"><span class="sl-num">10</span><span class="sl-ico">🛡️</span>Safety</a></li>
     </ul>
   </aside>
 
-  <!-- Steps -->
-  <main class="steps-content">
-    <div class="steps-grid">
+  <div class="content">
 
-      <div class="step-card" id="s1">
-        <div class="step-num">01 / Getting Started</div>
-        <span class="step-icon">🚀</span>
-        <div class="step-heading">First-time Setup</div>
-        <div class="step-body">
-          <ul>
-            <li><strong>Registration:</strong> Click "Create an account" on the login page and fill in your details — approval from the owner is required before access is granted.</li>
-            <li><strong>Login:</strong> Use your approved username and password to sign in.</li>
-            <li><strong>Dashboard:</strong> After login you'll be redirected to the main control panel.</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="step-card" id="s2">
-        <div class="step-num">02 / Dashboard</div>
-        <span class="step-icon">📊</span>
-        <div class="step-heading">Understanding the Dashboard</div>
-        <div class="step-body">
-          <ul>
-            <li><strong>Live Status:</strong> Real-time temperature and humidity gauges with color-coded indicators.</li>
-            <li><strong>Device Control:</strong> Toggle between <strong>Auto</strong> and <strong>Manual</strong> modes for full automation or direct control.</li>
-            <li><strong>Alerts:</strong> Instant notifications when environmental conditions fall outside ideal ranges.</li>
-            <li><strong>Mushroom Records:</strong> Log growth stages, counts, and field observations.</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="step-card" id="s3">
-        <div class="step-num">03 / Environment</div>
-        <span class="step-icon">🌡️</span>
-        <div class="step-heading">Monitoring Conditions</div>
-        <div class="step-body">
-          <ul>
-            <li><strong>Temperature:</strong> Target 22–28°C. Blue = too low, red = ideal, orange = too high.</li>
-            <li><strong>Humidity:</strong> Target 85–95%. Blue = too low, green = ideal, red = too high.</li>
-            <li><strong>Alerts:</strong> Address any out-of-range conditions promptly to prevent crop loss.</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="step-card" id="s4">
-        <div class="step-num">04 / Control</div>
-        <span class="step-icon">⚙️</span>
-        <div class="step-heading">Device Control & Overrides</div>
-        <div class="step-body">
-          <ul>
-            <li><strong>Auto Mode:</strong> Recommended. System automatically adjusts devices based on sensor readings.</li>
-            <li><strong>Manual Mode:</strong> Direct control for emergencies or specific adjustments.</li>
-            <li><strong>Status Badges:</strong> Check ON, OFF, or UNKNOWN states for each device.</li>
-          </ul>
-          <div class="callout">Manual overrides are for emergency use only. The system is optimized for Auto mode.</div>
-        </div>
-      </div>
-
-      <div class="step-card" id="s5">
-        <div class="step-num">05 / Records</div>
-        <span class="step-icon">🍄</span>
-        <div class="step-heading">Tracking Mushroom Growth</div>
-        <div class="step-body">
-          <ul>
-            <li><strong>Add Records:</strong> Log the date, mushroom count, growth stage, and any observations.</li>
-            <li><strong>Growth Stages:</strong> Spawn Run → Primordia Formation → Fruiting → Harvest.</li>
-            <li><strong>Monthly View:</strong> Records are organized by month for easy progress monitoring.</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="step-card" id="s6">
-        <div class="step-num">06 / Reports</div>
-        <span class="step-icon">📈</span>
-        <div class="step-heading">Viewing Reports & Analytics</div>
-        <div class="step-body">
-          <ul>
-            <li><strong>Sensor Data:</strong> Temperature and humidity trends over the last 7 days.</li>
-            <li><strong>Changes Report:</strong> Daily averages and overall environmental trend analysis.</li>
-            <li><strong>Data Export:</strong> All reports are saved to the database for long-term review.</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="step-card" id="s7">
-        <div class="step-num">07 / Profile</div>
-        <span class="step-icon">👤</span>
-        <div class="step-heading">Profile & System Management</div>
-        <div class="step-body">
-          <ul>
-            <li><strong>Profile Update:</strong> Edit personal information and contact details at any time.</li>
-            <li><strong>Password:</strong> Change your password regularly for account security.</li>
-            <li><strong>Activity Log:</strong> Review your recent system interactions.</li>
-            <li><strong>User Management (Owner):</strong> Approve new users and manage staff access levels.</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="step-card" id="s8">
-        <div class="step-num">08 / Best Practices</div>
-        <span class="step-icon">✅</span>
-        <div class="step-heading">Tips for Optimal Results</div>
-        <div class="step-body">
-          <ul>
-            <li>Check the dashboard daily to ensure conditions remain optimal.</li>
-            <li>Address alerts promptly — delayed response can cause significant crop loss.</li>
-            <li>Keep sensor data accurate for reliable automation decisions.</li>
-            <li>Update mushroom growth records consistently for better long-term tracking.</li>
-            <li>Use strong passwords and always log out when done.</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="step-card" id="s9">
-        <div class="step-num">09 / Troubleshooting</div>
-        <span class="step-icon">🔧</span>
-        <div class="step-heading">Common Issues & Fixes</div>
-        <div class="step-body">
-          <ul>
-            <li><strong>Offline Sensors:</strong> Check device connections and power supply.</li>
-            <li><strong>Alerts Not Clearing:</strong> Verify environmental conditions and device responses.</li>
-            <li><strong>Login Issues:</strong> Ensure your account is approved and credentials are correct.</li>
-            <li><strong>Manual Controls:</strong> Switch to Manual mode explicitly before trying overrides.</li>
-          </ul>
-          <div class="callout">If problems persist, contact the system administrator or owner for assistance.</div>
-        </div>
-      </div>
-
-      <div class="step-card" id="s10">
-        <div class="step-num">10 / Safety</div>
-        <span class="step-icon">🛡️</span>
-        <div class="step-heading">Safety & Maintenance</div>
-        <div class="step-body">
-          <ul>
-            <li><strong>Electrical Safety:</strong> Ensure all devices are properly grounded and protected from moisture.</li>
-            <li><strong>Cleanliness:</strong> Keep the chamber and sensors clean to prevent contamination.</li>
-            <li><strong>Calibration:</strong> Calibrate sensors periodically for accurate environmental readings.</li>
-            <li><strong>Backup Power:</strong> Consider a UPS or backup power source for uninterrupted operation.</li>
-          </ul>
-        </div>
-      </div>
-
+    <div class="step-card" id="s1">
+      <div class="step-card-header"><div class="step-number">01</div><div class="step-header-content"><div><div class="step-tag">Getting Started</div><div class="step-title">First-time Setup</div></div><div class="step-icon-wrap">🚀</div></div></div>
+      <div class="step-body"><ul>
+        <li><strong>Registration:</strong> Click "Create an account" on the login page — owner approval is required before access is granted.</li>
+        <li><strong>Login:</strong> Use your approved username and password to sign in at the login page.</li>
+        <li><strong>Dashboard:</strong> After login you'll be redirected immediately to the main control panel.</li>
+      </ul></div>
     </div>
-  </main>
+
+    <div class="step-card" id="s2">
+      <div class="step-card-header"><div class="step-number">02</div><div class="step-header-content"><div><div class="step-tag">Dashboard</div><div class="step-title">Understanding the Dashboard</div></div><div class="step-icon-wrap">📊</div></div></div>
+      <div class="step-body"><ul>
+        <li><strong>Live Status:</strong> Real-time temperature and humidity gauges with color-coded indicators.</li>
+        <li><strong>Device Control:</strong> Toggle between Auto and Manual modes for full automation or direct control.</li>
+        <li><strong>Alerts:</strong> Instant notifications when environmental conditions fall outside ideal ranges.</li>
+        <li><strong>Mushroom Records:</strong> Log growth stages, counts, and field observations directly from the dashboard.</li>
+      </ul></div>
+    </div>
+
+    <div class="step-card" id="s3">
+      <div class="step-card-header"><div class="step-number">03</div><div class="step-header-content"><div><div class="step-tag">Environment</div><div class="step-title">Monitoring Conditions</div></div><div class="step-icon-wrap">🌡️</div></div></div>
+      <div class="step-body"><ul>
+        <li><strong>Temperature:</strong> Target 22–28°C. Color-coded: blue = too low, green = ideal, red = too high.</li>
+        <li><strong>Humidity:</strong> Target 85–95%. Blue = too low, green = ideal, red = too high.</li>
+        <li><strong>Alerts:</strong> Address out-of-range conditions promptly to prevent crop loss.</li>
+      </ul></div>
+    </div>
+
+    <div class="step-card" id="s4">
+      <div class="step-card-header"><div class="step-number">04</div><div class="step-header-content"><div><div class="step-tag">Control</div><div class="step-title">Device Control & Overrides</div></div><div class="step-icon-wrap">⚙️</div></div></div>
+      <div class="step-body"><ul>
+        <li><strong>Auto Mode:</strong> Recommended. System automatically adjusts devices based on sensor readings.</li>
+        <li><strong>Manual Mode:</strong> Direct control for emergencies or specific targeted adjustments.</li>
+        <li><strong>Status Badges:</strong> Check ON, OFF, or UNKNOWN states for each connected device.</li>
+      </ul><div class="callout">⚠️ Manual overrides are for emergency use only. The system is optimized for Auto mode and should return to it once the situation is resolved.</div></div>
+    </div>
+
+    <div class="step-card" id="s5">
+      <div class="step-card-header"><div class="step-number">05</div><div class="step-header-content"><div><div class="step-tag">Records</div><div class="step-title">Tracking Mushroom Growth</div></div><div class="step-icon-wrap">🍄</div></div></div>
+      <div class="step-body"><ul>
+        <li><strong>Add Records:</strong> Log the date, mushroom count, growth stage, and any field observations.</li>
+        <li><strong>Growth Stages:</strong> Spawn Run → Primordia Formation → Fruiting Body → Harvest.</li>
+        <li><strong>Monthly View:</strong> Records are organized by month for easy progress monitoring and comparison.</li>
+      </ul></div>
+    </div>
+
+    <div class="step-card" id="s6">
+      <div class="step-card-header"><div class="step-number">06</div><div class="step-header-content"><div><div class="step-tag">Reports</div><div class="step-title">Viewing Reports & Analytics</div></div><div class="step-icon-wrap">📈</div></div></div>
+      <div class="step-body"><ul>
+        <li><strong>Sensor Data:</strong> Temperature and humidity trends charted over the last 7 days.</li>
+        <li><strong>Changes Report:</strong> Daily averages and overall environmental trend analysis.</li>
+        <li><strong>Data Persistence:</strong> All reports are saved to the database for long-term historical review.</li>
+      </ul></div>
+    </div>
+
+    <div class="step-card" id="s7">
+      <div class="step-card-header"><div class="step-number">07</div><div class="step-header-content"><div><div class="step-tag">Profile</div><div class="step-title">Profile & System Management</div></div><div class="step-icon-wrap">👤</div></div></div>
+      <div class="step-body"><ul>
+        <li><strong>Profile Update:</strong> Edit personal information and contact details at any time.</li>
+        <li><strong>Password:</strong> Change your password regularly to maintain account security.</li>
+        <li><strong>Activity Log:</strong> Review your recent system interactions and login history.</li>
+        <li><strong>User Management (Owner):</strong> Approve new registrations and manage staff access levels.</li>
+      </ul></div>
+    </div>
+
+    <div class="step-card" id="s8">
+      <div class="step-card-header"><div class="step-number">08</div><div class="step-header-content"><div><div class="step-tag">Best Practices</div><div class="step-title">Tips for Optimal Results</div></div><div class="step-icon-wrap">✅</div></div></div>
+      <div class="step-body"><ul>
+        <li>Check the dashboard daily to ensure conditions remain within optimal ranges.</li>
+        <li>Address alerts promptly — delayed response can cause significant crop loss.</li>
+        <li>Keep sensor hardware clean and calibrated for reliable readings and automation.</li>
+        <li>Update mushroom growth records consistently for more accurate long-term tracking.</li>
+        <li>Use strong passwords and always log out after each session.</li>
+      </ul></div>
+    </div>
+
+    <div class="step-card" id="s9">
+      <div class="step-card-header"><div class="step-number">09</div><div class="step-header-content"><div><div class="step-tag">Troubleshooting</div><div class="step-title">Common Issues & Fixes</div></div><div class="step-icon-wrap">🔧</div></div></div>
+      <div class="step-body"><ul>
+        <li><strong>Offline Sensors:</strong> Check device connections and verify power supply to the ESP32.</li>
+        <li><strong>Alerts Not Clearing:</strong> Verify environmental conditions have normalized and device responses are active.</li>
+        <li><strong>Login Issues:</strong> Ensure your account is approved by the owner and credentials are correct.</li>
+        <li><strong>Manual Controls Not Working:</strong> Switch to Manual mode explicitly before attempting overrides.</li>
+      </ul><div class="callout">If problems persist, contact the system administrator or owner directly for assistance.</div></div>
+    </div>
+
+    <div class="step-card" id="s10">
+      <div class="step-card-header"><div class="step-number">10</div><div class="step-header-content"><div><div class="step-tag">Safety</div><div class="step-title">Safety & Maintenance</div></div><div class="step-icon-wrap">🛡️</div></div></div>
+      <div class="step-body"><ul>
+        <li><strong>Electrical Safety:</strong> Ensure all devices are properly grounded and protected from moisture.</li>
+        <li><strong>Cleanliness:</strong> Keep the chamber and sensors clean to prevent contamination and false readings.</li>
+        <li><strong>Calibration:</strong> Calibrate sensors periodically to maintain accurate environmental measurements.</li>
+        <li><strong>Backup Power:</strong> Consider a UPS or backup power source for uninterrupted 24/7 operation.</li>
+      </ul></div>
+    </div>
+
+  </div>
 </div>
 
-<!-- ── FOOTER ── -->
 <footer>
-  <span class="footer-copy">© 2025 J WHO? Mushroom Incubation System — All Rights Reserved</span>
-  <span class="footer-brand">J WHO? MIS</span>
+  <span class="foot-copy">© 2025 J WHO? Mushroom Incubation System — All Rights Reserved</span>
+  <span class="foot-brand">J WHO? MIS</span>
 </footer>
 
+<!-- SCROLL TO TOP -->
+<button class="scroll-top" id="scrollTop" aria-label="Back to top" title="Back to top">&#8679;</button>
+
 <script>
-  // PH Time clock
-  function updatePHTime() {
-    const now = new Date();
-    const ph = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
-    let h = ph.getHours(), m = ph.getMinutes(), s = ph.getSeconds();
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12 || 12;
-    const pad = n => String(n).padStart(2, '0');
-    document.getElementById('phTime').textContent = `${pad(h)}:${pad(m)}:${pad(s)} ${ampm}`;
-    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    document.getElementById('phDate').textContent =
-      `${days[ph.getDay()]}, ${months[ph.getMonth()]} ${ph.getDate()}, ${ph.getFullYear()}`;
-  }
-  updatePHTime();
-  setInterval(updatePHTime, 1000);
+// PH Time
+function updatePHTime(){
+  const now=new Date(),ph=new Date(now.toLocaleString('en-US',{timeZone:'Asia/Manila'}));
+  let h=ph.getHours(),m=ph.getMinutes(),s=ph.getSeconds();
+  const ampm=h>=12?'PM':'AM'; h=h%12||12;
+  const pad=n=>String(n).padStart(2,'0');
+  document.getElementById('phTime').textContent=`${pad(h)}:${pad(m)}:${pad(s)} ${ampm}`;
+  const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('phDate').textContent=`${mo[ph.getMonth()]} ${ph.getDate()}, ${ph.getFullYear()}`;
+}
+updatePHTime(); setInterval(updatePHTime,1000);
 
-  // Active TOC link on scroll
-  const sections = document.querySelectorAll('.step-card[id]');
-  const tocLinks = document.querySelectorAll('.toc-item a');
-  const io = new IntersectionObserver((entries) => {
-    entries.forEach(e => {
-      if (e.isIntersecting) {
-        tocLinks.forEach(l => l.classList.remove('active'));
-        const active = document.querySelector(`.toc-item a[href="#${e.target.id}"]`);
-        if (active) active.classList.add('active');
-      }
-    });
-  }, { threshold: 0.4 });
-  sections.forEach(s => io.observe(s));
+// Modal helpers
+function openModal(id){document.getElementById(id).classList.add('open');document.body.style.overflow='hidden';}
+function closeModal(id){document.getElementById(id).classList.remove('open');document.body.style.overflow='';}
+function handleBackdrop(e,id){if(e.target===document.getElementById(id))closeModal(id);}
+function switchTo(id){['loginModal','registerModal'].forEach(m=>document.getElementById(m).classList.remove('open'));openModal(id);}
+function openLogin(){openModal('loginModal');}
 
-  // Step card scroll-in animation
-  const cards = document.querySelectorAll('.step-card');
-  const cardIO = new IntersectionObserver((entries) => {
-    entries.forEach((e, i) => {
-      if (e.isIntersecting) {
-        e.target.style.animation = `fadeSlideUp 0.55s ${(i % 2) * 0.08}s both`;
-        cardIO.unobserve(e.target);
-      }
-    });
-  }, { threshold: 0.1 });
-  cards.forEach(c => cardIO.observe(c));
+document.addEventListener('keydown',e=>{if(e.key==='Escape')['loginModal','registerModal'].forEach(id=>closeModal(id));});
+
+<?php if(!empty($login_error)): ?>
+document.addEventListener('DOMContentLoaded',()=>openModal('loginModal'));
+<?php endif; ?>
+<?php if(!empty($reg_error)||!empty($reg_success)): ?>
+document.addEventListener('DOMContentLoaded',()=>openModal('registerModal'));
+<?php endif; ?>
+
+// Password toggle
+function togglePw(inputId,iconId){
+  const inp=document.getElementById(inputId),ico=document.getElementById(iconId);
+  const show=inp.type==='password';
+  inp.type=show?'text':'password';
+  ico.classList.toggle('fa-eye',!show);
+  ico.classList.toggle('fa-eye-slash',show);
+}
+
+// Strength bar
+function checkStrength(v){
+  let s=0;
+  if(v.match(/[a-z]/))s++; if(v.match(/[A-Z]/))s++;
+  if(v.match(/[0-9]/))s++; if(v.match(/[^a-zA-Z0-9]/))s++;
+  if(v.length>=8)s++;
+  const fill=document.getElementById('strFill');
+  fill.style.width=(s/5*100)+'%';
+  fill.style.background=s<=2?'#e74c3c':s===3?'#e67e22':'#4a7c4a';
+}
+
+// Scroll-reveal cards
+const cards=document.querySelectorAll('.step-card');
+const io=new IntersectionObserver((entries)=>{
+  entries.forEach((e,i)=>{if(e.isIntersecting){setTimeout(()=>e.target.classList.add('visible'),i*40);io.unobserve(e.target);}});
+},{threshold:0.06});
+cards.forEach(c=>io.observe(c));
+
+// Active sidebar & tab on scroll
+const sections=document.querySelectorAll('.step-card[id]');
+const sideLinks=document.querySelectorAll('.sl a');
+const tabLinks=document.querySelectorAll('.tab-link');
+const markActive=(id)=>{
+  sideLinks.forEach(l=>l.classList.toggle('active',l.getAttribute('href')==='#'+id));
+  tabLinks.forEach(l=>l.classList.toggle('active',l.getAttribute('href')==='#'+id));
+};
+const sio=new IntersectionObserver((entries)=>{entries.forEach(e=>{if(e.isIntersecting)markActive(e.target.id);});},{rootMargin:'-30% 0px -60% 0px',threshold:0});
+sections.forEach(s=>sio.observe(s));
+
+// Scroll-to-top
+(function(){
+  const btn = document.getElementById('scrollTop');
+  window.addEventListener('scroll', () => {
+    btn.classList.toggle('show', window.scrollY > 320);
+  });
+  btn.addEventListener('click', () => {
+    window.scrollTo({top: 0, behavior: 'smooth'});
+  });
+})();
 </script>
 </body>
 </html>

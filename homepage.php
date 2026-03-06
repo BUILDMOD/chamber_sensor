@@ -1,474 +1,608 @@
 <?php  
 include 'includes/db_connect.php';
+include 'send_email.php';
 session_start();
+if (isset($_SESSION['user'])) { header("Location: dashboard.php"); exit; }
 
-if (isset($_SESSION['user'])) {
-    header("Location: dashboard.php");
-    exit;
+$login_error  = "";
+$reg_error    = "";
+$reg_success  = "";
+
+/* ── LOGIN ── */
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['modal_login'])) {
+    $username = mysqli_real_escape_string($conn, $_POST['username']);
+    $password = $_POST['password'];
+    $stmt = $conn->prepare("SELECT id,fullname,username,password,role,verified FROM users WHERE username=? LIMIT 1");
+    $stmt->bind_param("s", $username);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    if ($result && $result->num_rows == 1) {
+        $row = $result->fetch_assoc();
+        if (password_verify($password, $row['password'])) {
+            if ($row['verified'] == 1 || $row['role'] == 'owner') {
+                $_SESSION['user']     = $row['username'];
+                $_SESSION['role']     = $row['role'];
+                $_SESSION['fullname'] = $row['fullname'];
+                $ip  = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+                $usr = $row['username'];
+                $desc = "User '{$usr}' logged in successfully.";
+                $evt = 'login';
+                $ls = $conn->prepare("INSERT INTO system_logs (event_type,description,user,ip_address) VALUES (?,?,?,?)");
+                if ($ls) { $ls->bind_param("ssss",$evt,$desc,$usr,$ip); $ls->execute(); $ls->close(); }
+                header("Location: dashboard.php"); exit;
+            } else { $login_error = "Your account is pending approval."; }
+        } else { $login_error = "Invalid username or password."; }
+    } else { $login_error = "Invalid username or password."; }
 }
 
-$error = "";
+/* ── REGISTER ── */
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['modal_register'])) {
+    $first  = mysqli_real_escape_string($conn, $_POST['first_name']);
+    $middle = mysqli_real_escape_string($conn, $_POST['middle_name']);
+    $last   = mysqli_real_escape_string($conn, $_POST['last_name']);
+    $suffix = mysqli_real_escape_string($conn, $_POST['suffix'] ?? '');
+    $fullname = trim($first." ".($middle?$middle." ":"").$last.($suffix?", ".$suffix:""));
+    $email    = mysqli_real_escape_string($conn, $_POST['email']);
+    $phone    = mysqli_real_escape_string($conn, $_POST['phone']);
+    $username = mysqli_real_escape_string($conn, $_POST['username']);
+    $password_raw = $_POST['reg_password'];
+    $role = "staff";
+
+    if (!preg_match("/^[A-Za-z\s]+$/", $first))          { $reg_error = "First name must contain letters only."; }
+    elseif (!empty($middle) && !preg_match("/^[A-Za-z\s]+$/", $middle)) { $reg_error = "Middle name must contain letters only."; }
+    elseif (!preg_match("/^[A-Za-z\s]+$/", $last))        { $reg_error = "Last name must contain letters only."; }
+    elseif (!preg_match("/^[0-9]+$/", $phone))             { $reg_error = "Phone number must contain numbers only."; }
+    elseif (!preg_match("/^[A-Za-z0-9]+$/", $username))   { $reg_error = "Username must contain letters and numbers only."; }
+
+    if (empty($reg_error)) {
+        $up = preg_match('@[A-Z]@',$password_raw);
+        $lo = preg_match('@[a-z]@',$password_raw);
+        $nm = preg_match('@[0-9]@',$password_raw);
+        $sp = preg_match('@[^\w]@',$password_raw);
+        $ml = strlen($password_raw) >= 8;
+        if (!$up || !$lo || !$nm || !$sp || !$ml)
+            $reg_error = "Password must be 8+ chars with uppercase, lowercase, number, and special character.";
+    }
+
+    if (empty($reg_error)) {
+        $password = password_hash($password_raw, PASSWORD_DEFAULT);
+        $check = $conn->prepare("SELECT id FROM users WHERE username=? OR email=?");
+        $check->bind_param("ss",$username,$email);
+        $check->execute(); $check->store_result();
+        if ($check->num_rows > 0) {
+            $reg_error = "Username or Email already exists.";
+        } else {
+            // Auto-add suffix column if it doesn't exist
+            $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS suffix VARCHAR(20) NOT NULL DEFAULT '' AFTER last_name");
+            $stmt = $conn->prepare("INSERT INTO users (first_name,middle_name,last_name,suffix,fullname,email,phone,username,password,role,verified) VALUES (?,?,?,?,?,?,?,?,?,?,0)");
+            if ($stmt) {
+                $stmt->bind_param("ssssssssss",$first,$middle,$last,$suffix,$fullname,$email,$phone,$username,$password,$role);
+                $stmt->execute();
+                $subject = "Welcome to J.WHO Mushroom System!";
+                $body = "Hello <b>$fullname</b>,<br><br>Your account has been created. <b>Username:</b> $username<br><b>Role:</b> $role<br><br>Thank you!<br><b>J.WHO Mushroom Farm</b>";
+                $emailResult = sendEmail($email,$subject,$body);
+                if ($emailResult !== "SUCCESS") error_log("Reg email failed for $email: ".$emailResult);
+                $reg_success = "Account created! An admin will approve your access.";
+            } else { $reg_error = "Database error: ".$conn->error; }
+        }
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>J WHO? Mushroom Incubation System</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<title>J WHO? — Mushroom Incubation System</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400;1,600&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 <style>
-  :root {
-    --ink: #0f0e0c;
-    --cream: #f5f0e8;
-    --moss: #2e4a2e;
-    --sage: #6b8f5e;
-    --spore: #c4a96d;
-    --fog: rgba(245,240,232,0.06);
-  }
+:root{
+  --ivory:#f6f1e7;--ivory2:#ede7d6;--ink:#18201a;
+  --charcoal:#2e3830;--forest:#2b4d30;--fern:#4a7a50;
+  --moss:#7aab70;--moss-lt:#c2dabb;--amber:#c8883a;
+  --line:rgba(24,32,26,0.12);--r:12px;
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--ink);color:var(--ink);font-family:'Outfit',sans-serif;overflow-x:hidden;min-height:100vh;}
+body::after{content:'';position:fixed;inset:0;z-index:9998;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23g)' opacity='0.04'/%3E%3C/svg%3E");opacity:.6;}
 
-  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:600;height:66px;display:flex;align-items:center;justify-content:space-between;padding:0 44px;background:rgba(18,26,18,0.55);backdrop-filter:blur(22px) saturate(1.2);border-bottom:1px solid rgba(255,255,255,0.08);min-width:0;}
+.nav-logo{display:flex;align-items:center;gap:13px;text-decoration:none;flex-shrink:0;min-width:0;}
+.nav-logo img{width:38px;height:38px;border-radius:50%;object-fit:cover;border:2px solid rgba(194,218,187,0.4);box-shadow:0 2px 10px rgba(0,0,0,.3);}
+.logo-text{font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:600;color:#fff;letter-spacing:-0.01em;line-height:1;}
+.logo-sub{font-family:'Outfit',sans-serif;display:block;font-size:9px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--moss);margin-top:2px;}
+.nav-right{display:flex;align-items:center;gap:10px;flex-shrink:0;margin-left:auto;}
+.nav-clock{display:flex;flex-direction:column;align-items:flex-end;margin-right:6px;line-height:1.3;}
+.nc-time{font-size:13px;font-weight:600;color:rgba(255,255,255,.9);font-variant-numeric:tabular-nums;letter-spacing:.02em;}
+.nc-date{font-size:10px;color:rgba(255,255,255,.4);letter-spacing:.03em;}
+.nav-sep{width:1px;height:28px;background:rgba(255,255,255,.12);flex-shrink:0;margin:0 4px;}
+.nl{font-size:13px;font-weight:500;color:rgba(255,255,255,.75);text-decoration:none;padding:8px 18px;border-radius:100px;border:1px solid rgba(255,255,255,.22);transition:background .2s,color .2s,border-color .2s;white-space:nowrap;cursor:pointer;background:transparent;font-family:'Outfit',sans-serif;}
+.nl:hover{background:rgba(255,255,255,.08);color:#fff;border-color:rgba(255,255,255,.4);}
+.nl-cta{background:var(--forest)!important;color:#fff!important;border-color:var(--fern)!important;font-weight:600;box-shadow:0 4px 16px rgba(43,77,48,.35);}
+.nl-cta:hover{background:var(--fern)!important;transform:translateY(-1px);box-shadow:0 8px 24px rgba(43,77,48,.45)!important;border-color:var(--moss)!important;}
 
-  html { scroll-behavior: smooth; }
+/* HERO */
+.hero{position:relative;min-height:100vh;display:flex;align-items:center;overflow:hidden;}
+.hero-bg{position:absolute;inset:0;z-index:0;background:url('assets/img/bg-mushroom.jpg') center/cover no-repeat;}
+.hero-overlay{position:absolute;inset:0;z-index:1;background:linear-gradient(to right,rgba(18,32,18,0.90) 0%,rgba(18,32,18,0.65) 50%,rgba(18,32,18,0.22) 100%),linear-gradient(to top,rgba(18,32,18,0.5) 0%,transparent 50%);}
+.hero-deco-letter{position:absolute;top:-60px;left:-20px;z-index:2;font-family:'Cormorant Garamond',serif;font-size:clamp(300px,32vw,460px);font-weight:300;font-style:italic;color:rgba(255,255,255,0.025);line-height:1;pointer-events:none;user-select:none;letter-spacing:-.04em;}
+.spore{position:absolute;border-radius:50%;z-index:2;background:rgba(122,171,112,.09);animation:sporeFloat var(--d) ease-in-out var(--delay) infinite alternate;pointer-events:none;}
+@keyframes sporeFloat{from{transform:translateY(0) scale(1);}to{transform:translateY(-20px) scale(1.06);}}
 
-  body {
-    background: var(--ink);
-    color: var(--cream);
-    font-family: 'DM Mono', monospace;
-    overflow-x: hidden;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-  }
+.hero-logo-watermark{position:absolute;right:4%;top:50%;transform:translateY(-50%);z-index:3;pointer-events:none;user-select:none;width:clamp(300px,38vw,560px);height:clamp(300px,38vw,560px);animation:fadeIn 1.2s .3s both;}
+.hero-logo-watermark img{width:100%;height:100%;object-fit:contain;opacity:0.82;filter:brightness(1.1) drop-shadow(0 0 60px rgba(122,171,112,0.45)) drop-shadow(0 0 20px rgba(122,171,112,0.3));border-radius:50%;}
+@keyframes fadeIn{from{opacity:0;}to{opacity:1;}}
 
-  /* ── NAV ── */
-  nav {
-    position: fixed; top: 0; left: 0; right: 0;
-    z-index: 100;
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 18px 48px;
-    border-bottom: 1px solid rgba(245,240,232,0.07);
-    backdrop-filter: blur(14px);
-    background: rgba(15,14,12,0.65);
-  }
+.hero-inner{position:relative;z-index:5;width:100%;padding:100px 80px 80px;max-width:820px;}
+.hero-eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:10px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;color:var(--moss);margin-bottom:20px;animation:fadeUp .8s .15s both;}
+.hero-eyebrow::before{content:'';width:24px;height:1px;background:var(--moss);}
+.hero-title{font-family:'Cormorant Garamond',serif;font-size:clamp(60px,7vw,100px);font-weight:300;line-height:1.0;letter-spacing:-.03em;color:#fff;margin-bottom:28px;animation:fadeUp .8s .25s both;}
+.hero-title em{font-style:italic;color:var(--moss);}
+.hero-desc{font-size:15px;line-height:1.8;color:rgba(255,255,255,.5);max-width:480px;margin-bottom:44px;animation:fadeUp .8s .35s both;}
+.hero-btns{display:flex;gap:14px;align-items:center;animation:fadeUp .8s .45s both;}
+.btn-hero-primary{display:inline-flex;align-items:center;gap:10px;padding:14px 32px;background:var(--amber);color:#fff;font-family:'Outfit',sans-serif;font-size:14px;font-weight:600;border-radius:var(--r);text-decoration:none;box-shadow:0 4px 20px rgba(200,136,58,.4);transition:all .25s;letter-spacing:.01em;border:1px solid transparent;cursor:pointer;}
+.btn-hero-primary:hover{background:#d4963e;transform:translateY(-2px);box-shadow:0 12px 32px rgba(200,136,58,.45);}
+.btn-hero-ghost{display:inline-flex;align-items:center;gap:8px;padding:13px 24px;border:1px solid rgba(255,255,255,.25);color:rgba(255,255,255,.8);font-size:14px;font-weight:400;border-radius:var(--r);text-decoration:none;transition:all .2s;backdrop-filter:blur(4px);background:rgba(255,255,255,.04);}
+.btn-hero-ghost:hover{border-color:var(--moss);color:var(--moss);background:rgba(122,171,112,.06);}
 
-  .nav-brand {
-    display: flex; align-items: center; gap: 14px;
-    flex-shrink: 0;
-  }
-  .nav-brand img { width: 42px; height: 42px; object-fit: contain; }
-  .nav-brand-text {
-    font-family: 'Syne', sans-serif;
-    font-size: 15px; font-weight: 700;
-    letter-spacing: 0.06em; text-transform: uppercase;
-    color: var(--cream); line-height: 1.3;
-  }
-  .nav-brand-sub {
-    display: block;
-    font-family: 'DM Mono', monospace;
-    font-size: 10px; font-weight: 300;
-    letter-spacing: 0.15em; color: var(--spore);
-    text-transform: uppercase;
-  }
+/* ── SHARED MODAL BASE ── */
+.modal-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(10,18,10,0.75);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;pointer-events:none;transition:opacity .3s ease;}
+.modal-backdrop.open{opacity:1;pointer-events:all;}
+.modal{background:rgba(20,30,20,0.97);border:1px solid rgba(255,255,255,0.10);border-radius:22px;padding:36px 32px 28px;width:100%;box-shadow:0 32px 80px rgba(0,0,0,.65);transform:translateY(28px) scale(0.97);transition:transform .38s cubic-bezier(.22,1,.36,1),opacity .3s;opacity:0;position:relative;overflow-y:auto;max-height:90vh;}
+.modal-backdrop.open .modal{transform:translateY(0) scale(1);opacity:1;}
+.modal-close{position:absolute;top:14px;right:16px;background:none;border:none;color:rgba(255,255,255,.3);font-size:20px;cursor:pointer;transition:color .2s;line-height:1;padding:4px;}
+.modal-close:hover{color:rgba(255,255,255,.7);}
 
-  /* PH Time */
-  .ph-time-chip {
-    display: flex; flex-direction: column; align-items: flex-end;
-    flex-shrink: 0; line-height: 1.4;
-  }
-  .ph-time-value {
-    font-size: 13px; font-weight: 500;
-    color: rgba(245,240,232,0.8);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.03em;
-  }
-  .ph-time-date {
-    font-size: 11px;
-    color: rgba(245,240,232,0.35);
-    letter-spacing: 0.03em;
-  }
+/* Modal header with logo */
+.modal-logo{display:flex;align-items:center;gap:10px;margin-bottom:20px;}
+.modal-logo img{width:34px;height:34px;border-radius:50%;border:2px solid rgba(194,218,187,.3);}
+.modal-logo-text{font-family:'Cormorant Garamond',serif;font-size:17px;font-weight:600;color:#fff;line-height:1;}
+.modal-logo-sub{font-size:9px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--moss);display:block;margin-top:2px;}
+.modal-title{font-family:'Cormorant Garamond',serif;font-size:26px;font-weight:400;color:#fff;margin-bottom:4px;letter-spacing:-.01em;}
+.modal-sub{font-size:12px;color:rgba(255,255,255,.35);margin-bottom:20px;}
 
-  .nav-actions { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+/* Alerts */
+.m-error{font-size:12px;color:#f08080;background:rgba(192,57,43,.15);border:1px solid rgba(192,57,43,.25);border-radius:8px;padding:9px 12px;margin-bottom:14px;}
+.m-success{font-size:12px;color:#9affb5;background:rgba(74,124,74,.2);border:1px solid rgba(74,124,74,.35);border-radius:8px;padding:9px 12px;margin-bottom:14px;}
 
-  .pill-btn {
-    font-family: 'DM Mono', monospace;
-    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
-    padding: 9px 22px;
-    border-radius: 100px;
-    border: 1px solid rgba(245,240,232,0.2);
-    background: transparent;
-    color: var(--cream);
-    cursor: pointer;
-    transition: all 0.25s ease;
-    text-decoration: none; display: inline-block;
-    white-space: nowrap;
-  }
-  .pill-btn:hover { background: var(--fog); border-color: var(--spore); color: var(--spore); }
-  .pill-btn.filled {
-    background: var(--spore); border-color: var(--spore);
-    color: var(--ink); font-weight: 500;
-  }
-  .pill-btn.filled:hover { background: #d4b97d; border-color: #d4b97d; transform: translateY(-1px); box-shadow: 0 8px 24px rgba(196,169,109,0.3); }
+/* Fields */
+.mfield{margin-bottom:11px;}
+.mfield label{display:block;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.3);margin-bottom:5px;}
+.mfield-wrap{position:relative;}
+.mfield input,.mfield select{width:100%;padding:10px 36px 10px 13px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.11);border-radius:10px;color:#fff;font-family:'Outfit',sans-serif;font-size:13.5px;outline:none;transition:border-color .2s,background .2s;-webkit-appearance:none;}
+.mfield input::placeholder{color:rgba(255,255,255,.2);}
+.mfield input:focus,.mfield select:focus{border-color:rgba(122,171,112,.5);background:rgba(255,255,255,.09);}
+.mfield select option{background:#1e3020;color:#fff;}
+.mfield-icon{position:absolute;right:11px;top:50%;transform:translateY(-50%);color:rgba(255,255,255,.22);font-size:12px;pointer-events:none;}
+.toggle-pw{pointer-events:all;cursor:pointer;transition:color .2s;}
+.toggle-pw:hover{color:var(--moss);}
 
-  /* ── HERO ── */
-  .hero {
-    flex: 1;
-    min-height: 100vh;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    position: relative;
-    overflow: hidden;
-  }
+/* 2-col grid for name fields */
+.mgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
 
-  .hero-bg {
-    position: absolute; inset: 0;
-    background: url('assets/img/bg-mushroom.jpg') center/cover no-repeat;
-    opacity: 0.12; filter: grayscale(30%); z-index: 0;
-  }
+/* Strength bar */
+.str-bar{height:3px;background:rgba(255,255,255,.08);border-radius:3px;margin-top:5px;overflow:hidden;}
+.str-fill{height:100%;width:0;border-radius:3px;transition:width .3s,background .3s;}
 
-  .hero-blob {
-    position: absolute; top: -10%; right: -5%;
-    width: 55vw; height: 85vh;
-    background: radial-gradient(ellipse at 60% 40%, rgba(46,74,46,0.45) 0%, rgba(107,143,94,0.15) 50%, transparent 80%);
-    border-radius: 30% 70% 60% 40% / 40% 30% 70% 60%;
-    z-index: 1;
-    animation: blobFloat 14s ease-in-out infinite alternate;
-  }
-  @keyframes blobFloat {
-    0%   { border-radius: 30% 70% 60% 40% / 40% 30% 70% 60%; transform: scale(1); }
-    50%  { border-radius: 60% 40% 30% 70% / 60% 70% 30% 40%; }
-    100% { border-radius: 40% 60% 70% 30% / 30% 40% 60% 70%; transform: scale(1.04); }
-  }
+/* Submit */
+.modal-btn{width:100%;padding:12px;background:linear-gradient(135deg,var(--forest),var(--fern));border:none;border-radius:10px;color:#fff;font-family:'Outfit',sans-serif;font-size:14px;font-weight:600;cursor:pointer;margin-top:8px;transition:opacity .2s,transform .2s;letter-spacing:.02em;}
+.modal-btn:hover{opacity:.88;transform:translateY(-1px);}
 
-  .spores { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
-  .spore {
-    position: absolute; border-radius: 50%;
-    background: var(--spore); opacity: 0;
-    animation: sporeRise var(--dur) ease-in var(--delay) infinite;
-  }
-  @keyframes sporeRise {
-    0%   { opacity: 0; transform: translateY(0) scale(0.5); }
-    15%  { opacity: 0.6; }
-    100% { opacity: 0; transform: translateY(-60vh) scale(1.2); }
-  }
+/* Switch link */
+.modal-switch{margin-top:18px;text-align:center;font-size:12px;color:rgba(255,255,255,.3);}
+.modal-switch a{color:var(--moss);text-decoration:none;cursor:pointer;}
+.modal-switch a:hover{color:var(--moss-lt);}
 
-  .scanline {
-    position: absolute; inset: 0; z-index: 2; pointer-events: none;
-    background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.03) 4px);
-  }
-
-  /* Hero content */
-  .hero-content {
-    grid-column: 1; position: relative; z-index: 5;
-    display: flex; flex-direction: column; justify-content: center;
-    padding: 130px 64px 80px;
-  }
-
-  .hero-tag {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
-    color: var(--spore); margin-bottom: 32px;
-    animation: fadeSlideUp 0.8s 0.2s both;
-  }
-  .hero-tag::before { content: ''; display: inline-block; width: 28px; height: 1px; background: var(--spore); }
-
-  .hero-title {
-    font-family: 'DM Serif Display', serif;
-    font-size: clamp(52px, 5.5vw, 80px);
-    line-height: 1.05; font-weight: 400;
-    margin-bottom: 28px;
-    animation: fadeSlideUp 0.8s 0.35s both;
-  }
-  .hero-title em { font-style: italic; color: var(--sage); display: block; }
-  .hero-title .accent-word { position: relative; display: inline-block; }
-  .hero-title .accent-word::after {
-    content: ''; position: absolute;
-    bottom: 6px; left: 0; right: 0; height: 3px;
-    background: var(--spore);
-    transform: scaleX(0); transform-origin: left;
-    animation: underlineReveal 0.6s 1.2s forwards;
-  }
-  @keyframes underlineReveal { to { transform: scaleX(1); } }
-
-  .hero-desc {
-    font-size: 15px; line-height: 1.85;
-    max-width: 460px; color: rgba(245,240,232,0.65);
-    margin-bottom: 52px;
-    animation: fadeSlideUp 0.8s 0.5s both;
-  }
-
-  .hero-cta {
-    display: flex; align-items: center; gap: 20px;
-    animation: fadeSlideUp 0.8s 0.65s both;
-  }
-
-  .cta-primary {
-    display: inline-flex; align-items: center; gap: 12px;
-    font-family: 'Syne', sans-serif;
-    font-size: 14px; font-weight: 600;
-    letter-spacing: 0.08em; text-transform: uppercase;
-    padding: 16px 36px;
-    background: var(--moss); border: 1px solid var(--sage);
-    color: var(--cream); border-radius: 4px;
-    cursor: pointer; transition: all 0.3s ease;
-    position: relative; overflow: hidden; text-decoration: none;
-  }
-  .cta-primary::before {
-    content: ''; position: absolute; inset: 0;
-    background: linear-gradient(135deg, rgba(107,143,94,0.3), transparent);
-    transform: translateX(-100%); transition: transform 0.4s ease;
-  }
-  .cta-primary:hover::before { transform: translateX(0); }
-  .cta-primary:hover { box-shadow: 0 0 40px rgba(46,74,46,0.5); transform: translateY(-2px); }
-  .cta-arrow { display: inline-block; font-size: 18px; transition: transform 0.3s ease; }
-  .cta-primary:hover .cta-arrow { transform: translateX(4px); }
-
-  .cta-secondary {
-    font-size: 13px; letter-spacing: 0.1em; text-transform: uppercase;
-    color: rgba(245,240,232,0.5); background: none; border: none;
-    cursor: pointer; padding: 0;
-    text-decoration: underline; text-underline-offset: 4px;
-    text-decoration-color: transparent; transition: all 0.2s;
-  }
-  .cta-secondary:hover { color: var(--spore); text-decoration-color: var(--spore); }
+/* Login modal max-width */
 
 
+/* Modal info card */
+.modal-info-card{
+  margin-top:14px;
+  border:1px solid rgba(122,171,112,0.2);
+  border-radius:10px;
+  overflow:hidden;
+  cursor:pointer;
+  transition:border-color .2s;
+  background:rgba(122,171,112,0.05);
+}
+.modal-info-card:hover{border-color:rgba(122,171,112,0.35);}
+.mic-header{
+  display:flex;align-items:center;gap:8px;
+  padding:9px 13px;
+  user-select:none;
+}
+.mic-icon{color:var(--moss);font-size:13px;flex-shrink:0;}
+.mic-label{flex:1;font-size:11px;font-weight:600;color:rgba(255,255,255,.45);letter-spacing:.04em;text-transform:uppercase;}
+.mic-arrow{color:rgba(255,255,255,.25);font-size:10px;transition:transform .25s;}
+.modal-info-card.expanded .mic-arrow{transform:rotate(180deg);}
+.mic-body{
+  max-height:0;overflow:hidden;
+  transition:max-height .3s ease, padding .3s ease;
+  padding:0 13px;
+}
+.modal-info-card.expanded .mic-body{
+  max-height:120px;
+  padding:0 13px 12px;
+}
+.mic-row{
+  display:flex;align-items:center;gap:10px;
+  padding:6px 0;
+  border-top:1px solid rgba(255,255,255,.06);
+  font-size:11.5px;
+  color:rgba(255,255,255,.38);
+  line-height:1.5;
+}
+.mic-row:first-child{border-top:none;}
+.mic-badge{
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:10px;font-weight:700;letter-spacing:.06em;
+  padding:2px 8px;border-radius:100px;
+  flex-shrink:0;white-space:nowrap;
+}
+.mic-staff{background:rgba(122,171,112,.15);color:var(--moss);}
+.mic-owner{background:rgba(200,136,58,.15);color:var(--amber);}
+.mic-text strong{color:rgba(255,255,255,.6);}
 
-  /* Hero visual */
-  .hero-visual {
-    grid-column: 2; position: relative; z-index: 3;
-    display: flex; align-items: center; justify-content: center;
-    padding: 130px 48px 80px;
-  }
+#loginModal .modal{max-width:360px;}
+/* Register modal slightly wider */
+#registerModal .modal{max-width:420px;}
 
-  .env-card {
-    background: rgba(245,240,232,0.04);
-    border: 1px solid rgba(245,240,232,0.1);
-    border-radius: 16px; backdrop-filter: blur(20px);
-    padding: 32px; width: 100%; max-width: 380px;
-    animation: fadeSlideUp 0.8s 0.7s both, cardFloat 6s ease-in-out infinite;
-    box-shadow: 0 40px 80px rgba(0,0,0,0.4), inset 0 1px 0 rgba(245,240,232,0.08);
-  }
-  @keyframes cardFloat { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+/* MARQUEE */
+.marquee-band{background:var(--forest);padding:13px 0;overflow:hidden;position:relative;z-index:2;}
+.marquee-track{display:flex;width:max-content;animation:marquee 28s linear infinite;}
+@keyframes marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.marquee-item{display:flex;align-items:center;gap:14px;padding:0 28px;white-space:nowrap;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.5);}
+.marquee-dot{width:3px;height:3px;border-radius:50%;background:var(--moss);}
 
-  .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
-  .card-title { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(245,240,232,0.45); }
-  .status-dot { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--sage); letter-spacing: 0.1em; }
-  .status-dot::before {
-    content: ''; width: 7px; height: 7px; border-radius: 50%;
-    background: var(--sage); box-shadow: 0 0 8px var(--sage);
-    animation: pulse 2s infinite;
-  }
-  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.3)} }
+/* FEATURES */
+.features{padding:80px 44px;background:var(--ivory2);border-top:1px solid var(--line);}
+.features-top{max-width:1100px;margin:0 auto 52px;display:flex;align-items:flex-end;justify-content:space-between;gap:32px;}
+.feat-heading{font-family:'Cormorant Garamond',serif;font-size:clamp(36px,4vw,54px);font-weight:300;line-height:1.1;color:var(--ink);letter-spacing:-.02em;}
+.feat-heading em{font-style:italic;color:var(--fern);}
+.feat-sub{max-width:320px;font-size:13.5px;line-height:1.75;color:#6a7a6a;}
+.feat-grid{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:16px;overflow:hidden;}
+.feat-cell{background:var(--ivory);padding:32px 28px;transition:background .2s;}
+.feat-cell:hover{background:#fff;}
+.feat-ico{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:18px;}
+.fc1{background:rgba(200,136,58,.12);}.fc2{background:rgba(74,122,80,.12);}.fc3{background:rgba(43,77,48,.1);}.fc4{background:rgba(160,80,48,.1);}
+.feat-name{font-family:'Cormorant Garamond',serif;font-size:20px;font-weight:400;color:var(--ink);margin-bottom:10px;letter-spacing:-.01em;}
+.feat-desc{font-size:13px;line-height:1.75;color:#6a7a6a;}
 
-  .gauge-row { display: flex; gap: 20px; margin-bottom: 28px; }
-  .gauge {
-    flex: 1; background: rgba(245,240,232,0.04);
-    border: 1px solid rgba(245,240,232,0.08);
-    border-radius: 12px; padding: 18px;
-    position: relative; overflow: hidden;
-  }
-  .gauge::before { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px; }
-  .gauge.temp::before { background: linear-gradient(90deg, var(--moss), var(--sage)); }
-  .gauge.humid::before { background: linear-gradient(90deg, #2a5f7a, #4a9bbf); }
-  .gauge-label { font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: rgba(245,240,232,0.4); margin-bottom: 8px; }
-  .gauge-value { font-family: 'DM Serif Display', serif; font-size: 32px; line-height: 1; color: var(--cream); }
-  .gauge-unit { font-size: 14px; opacity: 0.5; }
-  .gauge-range { font-size: 10px; color: rgba(245,240,232,0.35); margin-top: 6px; }
+/* FOOTER */
+footer{background:var(--charcoal);padding:28px 44px;display:flex;align-items:center;justify-content:space-between;border-top:1px solid rgba(255,255,255,.06);}
+.foot-copy{font-size:12px;color:rgba(255,255,255,.35);letter-spacing:.03em;}
+.foot-brand{font-family:'Cormorant Garamond',serif;font-size:16px;font-weight:600;font-style:italic;color:rgba(255,255,255,.5);}
 
-  .device-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .device-item {
-    display: flex; align-items: center; gap: 10px;
-    background: rgba(245,240,232,0.03); border: 1px solid rgba(245,240,232,0.07);
-    border-radius: 10px; padding: 12px;
-  }
-  .device-icon { font-size: 18px; }
-  .device-info { flex: 1; min-width: 0; }
-  .device-name { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(245,240,232,0.5); margin-bottom: 2px; }
-  .device-status { font-size: 12px; font-weight: 500; }
-  .device-status.on { color: var(--sage); }
-  .device-status.off { color: rgba(245,240,232,0.3); }
-  .toggle { width: 32px; height: 18px; background: rgba(245,240,232,0.1); border-radius: 100px; position: relative; flex-shrink: 0; }
-  .toggle.active { background: var(--moss); }
-  .toggle::after {
-    content: ''; position: absolute; top: 3px; left: 3px;
-    width: 12px; height: 12px; border-radius: 50%;
-    background: rgba(245,240,232,0.5); transition: transform 0.2s;
-  }
-  .toggle.active::after { transform: translateX(14px); background: var(--sage); }
+@keyframes fadeUp{from{opacity:0;transform:translateY(22px);}to{opacity:1;transform:translateY(0);}}
 
-  /* ── FOOTER ── */
-  footer {
-    position: relative; z-index: 5;
-    border-top: 1px solid rgba(245,240,232,0.07);
-    padding: 24px 48px;
-    display: flex; align-items: center; justify-content: space-between;
-    background: rgba(0,0,0,0.3);
-  }
-  .footer-copy { font-size: 12px; letter-spacing: 0.06em; color: rgba(245,240,232,0.3); }
-  .footer-brand { font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 600; color: rgba(245,240,232,0.2); letter-spacing: 0.1em; text-transform: uppercase; }
+@media(max-width:1024px){.hero-logo-watermark{width:240px;height:240px;right:3%;}.feat-grid{grid-template-columns:1fr 1fr;}.features-top{flex-direction:column;align-items:flex-start;}}
+@media(max-width:768px){.hero-inner{padding:90px 36px 60px;}.hero-title{font-size:56px;}.hero-logo-watermark{display:none;}nav{padding:0 20px;}.nc-date{display:none;}.feat-grid{grid-template-columns:1fr;}.features{padding:56px 24px;}}
+@media(max-width:540px){.hero-title{font-size:44px;}.hero-btns{flex-direction:column;align-items:flex-start;}.nav-clock{display:none;}.nav-sep{display:none;}footer{padding:20px 24px;flex-direction:column;gap:8px;text-align:center;}.mgrid{grid-template-columns:1fr;}}
 
-  @keyframes fadeSlideUp {
-    from { opacity: 0; transform: translateY(24px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-
-  /* ── RESPONSIVE ── */
-  @media (max-width: 1100px) {
-    nav { padding: 16px 32px; }
-    .ph-time-chip { display: none; }
-  }
-  @media (max-width: 1024px) {
-    .hero { grid-template-columns: 1fr; }
-    .hero-visual { display: none; }
-    .hero-content { padding: 130px 40px 120px; }
-    .hero-stats { left: 40px; }
-    footer { padding: 20px 40px; }
-  }
-  @media (max-width: 640px) {
-    nav { padding: 14px 20px; gap: 12px; }
-    .nav-brand img { width: 34px; height: 34px; }
-    .nav-brand-text { font-size: 13px; }
-    .pill-btn { padding: 7px 14px; font-size: 10px; }
-    .hero-content { padding: 110px 24px 100px; }
-    .hero-stats { left: 24px; bottom: 32px; gap: 28px; }
-    .hero-stats .stat-value { font-size: 22px; }
-    footer { padding: 18px 24px; flex-direction: column; gap: 6px; text-align: center; }
-  }
+/* ── SCROLL-TO-TOP FAB ── */
+.scroll-top{
+  position:fixed;
+  bottom:28px;right:28px;
+  z-index:900;
+  width:44px;height:44px;
+  background:var(--forest);
+  border:1px solid var(--fern);
+  border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;
+  box-shadow:0 4px 20px rgba(0,0,0,.35);
+  opacity:0;pointer-events:none;
+  transform:translateY(12px);
+  transition:opacity .3s,transform .3s,background .2s;
+  color:#fff;font-size:16px;
+}
+.scroll-top.show{opacity:1;pointer-events:all;transform:translateY(0);}
+.scroll-top:hover{background:var(--fern);box-shadow:0 8px 28px rgba(43,77,48,.5);}
 </style>
 </head>
 <body>
 
-<!-- ── NAV ── -->
+<!-- NAV -->
 <nav>
-  <div class="nav-brand">
-    <img src="assets/img/logo.png" alt="Logo">
-    <div>
-      <div class="nav-brand-text">J WHO?</div>
-      <span class="nav-brand-sub">Mushroom Incubation</span>
+  <a href="homepage.php" class="nav-logo">
+    <img src="assets/img/logo.png" alt="J.WHO Logo">
+    <div><span class="logo-text">J WHO?</span><span class="logo-sub">Mushroom Incubation</span></div>
+  </a>
+  <div class="nav-right">
+    <div class="nav-clock">
+      <span class="nc-time" id="phTime">--:-- --</span>
+      <span class="nc-date" id="phDate">--- --, ----</span>
     </div>
-  </div>
-
-  <div class="nav-actions">
-    <div class="ph-time-chip">
-      <span class="ph-time-value" id="phTime">--:-- --</span>
-      <span class="ph-time-date" id="phDate">---, --- --, ----</span>
-    </div>
-    <a href="docs.php" class="pill-btn">How It Works</a>
-    <a href="index.php" class="pill-btn filled">Log In</a>
+    <div class="nav-sep"></div>
+    <a href="docs.php" class="nl">How It Works</a>
+    <button class="nl nl-cta" onclick="openLogin()">Log In →</button>
   </div>
 </nav>
 
-<!-- ── HERO ── -->
-<section class="hero">
-  <div class="hero-bg"></div>
-  <div class="hero-blob"></div>
-  <div class="scanline"></div>
-  <div class="spores" id="spores"></div>
+<!-- ══════════ LOGIN MODAL ══════════ -->
+<div class="modal-backdrop" id="loginModal" onclick="handleBackdrop(event,'loginModal')">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('loginModal')">&times;</button>
+    <div class="modal-logo">
+      <img src="assets/img/logo.png" alt="">
+      <div><span class="modal-logo-text">J WHO?</span><span class="modal-logo-sub">Mushroom Incubation</span></div>
+    </div>
+    <div class="modal-title">Welcome back</div>
+    <div class="modal-sub">Sign in to access your dashboard</div>
 
-  <div class="hero-content">
-    <div class="hero-tag">Smart Cultivation System</div>
+    <?php if (!empty($login_error)): ?>
+      <div class="m-error"><?= htmlspecialchars($login_error) ?></div>
+    <?php endif; ?>
 
-    <h1 class="hero-title">
-      <span class="accent-word">Precision</span>
-      <em>incubation</em>
-      for reliable<br>yields
-    </h1>
+    <form method="POST">
+      <input type="hidden" name="modal_login" value="1">
+      <div class="mfield">
+        <label>Username</label>
+        <div class="mfield-wrap">
+          <input type="text" name="username" placeholder="Enter your username" required autocomplete="username">
+          <span class="mfield-icon"><i class="fa fa-user"></i></span>
+        </div>
+      </div>
+      <div class="mfield">
+        <label>Password</label>
+        <div class="mfield-wrap">
+          <input type="password" id="loginPw" name="password" placeholder="Enter your password" required autocomplete="current-password">
+          <span class="mfield-icon toggle-pw" onclick="togglePw('loginPw','loginPwEye')"><i class="fa fa-eye" id="loginPwEye"></i></span>
+        </div>
+      </div>
+      <button type="submit" class="modal-btn">Sign In</button>
+    </form>
 
-    <p class="hero-desc">
-      A modern monitoring system designed to optimize mushroom
-      growth conditions with automated tracking, real-time environment
-      control, and data-driven insights for consistently healthy yields.
-    </p>
-
-    <div class="hero-cta">
-      <a href="index.php" class="cta-primary">
-        Access Dashboard
-        <span class="cta-arrow">→</span>
-      </a>
-      <a href="docs.php" class="cta-secondary">Learn how it works</a>
+    <div class="modal-switch">
+      Don't have an account? <a onclick="switchTo('registerModal')">Create one</a>
+    </div>
+    <div class="modal-info-card" onclick="this.classList.toggle('expanded')" title="Click to expand">
+      <div class="mic-header">
+        <span class="mic-icon"><i class="fa fa-circle-info"></i></span>
+        <span class="mic-label">Account Access Info</span>
+        <span class="mic-arrow"><i class="fa fa-chevron-down"></i></span>
+      </div>
+      <div class="mic-body">
+        <div class="mic-row">
+          <span class="mic-badge mic-staff"><i class="fa fa-user"></i> Staff</span>
+          <span class="mic-text">Requires <strong>owner approval</strong> before you can log in.</span>
+        </div>
+        <div class="mic-row">
+          <span class="mic-badge mic-owner"><i class="fa fa-crown"></i> Owner</span>
+          <span class="mic-text">Has <strong>immediate access</strong> — no approval needed.</span>
+        </div>
+      </div>
     </div>
   </div>
+</div>
 
+<!-- ══════════ REGISTER MODAL ══════════ -->
+<div class="modal-backdrop" id="registerModal" onclick="handleBackdrop(event,'registerModal')">
+  <div class="modal">
+    <button class="modal-close" onclick="closeModal('registerModal')">&times;</button>
+    <div class="modal-logo">
+      <img src="assets/img/logo.png" alt="">
+      <div><span class="modal-logo-text">J WHO?</span><span class="modal-logo-sub">Mushroom Incubation</span></div>
+    </div>
+    <div class="modal-title">Create account</div>
+    <div class="modal-sub">Join J WHO? Mushroom Incubation System</div>
 
+    <?php if (!empty($reg_error)): ?>
+      <div class="m-error"><?= htmlspecialchars($reg_error) ?></div>
+    <?php endif; ?>
+    <?php if (!empty($reg_success)): ?>
+      <div class="m-success"><?= htmlspecialchars($reg_success) ?></div>
+    <?php endif; ?>
 
-  <!-- Live env preview card -->
-  <div class="hero-visual">
-    <div class="env-card">
-      <div class="card-header">
-        <span class="card-title">Live Environment</span>
-        <span class="status-dot">Online</span>
-      </div>
-      <div class="gauge-row">
-        <div class="gauge temp">
-          <div class="gauge-label">Temperature</div>
-          <div class="gauge-value">25.4<span class="gauge-unit">°C</span></div>
-          <div class="gauge-range">Ideal: 22–28°C</div>
+    <form method="POST">
+      <input type="hidden" name="modal_register" value="1">
+
+      <div class="mgrid">
+        <div class="mfield">
+          <label>First Name</label>
+          <div class="mfield-wrap">
+            <input type="text" name="first_name" placeholder="First name" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')">
+          </div>
         </div>
-        <div class="gauge humid">
-          <div class="gauge-label">Humidity</div>
-          <div class="gauge-value">91<span class="gauge-unit">%</span></div>
-          <div class="gauge-range">Ideal: 85–95%</div>
-        </div>
-      </div>
-      <div class="device-grid">
-        <div class="device-item">
-          <span class="device-icon">💧</span>
-          <div class="device-info"><div class="device-name">Mist</div><div class="device-status on">Active</div></div>
-          <div class="toggle active"></div>
-        </div>
-        <div class="device-item">
-          <span class="device-icon">🌀</span>
-          <div class="device-info"><div class="device-name">Fan</div><div class="device-status off">Idle</div></div>
-          <div class="toggle"></div>
-        </div>
-        <div class="device-item">
-          <span class="device-icon">🔥</span>
-          <div class="device-info"><div class="device-name">Heater</div><div class="device-status off">Idle</div></div>
-          <div class="toggle"></div>
-        </div>
-        <div class="device-item">
-          <span class="device-icon">🌿</span>
-          <div class="device-info"><div class="device-name">Sprayer</div><div class="device-status off">Idle</div></div>
-          <div class="toggle"></div>
+        <div class="mfield">
+          <label>Middle Name</label>
+          <div class="mfield-wrap">
+            <input type="text" name="middle_name" placeholder="Middle (optional)" oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')">
+          </div>
         </div>
       </div>
+
+      <div class="mfield">
+        <label>Last Name</label>
+        <div class="mfield-wrap">
+          <input type="text" name="last_name" placeholder="Last name" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')">
+        </div>
+      </div>
+
+      <div class="mfield">
+        <label>Suffix <span style="font-weight:400;opacity:.5;">(e.g. Jr., Sr., III)</span></label>
+        <div class="mfield-wrap">
+          <input type="text" name="suffix" placeholder="Optional">
+        </div>
+      </div>
+
+      <div class="mgrid">
+        <div class="mfield">
+          <label>Email</label>
+          <div class="mfield-wrap">
+            <input type="email" name="email" placeholder="Email address" required>
+            <span class="mfield-icon"><i class="fa fa-envelope"></i></span>
+          </div>
+        </div>
+        <div class="mfield">
+          <label>Phone</label>
+          <div class="mfield-wrap">
+            <input type="text" name="phone" placeholder="Phone number" required maxlength="11" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+            <span class="mfield-icon"><i class="fa fa-phone"></i></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="mfield">
+        <label>Username</label>
+        <div class="mfield-wrap">
+          <input type="text" name="username" placeholder="Choose a username" required oninput="this.value=this.value.replace(/[^A-Za-z0-9]/g,'')">
+          <span class="mfield-icon"><i class="fa fa-user"></i></span>
+        </div>
+      </div>
+
+      <div class="mfield">
+        <label>Password</label>
+        <div class="mfield-wrap">
+          <input type="password" id="regPw" name="reg_password" placeholder="Create a password" required oninput="checkStrength(this.value)">
+          <span class="mfield-icon toggle-pw" onclick="togglePw('regPw','regPwEye')"><i class="fa fa-eye" id="regPwEye"></i></span>
+        </div>
+        <div class="str-bar"><div class="str-fill" id="strFill"></div></div>
+      </div>
+
+      <button type="submit" class="modal-btn">Create Account</button>
+    </form>
+
+    <div class="modal-switch">
+      Already have an account? <a onclick="switchTo('loginModal')">Sign in</a>
+    </div>
+  </div>
+</div>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-bg"></div>
+  <div class="hero-overlay"></div>
+  <div class="hero-deco-letter">M</div>
+  <div class="spore" style="width:130px;height:130px;top:20%;left:42%;--d:8s;--delay:0s;"></div>
+  <div class="spore" style="width:60px;height:60px;top:60%;left:22%;--d:10s;--delay:1.5s;"></div>
+  <div class="spore" style="width:180px;height:180px;top:35%;left:58%;--d:12s;--delay:.6s;"></div>
+  <div class="hero-logo-watermark"><img src="assets/img/logo.png" alt=""></div>
+
+  <div class="hero-inner">
+    <div class="hero-eyebrow">Smart Cultivation System</div>
+    <h1 class="hero-title">Precision <em>incubation</em><br>for the harvest.</h1>
+    <p class="hero-desc">A modern monitoring platform built for mushroom growers — real-time environment control, automated device management, and data-driven insights in one unified system.</p>
+    <div class="hero-btns">
+      <button class="btn-hero-primary" onclick="openLogin()">Access Dashboard →</button>
     </div>
   </div>
 </section>
 
-<!-- ── FOOTER ── -->
+<!-- MARQUEE -->
+<div class="marquee-band" aria-hidden="true">
+  <div class="marquee-track">
+    <?php $items=['Temperature Monitoring','Humidity Control','Auto Device Management','Growth Tracking','Harvest Analytics','Camera Analysis','Email Alerts','Data Reports']; ?>
+    <?php for($r=0;$r<4;$r++) foreach($items as $it): ?>
+      <div class="marquee-item"><span><?= $it ?></span><span class="marquee-dot"></span></div>
+    <?php endforeach; ?>
+  </div>
+</div>
+
+<!-- FEATURES -->
+<section class="features">
+  <div class="features-top">
+    <h2 class="feat-heading">Everything you need<br>for <em>better yields</em></h2>
+    <p class="feat-sub">From environment sensors to automated harvest detection — all connected in a single dashboard built for mushroom growers.</p>
+  </div>
+  <div class="feat-grid">
+    <div class="feat-cell"><div class="feat-ico fc1">🌡️</div><div class="feat-name">Live Monitoring</div><p class="feat-desc">Real-time temperature and humidity tracking with instant alerts when conditions drift outside optimal ranges.</p></div>
+    <div class="feat-cell"><div class="feat-ico fc2">⚙️</div><div class="feat-name">Auto Control</div><p class="feat-desc">Intelligent automation adjusts misting, fans, heaters, and sprayers based on live sensor data.</p></div>
+    <div class="feat-cell"><div class="feat-ico fc3">📊</div><div class="feat-name">Growth Reports</div><p class="feat-desc">Track mushroom growth stages, harvest counts, and environmental trends over time with visual analytics.</p></div>
+    <div class="feat-cell"><div class="feat-ico fc4">📷</div><div class="feat-name">Camera</div><p class="feat-desc">Image analysis estimates mushroom diameter and determines harvest readiness automatically.</p></div>
+  </div>
+</section>
+
+<!-- FOOTER -->
 <footer>
-  <span class="footer-copy">© 2025 J WHO? Mushroom Incubation System — All Rights Reserved</span>
-  <span class="footer-brand">J WHO? MIS</span>
+  <span class="foot-copy">© 2025 J WHO? Mushroom Incubation System — All Rights Reserved</span>
+  <span class="foot-brand">J WHO? MIS</span>
 </footer>
 
-<script>
-  // PH Time clock (UTC+8)
-  function updatePHTime() {
-    const now = new Date();
-    const ph = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
-    let h = ph.getHours(), m = ph.getMinutes(), s = ph.getSeconds();
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    h = h % 12 || 12;
-    const pad = n => String(n).padStart(2, '0');
-    document.getElementById('phTime').textContent = `${pad(h)}:${pad(m)}:${pad(s)} ${ampm}`;
-    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    document.getElementById('phDate').textContent =
-      `${days[ph.getDay()]}, ${months[ph.getMonth()]} ${ph.getDate()}, ${ph.getFullYear()}`;
-  }
-  updatePHTime();
-  setInterval(updatePHTime, 1000);
+<!-- SCROLL TO TOP -->
+<button class="scroll-top" id="scrollTop" aria-label="Back to top" title="Back to top">&#8679;</button>
 
-  // Spore particles
-  const sporesEl = document.getElementById('spores');
-  for (let i = 0; i < 22; i++) {
-    const s = document.createElement('div');
-    s.className = 'spore';
-    const size = Math.random() * 4 + 2;
-    s.style.cssText = `width:${size}px;height:${size}px;left:${Math.random()*100}%;bottom:${Math.random()*30}%;--dur:${6+Math.random()*14}s;--delay:${Math.random()*12}s;`;
-    sporesEl.appendChild(s);
+<script>
+// PH Time
+function updatePHTime(){
+  const now=new Date(),ph=new Date(now.toLocaleString('en-US',{timeZone:'Asia/Manila'}));
+  let h=ph.getHours(),m=ph.getMinutes(),s=ph.getSeconds();
+  const ampm=h>=12?'PM':'AM'; h=h%12||12;
+  const pad=n=>String(n).padStart(2,'0');
+  document.getElementById('phTime').textContent=`${pad(h)}:${pad(m)}:${pad(s)} ${ampm}`;
+  const mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('phDate').textContent=`${mo[ph.getMonth()]} ${ph.getDate()}, ${ph.getFullYear()}`;
+}
+updatePHTime(); setInterval(updatePHTime,1000);
+
+// Modal helpers
+function openModal(id){
+  document.getElementById(id).classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeModal(id){
+  document.getElementById(id).classList.remove('open');
+  document.body.style.overflow='';
+}
+function handleBackdrop(e,id){
+  if(e.target===document.getElementById(id)) closeModal(id);
+}
+function switchTo(id){
+  // close all, open target
+  ['loginModal','registerModal'].forEach(m=>document.getElementById(m).classList.remove('open'));
+  document.getElementById(id).classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function openLogin(){ openModal('loginModal'); }
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    ['loginModal','registerModal'].forEach(id=>closeModal(id));
   }
+});
+
+// Auto-open correct modal on PHP error
+<?php if(!empty($login_error)): ?>
+document.addEventListener('DOMContentLoaded',()=>openModal('loginModal'));
+<?php endif; ?>
+<?php if(!empty($reg_error)||!empty($reg_success)): ?>
+document.addEventListener('DOMContentLoaded',()=>openModal('registerModal'));
+<?php endif; ?>
+
+// Password toggle
+function togglePw(inputId,iconId){
+  const inp=document.getElementById(inputId),ico=document.getElementById(iconId);
+  const show=inp.type==='password';
+  inp.type=show?'text':'password';
+  ico.classList.toggle('fa-eye',!show);
+  ico.classList.toggle('fa-eye-slash',show);
+}
+
+// Strength bar
+function checkStrength(v){
+  let s=0;
+  if(v.match(/[a-z]/))s++; if(v.match(/[A-Z]/))s++;
+  if(v.match(/[0-9]/))s++; if(v.match(/[^a-zA-Z0-9]/))s++;
+  if(v.length>=8)s++;
+  const fill=document.getElementById('strFill');
+  fill.style.width=(s/5*100)+'%';
+  fill.style.background=s<=2?'#e74c3c':s===3?'#e67e22':'#4a7c4a';
+}
+
+// Scroll-to-top
+(function(){
+  const btn = document.getElementById('scrollTop');
+  window.addEventListener('scroll', () => {
+    btn.classList.toggle('show', window.scrollY > 320);
+  });
+  btn.addEventListener('click', () => {
+    window.scrollTo({top: 0, behavior: 'smooth'});
+  });
+})();
 </script>
 </body>
 </html>

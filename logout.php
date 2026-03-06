@@ -30,6 +30,6 @@ if (isset($_SESSION['user'])) {
 }
 
 session_destroy();
-header("Location: index.php");
+header("Location: homepage.php");
 exit;
 ?>
