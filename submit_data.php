@@ -72,6 +72,14 @@ $stmt->bind_param("dds", $temperature, $humidity, $timestamp);
 if ($stmt->execute()) {
     echo "Success";
 
+
+
+    // ══════════════════════════════════════════════════════
+    // AUTO ENGINE — runs every time ESP32 sends sensor data
+    // ══════════════════════════════════════════════════════
+    require_once 'auto_engine.php';
+    runAutoEngine($conn, floatval($temperature), floatval($humidity), $timestamp);
+
     // ── BUG 1 FIX: Read thresholds from alert_thresholds table (set in settings.php) ──
     // Ensure table exists with defaults
     $conn->query("CREATE TABLE IF NOT EXISTS alert_thresholds (

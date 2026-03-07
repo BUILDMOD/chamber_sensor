@@ -18,6 +18,33 @@ if (!ini_get('date.timezone')) date_default_timezone_set('Asia/Manila');
 $server_ts_ms = round(microtime(true) * 1000);
 $server_time_formatted = date('M j, Y — h:i:s A');
 
+// ── Load thresholds from DB (never hardcoded) ──
+$thr = ['temp_min'=>22,'temp_max'=>28,'hum_min'=>85,'hum_max'=>95,
+        'emergency_temp_high'=>35,'emergency_temp_low'=>15,'emergency_hum_high'=>98];
+$conn2 = null;
+try {
+    include_once('includes/db_connect.php');
+    // Ensure defaults exist
+    $conn->query("CREATE TABLE IF NOT EXISTS alert_thresholds (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        metric VARCHAR(30) NOT NULL UNIQUE,
+        min_value FLOAT NOT NULL,
+        max_value FLOAT NOT NULL,
+        enabled TINYINT(1) NOT NULL DEFAULT 1,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )");
+    $conn->query("INSERT IGNORE INTO alert_thresholds (metric,min_value,max_value) VALUES
+        ('temperature',22,28),('humidity',85,95),
+        ('emergency_temp',15,35),('emergency_hum',0,98)");
+    $tr = $conn->query("SELECT metric,min_value,max_value FROM alert_thresholds");
+    if ($tr) while ($row = $tr->fetch_assoc()) {
+        if ($row['metric']==='temperature') { $thr['temp_min']=$row['min_value']; $thr['temp_max']=$row['max_value']; }
+        if ($row['metric']==='humidity')    { $thr['hum_min']=$row['min_value'];  $thr['hum_max']=$row['max_value']; }
+        if ($row['metric']==='emergency_temp') { $thr['emergency_temp_low']=$row['min_value']; $thr['emergency_temp_high']=$row['max_value']; }
+        if ($row['metric']==='emergency_hum')  { $thr['emergency_hum_high']=$row['max_value']; }
+    }
+} catch(Exception $e) { /* use defaults */ }
+
 $displayName = 'Menu';
 if (session_status() === PHP_SESSION_NONE) @session_start();
 if (!empty($_SESSION['fullname']))     $displayName = $_SESSION['fullname'];
@@ -567,11 +594,11 @@ $isOwner = $sessionRole === 'owner';
     <h3>Environment Status</h3>
     <h4>Temperature</h4>
     <div class="legend-row"><span class="leg-dot" style="background:#60a5fa"></span><span>Too Low — below 22°C</span></div>
-    <div class="legend-row"><span class="leg-dot" style="background:#fb7185"></span><span>Ideal — 22–28°C</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:#fb7185"></span><span>Ideal — <?= $thr["temp_min"] ?>–<?= $thr["temp_max"] ?>°C</span></div>
     <div class="legend-row"><span class="leg-dot" style="background:#fbbf24"></span><span>Too High — above 28°C</span></div>
     <h4>Humidity</h4>
     <div class="legend-row"><span class="leg-dot" style="background:#60a5fa"></span><span>Too Low — below 85%</span></div>
-    <div class="legend-row"><span class="leg-dot" style="background:#34d399"></span><span>Ideal — 85–95%</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:#34d399"></span><span>Ideal — <?= $thr["hum_min"] ?>–<?= $thr["hum_max"] ?>%</span></div>
     <div class="legend-row"><span class="leg-dot" style="background:#fb7185"></span><span>Too High — above 95%</span></div>
   </div>
 </div>
@@ -596,7 +623,7 @@ $isOwner = $sessionRole === 'owner';
     <h3>Alerts</h3>
     <p>Alerts fire when conditions deviate from ideal ranges.</p>
     <h4>Ideal Ranges</h4>
-    <ul><li>Temperature: 22–28°C</li><li>Humidity: 85–95%</li></ul>
+    <ul><li>Temperature: <?= $thr["temp_min"] ?>–<?= $thr["temp_max"] ?>°C</li><li>Humidity: <?= $thr["hum_min"] ?>–<?= $thr["hum_max"] ?>%</li></ul>
     <h4>Color Codes</h4>
     <div class="legend-row"><span class="leg-dot" style="background:var(--red)"></span><span>Critical — out of range</span></div>
     <div class="legend-row"><span class="leg-dot" style="background:var(--green)"></span><span>All clear — conditions ideal</span></div>
@@ -604,6 +631,16 @@ $isOwner = $sessionRole === 'owner';
 </div>
 
 <script>
+// Thresholds from DB — never hardcoded
+const THRESH = {
+  tempMin: <?= $thr['temp_min'] ?>,
+  tempMax: <?= $thr['temp_max'] ?>,
+  humMin:  <?= $thr['hum_min'] ?>,
+  humMax:  <?= $thr['hum_max'] ?>,
+  emergTempHigh: <?= $thr['emergency_temp_high'] ?>,
+  emergTempLow:  <?= $thr['emergency_temp_low'] ?>,
+  emergHumHigh:  <?= $thr['emergency_hum_high'] ?>,
+};
 const $$ = id => document.getElementById(id);
 const toNum = v => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
 
@@ -626,8 +663,8 @@ function makeGauge(id,color){
 }
 const tempGauge = makeGauge('tempGauge','#fb7185');
 const humGauge  = makeGauge('humGauge','#34d399');
-const tempColor = t => t<22?'#60a5fa':t>28?'#fbbf24':'#fb7185';
-const humColor  = h => h<85?'#60a5fa':h>95?'#fb7185':'#34d399';
+const tempColor = t => t<THRESH.tempMin?'#60a5fa':t>THRESH.tempMax?'#fbbf24':'#fb7185';
+const humColor  = h => h<THRESH.humMin?'#60a5fa':h>THRESH.humMax?'#fb7185':'#34d399';
 function gaugeStatusClass(val,low,high){
   if(val<low) return['gs-low','Too Low'];
   if(val>high)return['gs-high','Too High'];
@@ -636,18 +673,36 @@ function gaugeStatusClass(val,low,high){
 function setGaugeStatus(el,cls,text){el.className='gauge-status '+cls;el.textContent=text;}
 
 // Live data
+function goOffline(){
+  ['tempValue','humValue'].forEach(id=>{const e=$$(id);if(e)e.textContent='—';});
+  $$('time').textContent='Offline';
+  setGaugeStatus($$('tempNote'),'gs-offline','Offline');
+  setGaugeStatus($$('humNote'),'gs-offline','Offline');
+  [tempGauge,humGauge].forEach(g=>{g.data.datasets[0].data=[0,100];g.data.datasets[0].backgroundColor=['#e5e7eb','#f0f2f5'];g.update();});
+  renderAlerts(['Device offline']);
+}
+
 async function loadLive(){
   try{
     const r=await fetch('submit_data.php',{cache:'no-store'});
     if(!r.ok)throw 0;
     const d=await r.json();
+
+    // ── Staleness check: if last reading is older than 2 minutes, treat as offline ──
+    // Timestamp from DB is Asia/Manila (UTC+8), so add 8hrs offset when parsing
+    if(d.timestamp && d.timestamp !== 'No data'){
+      const lastTs = new Date(d.timestamp.replace(' ','T') + '+08:00');
+      const ageMs = Date.now() - lastTs.getTime();
+      if(ageMs > 2 * 60 * 1000){ goOffline(); return; }
+    } else { goOffline(); return; }
+
     const t=Math.max(1,Math.min(50,toNum(d.temperature)));
     const h=Math.max(1,Math.min(100,toNum(d.humidity)));
     $$('tempValue').textContent=t.toFixed(1)+'°';
     $$('humValue').textContent=h.toFixed(1)+'%';
     $$('time').textContent=d.timestamp||'—';
-    const[tcls,ttxt]=gaugeStatusClass(t,22,28);
-    const[hcls,htxt]=gaugeStatusClass(h,85,95);
+    const[tcls,ttxt]=gaugeStatusClass(t,THRESH.tempMin,THRESH.tempMax);
+    const[hcls,htxt]=gaugeStatusClass(h,THRESH.humMin,THRESH.humMax);
     setGaugeStatus($$('tempNote'),tcls,ttxt);
     setGaugeStatus($$('humNote'),hcls,htxt);
     const tPct=Math.round((t-1)/49*100);
@@ -659,20 +714,13 @@ async function loadLive(){
     humGauge.data.datasets[0].backgroundColor=[humColor(h),'#f0f2f5'];
     humGauge.update();
     const alerts=[];
-    if(t<22||t>28)alerts.push(`Temperature out of range: ${t.toFixed(1)}°C (ideal 22–28°C)`);
-    if(h<85||h>95)alerts.push(`Humidity out of range: ${h.toFixed(1)}% (ideal 85–95%)`);
+    if(t<THRESH.tempMin||t>THRESH.tempMax)alerts.push(`Temperature out of range: ${t.toFixed(1)}°C (ideal ${THRESH.tempMin}–${THRESH.tempMax}°C)`);
+    if(h<THRESH.humMin||h>THRESH.humMax)alerts.push(`Humidity out of range: ${h.toFixed(1)}% (ideal ${THRESH.humMin}–${THRESH.humMax}%)`);
     renderAlerts(alerts);
     if(alerts.length>0){
       fetch('submit_data.php',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({alerts:JSON.stringify(alerts)})}).catch(()=>{});
     }
-  }catch(_){
-    ['tempValue','humValue'].forEach(id=>{const e=$$(''+id);if(e)e.textContent='—';});
-    $$('time').textContent='Offline';
-    setGaugeStatus($$('tempNote'),'gs-offline','Offline');
-    setGaugeStatus($$('humNote'),'gs-offline','Offline');
-    [tempGauge,humGauge].forEach(g=>{g.data.datasets[0].data=[0,100];g.data.datasets[0].backgroundColor=['#e5e7eb','#f0f2f5'];g.update();});
-    renderAlerts(['Device offline']);
-  }
+  }catch(_){ goOffline(); }
 }
 function renderAlerts(msgs){
   const list=$$('alertList'); list.innerHTML='';
@@ -695,8 +743,26 @@ async function fetchDeviceStates(){
     const j=await r.json();
     ['mist','fan','heater','sprayer'].forEach(d=>applyPill(d,j[d]));
     const manual=j.manual_mode==1;
-    $$('modeSwitch').checked=manual;
-    setMode(manual);
+    // Only sync the switch from server if user isn't actively toggling it
+    if(!modeSwitching){
+      $$('modeSwitch').checked=manual;
+      setMode(manual);
+    }
+
+    // ── Show fault/buzzer alert on dashboard ──
+    if(j.buzzer==1){
+      const list=$$('alertList');
+      // Only add fault banner if not already shown
+      if(!list.querySelector('.alert-fault')){
+        const el=document.createElement('div');
+        el.className='alert-item alert-err alert-fault';
+        el.innerHTML='<i class="fas fa-triangle-exclamation"></i> <strong>Device fault detected!</strong> A device was automatically shut off. Check the Automation log.';
+        list.prepend(el);
+      }
+    } else {
+      // Remove fault banner when buzzer clears
+      list.querySelector('.alert-fault')?.remove();
+    }
   }catch(_){}
 }
 function applyPill(dev,status){
@@ -712,9 +778,17 @@ function setMode(manual){
   $$('modeLabel').textContent=manual?'Manual Mode':'Auto Mode';
   $$('manualControls').style.display=manual?'':'none';
 }
+let modeSwitching = false; // flag: user is actively changing mode
+
 $$('modeSwitch').addEventListener('change',async function(){
-  setMode(this.checked);
-  try{await fetch(`update_device_status.php?mode=${this.checked?1:0}`,{cache:'no-store'});}catch(_){}
+  modeSwitching = true;
+  const wantManual = this.checked;
+  setMode(wantManual);
+  try{
+    await fetch(`update_device_status.php?mode=${wantManual?1:0}`,{cache:'no-store'});
+  }catch(_){}
+  // Give server 2 seconds to persist, then allow polling to sync again
+  setTimeout(()=>{ modeSwitching = false; }, 2000);
 });
 document.querySelectorAll('.toggle-btn[data-device]').forEach(btn=>{
   btn.addEventListener('click',async function(){

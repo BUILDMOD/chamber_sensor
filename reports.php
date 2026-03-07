@@ -895,29 +895,25 @@ if (isset($_GET['export']) && $_GET['export'] === 'sensor_csv' && !empty($data))
   const hamburger = document.getElementById('hamburger');
   const sidebar   = document.querySelector('.sidebar');
   const overlay   = document.getElementById('sidebarOverlay');
-  if(!hamburger || !sidebar || !overlay) return;
+  if(!hamburger||!sidebar||!overlay) return;
 
   function openSidebar(){
     sidebar.classList.add('open');
     overlay.classList.add('open');
     hamburger.classList.add('open');
-    document.body.style.overflow = 'hidden';
   }
   function closeSidebar(){
     sidebar.classList.remove('open');
     overlay.classList.remove('open');
     hamburger.classList.remove('open');
-    document.body.style.overflow = '';
   }
 
-  hamburger.addEventListener('click', function(e){
-    e.stopPropagation();
-    sidebar.classList.contains('open') ? closeSidebar() : openSidebar();
-  });
+  hamburger.addEventListener('click', ()=> sidebar.classList.contains('open') ? closeSidebar() : openSidebar());
   overlay.addEventListener('click', closeSidebar);
 
-  sidebar.querySelectorAll('.sidebar-nav a').forEach(function(a){
-    a.addEventListener('click', function(){ if(window.innerWidth<=768) closeSidebar(); });
+  // Close sidebar when a nav link is tapped on mobile
+  sidebar.querySelectorAll('.sidebar-nav a').forEach(a => {
+    a.addEventListener('click', ()=>{ if(window.innerWidth<=768) closeSidebar(); });
   });
 })();
 
