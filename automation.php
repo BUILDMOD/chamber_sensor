@@ -42,6 +42,13 @@ $conn->query("CREATE TABLE IF NOT EXISTS device_logs (
 
 $errors = []; $success = '';
 
+// ── Resolve Fault ──
+if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['resolve_fault'])) {
+    $fid = intval($_POST['resolve_fault']);
+    $s=$conn->prepare("UPDATE device_faults SET resolved=1 WHERE id=?");
+    if($s){$s->bind_param("i",$fid);if($s->execute())$success='Fault marked as resolved.';$s->close();}
+}
+
 // ── Add Rule ──
 if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['add_rule'])) {
     if (!$isOwner) { $errors[]='Access denied.'; } else {
@@ -101,10 +108,26 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['delete_schedule'])) {
     if($s){$s->bind_param("i",$sid);if($s->execute())$success='Schedule deleted.';$s->close();}
 }
 
+// ── Ensure device_faults table exists ──
+$conn->query("CREATE TABLE IF NOT EXISTS device_faults (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    device VARCHAR(30) NOT NULL,
+    fault_type ENUM('no_response','stuck_on') NOT NULL,
+    detail VARCHAR(200),
+    sensor_val FLOAT,
+    resolved TINYINT(1) NOT NULL DEFAULT 0,
+    logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)");
+
 // ── Fetch data ──
 $rules = [];
 $r=$conn->query("SELECT * FROM automation_rules ORDER BY device, id");
 if($r) while($row=$r->fetch_assoc()) $rules[]=$row;
+
+// Active (unresolved) faults
+$active_faults = [];
+$r=$conn->query("SELECT * FROM device_faults WHERE resolved=0 ORDER BY logged_at DESC");
+if($r) while($row=$r->fetch_assoc()) $active_faults[]=$row;
 
 $schedules = [];
 $r=$conn->query("SELECT * FROM scheduled_tasks ORDER BY run_time");
@@ -205,6 +228,15 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
 .pill-auto{background:var(--blue-lt);color:var(--blue);}
 .pill-manual{background:var(--amber-lt);color:var(--amber);}
 .pill-schedule{background:#ede9fe;color:#7c3aed;}
+.pill-emergency{background:var(--red-lt);color:var(--red);}
+.pill-fault{background:#fff3e0;color:#e65100;}
+.fault-banner{display:flex;align-items:flex-start;gap:10px;padding:12px 16px;border-radius:8px;background:#fff3e0;border:1px solid #ffcc80;margin-bottom:8px;}
+.fault-banner i{color:#e65100;font-size:14px;margin-top:1px;flex-shrink:0;}
+.fault-banner-text{font-size:12.5px;font-weight:600;color:#bf360c;line-height:1.5;}
+.fault-banner-time{font-size:11px;color:#e65100;margin-top:2px;font-family:'DM Mono',monospace;}
+.builtin-rule{display:flex;align-items:center;gap:12px;padding:11px 20px;border-bottom:1px solid var(--border);background:var(--surface2);}
+.builtin-rule:last-child{border-bottom:none;}
+.builtin-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--red-lt);color:var(--red);letter-spacing:.3px;}
 
 /* Forms */
 .form-group{display:flex;flex-direction:column;gap:5px;margin-bottom:12px;}
@@ -421,6 +453,72 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
         </div>
       </div>
       <?php endforeach; ?>
+    </div>
+
+    <!-- Active Faults (only shown when faults exist) -->
+    <?php if(!empty($active_faults)): ?>
+    <div class="card" style="border-color:rgba(230,81,0,.25);margin-bottom:16px;">
+      <div class="card-header" style="background:#fff8f0;">
+        <div class="card-title" style="color:#e65100;"><span class="icon" style="background:#fff3e0;color:#e65100;"><i class="fas fa-triangle-exclamation"></i></span> Active Device Faults</div>
+        <span class="card-sub" style="color:#e65100;"><?=count($active_faults)?> unresolved</span>
+      </div>
+      <div style="padding:14px 20px;display:flex;flex-direction:column;gap:8px;">
+        <?php foreach($active_faults as $fault): $col=$device_colors[$fault['device']]??'blue'; $icon=$device_icons[$fault['device']]??'fa-cog'; ?>
+        <div class="fault-banner">
+          <i class="fas fa-<?=$icon?>"></i>
+          <div>
+            <div class="fault-banner-text">
+              <strong><?=ucfirst($fault['device'])?></strong> —
+              <?=$fault['fault_type']==='stuck_on'?'Stuck ON too long':'Not responding to sensor'?>:
+              <?=htmlspecialchars($fault['detail'])?>
+            </div>
+            <div class="fault-banner-time"><?=$fault['logged_at']?></div>
+          </div>
+          <?php if($isOwner): ?>
+          <form method="POST" style="margin-left:auto;flex-shrink:0;">
+            <input type="hidden" name="resolve_fault" value="<?=$fault['id']?>">
+            <button type="submit" class="btn btn-ghost btn-sm">Resolve</button>
+          </form>
+          <?php endif; ?>
+        </div>
+        <?php endforeach; ?>
+      </div>
+    </div>
+    <?php endif; ?>
+
+    <!-- Built-in Protections (always active, no setup needed) -->
+    <div class="card" style="margin-bottom:16px;">
+      <div class="card-header">
+        <div class="card-title"><span class="icon icon-red"><i class="fas fa-shield-halved"></i></span> Built-in Protections</div>
+        <span class="card-sub" style="color:var(--green);font-weight:600;"><i class="fas fa-circle" style="font-size:8px;"></i> Always active</span>
+      </div>
+      <div class="rule-list">
+        <div class="builtin-rule">
+          <div class="rule-device-badge" style="background:var(--red-lt);color:var(--red);"><i class="fas fa-fire"></i></div>
+          <div class="rule-text">Temperature &gt; 35°C → <span>Heater forced OFF</span> <div class="rule-detail">Emergency shutoff — overrides manual mode</div></div>
+          <span class="builtin-badge">EMERGENCY</span>
+        </div>
+        <div class="builtin-rule">
+          <div class="rule-device-badge" style="background:var(--blue-lt);color:var(--blue);"><i class="fas fa-droplet"></i></div>
+          <div class="rule-text">Humidity &gt; 98% → <span>Mist + Sprayer forced OFF</span> <div class="rule-detail">Emergency shutoff — overrides manual mode</div></div>
+          <span class="builtin-badge">EMERGENCY</span>
+        </div>
+        <div class="builtin-rule">
+          <div class="rule-device-badge" style="background:var(--green-lt);color:var(--green);"><i class="fas fa-fan"></i></div>
+          <div class="rule-text">Temperature &lt; 15°C → <span>Fan forced OFF</span> <div class="rule-detail">Emergency shutoff — overrides manual mode</div></div>
+          <span class="builtin-badge">EMERGENCY</span>
+        </div>
+        <div class="builtin-rule">
+          <div class="rule-device-badge" style="background:#fff3e0;color:#e65100;"><i class="fas fa-triangle-exclamation"></i></div>
+          <div class="rule-text">Device ON but sensor not responding after 5 min → <span>Device forced OFF + Buzzer</span> <div class="rule-detail">Fault detection — overrides manual mode</div></div>
+          <span class="builtin-badge">FAULT</span>
+        </div>
+        <div class="builtin-rule" style="border-bottom:none;">
+          <div class="rule-device-badge" style="background:#fff3e0;color:#e65100;"><i class="fas fa-clock-rotate-left"></i></div>
+          <div class="rule-text">Device ON for 60+ min continuously → <span>Device forced OFF + Buzzer</span> <div class="rule-detail">Stuck-on detection — overrides manual mode</div></div>
+          <span class="builtin-badge">FAULT</span>
+        </div>
+      </div>
     </div>
 
     <div class="grid-2">
