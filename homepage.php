@@ -76,9 +76,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['modal_register'])) {
             $stmt = $conn->prepare("INSERT INTO users (first_name,middle_name,last_name,suffix,fullname,email,phone,username,password,role,verified) VALUES (?,?,?,?,?,?,?,?,?,?,0)");
             if ($stmt) {
                 $stmt->bind_param("ssssssssss",$first,$middle,$last,$suffix,$fullname,$email,$phone,$username,$password,$role);
-                $stmt->execute();
+                if (!$stmt->execute()) {
+                    $reg_error = "Database error: " . $stmt->error;
+                } else {
 
-                // ── Welcome email to registrant ──
+                // ── Welcome email to registrant (only if insert succeeded) ──
                 $subject = "Welcome to MushroomOS — J.WHO Mushroom Farm";
                 $body = "<div style='font-family:sans-serif;max-width:480px;margin:0 auto;'>"
                       . "<div style='background:#2b4d30;padding:24px;border-radius:12px 12px 0 0;text-align:center;'>"
@@ -127,6 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['modal_register'])) {
                 }
 
                 $reg_success = "Account created! An admin will approve your access.";
+                } // end if execute succeeded
             } else { $reg_error = "Database error: " . $conn->error; }
         }
     }
