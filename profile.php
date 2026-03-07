@@ -1,6 +1,7 @@
 <?php 
 include('includes/auth_check.php');
 include('includes/db_connect.php');
+include_once('send_email.php');
 
 if (session_status() === PHP_SESSION_NONE) session_start();
 
@@ -60,7 +61,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
             $a_fullname=trim($a_first.' '.($a_middle?$a_middle.' ':'').$a_last); $a_hashed=password_hash($a_password_raw,PASSWORD_DEFAULT);
             $ins=$conn->prepare("INSERT INTO users (first_name,middle_name,last_name,fullname,email,phone,username,password,role,verified) VALUES (?,?,?,?,?,?,?,?,?,1)");
             if ($ins) { $ins->bind_param("sssssssss",$a_first,$a_middle,$a_last,$a_fullname,$a_email,$a_phone,$a_username,$a_hashed,$a_role);
-                if ($ins->execute()) { $success="User created successfully."; if ($user) logActivity($conn,$user['id'],"Created user: {$a_username}"); } else $errors[]="Database error."; $ins->close(); }
+                if ($ins->execute()) {
+                    $success="User created successfully.";
+                    if ($user) logActivity($conn,$user['id'],"Created user: {$a_username}");
+                    if (!empty($a_email)) {
+                        $addedBy = $user['fullname'] ?? 'the Owner';
+                        $roleLabel = ucfirst($a_role);
+                        $subject = "Welcome to MushroomOS — Your Account is Ready";
+                        $body = '<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,sans-serif;">'
+                            . '<table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:30px 10px;">'
+                            . '<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">'
+                            . '<tr><td style="background:#2b4d30;padding:28px 32px;">'
+                            . '<h1 style="margin:0;color:#ffffff;font-size:22px;letter-spacing:1px;">&#127812; MushroomOS</h1>'
+                            . '<p style="margin:4px 0 0;color:#a8c8a0;font-size:13px;">J.WHO Mushroom Farm</p>'
+                            . '</td></tr>'
+                            . '<tr><td style="padding:32px;">'
+                            . '<p style="font-size:16px;color:#333;margin-top:0;">Hi <strong>' . htmlspecialchars($a_fullname) . '</strong>,</p>'
+                            . '<p style="font-size:14px;color:#555;">Your MushroomOS account has been created by <strong>' . htmlspecialchars($addedBy) . '</strong>. You can log in right away using the credentials below.</p>'
+                            . '<div style="background:#e8f5e9;border-left:4px solid #2b4d30;border-radius:4px;padding:16px 20px;margin:24px 0;">'
+                            . '<p style="margin:0;font-size:13px;color:#555;">&#10003; &nbsp;<strong>Account Status: Active</strong></p>'
+                            . '</div>'
+                            . '<table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-size:14px;margin-bottom:24px;">'
+                            . '<tr style="background:#f9f9f9;"><td style="color:#777;width:40%;border-bottom:1px solid #eee;">Full Name</td><td style="color:#333;border-bottom:1px solid #eee;"><strong>' . htmlspecialchars($a_fullname) . '</strong></td></tr>'
+                            . '<tr><td style="color:#777;border-bottom:1px solid #eee;">Username</td><td style="color:#333;border-bottom:1px solid #eee;"><strong>' . htmlspecialchars($a_username) . '</strong></td></tr>'
+                            . '<tr style="background:#f9f9f9;"><td style="color:#777;border-bottom:1px solid #eee;">Role</td><td style="color:#333;border-bottom:1px solid #eee;">' . $roleLabel . '</td></tr>'
+                            . '<tr><td style="color:#777;">Added By</td><td style="color:#333;">' . htmlspecialchars($addedBy) . '</td></tr>'
+                            . '</table>'
+                            . '<div style="background:#fff8e1;border-left:4px solid #f9a825;border-radius:4px;padding:14px 18px;margin-bottom:24px;">'
+                            . '<p style="margin:0;font-size:13px;color:#7a6000;">&#9888; &nbsp;For security, please change your password after your first login.</p>'
+                            . '</div>'
+                            . '<p style="font-size:13px;color:#999;border-top:1px solid #eee;padding-top:16px;margin-bottom:0;">This is an automated message from <strong>MushroomOS</strong>. Please do not reply.</p>'
+                            . '</td></tr></table></td></tr></table></body></html>';
+                        $emailResult = sendEmail($a_email, $subject, $body);
+                        if ($emailResult !== "SUCCESS") error_log("Add-user welcome email failed for {$a_email}: " . $emailResult);
+                    }
+                } else $errors[]="Database error.";
+                $ins->close(); }
         }
     }
 }
@@ -104,16 +140,84 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_user'])) {
 // APPROVE / REJECT
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['approve_user'])) {
     if (($_SESSION['role']??'')!=='owner') { $errors[]="Access denied."; } else {
-        $aid=intval($_POST['approve_user_id']??0);
-        $u=$conn->prepare("UPDATE users SET verified=1 WHERE id=?");
-        if ($u) { $u->bind_param("i",$aid); if ($u->execute()) { $success="User approved."; logActivity($conn,$user['id'],"Approved ID: {$aid}"); } $u->close(); }
+        $aid = intval($_POST['approve_user_id'] ?? 0);
+        // Fetch staff info before approving so we can email them
+        $si = $conn->prepare("SELECT fullname, email, username FROM users WHERE id=? LIMIT 1");
+        $si->bind_param("i", $aid); $si->execute();
+        $staff = $si->get_result()->fetch_assoc(); $si->close();
+
+        $u = $conn->prepare("UPDATE users SET verified=1 WHERE id=?");
+        if ($u) {
+            $u->bind_param("i", $aid);
+            if ($u->execute()) {
+                $success = "User approved.";
+                logActivity($conn, $user['id'], "Approved ID: {$aid}");
+
+                // ── Email the staff: account approved ──
+                if ($staff && !empty($staff['email'])) {
+                    $approvedBy = $user['fullname'] ?? 'the Owner';
+                    $subject = "MushroomOS — Your Account Has Been Approved!";
+                    $body = "<div style='font-family:sans-serif;max-width:480px;margin:0 auto;'>"
+                          . "<div style='background:#2b4d30;padding:24px;border-radius:12px 12px 0 0;text-align:center;'>"
+                          . "<h2 style='color:#c8e8b8;margin:0;font-size:20px;'>&#127812; MushroomOS</h2>"
+                          . "<p style='color:rgba(200,232,184,0.6);font-size:12px;margin:6px 0 0;'>J.WHO Mushroom Farm</p>"
+                          . "</div>"
+                          . "<div style='background:#ffffff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #e0e0e0;'>"
+                          . "<p style='font-size:15px;margin:0 0 8px;'>Hello <strong>" . htmlspecialchars($staff['fullname']) . "</strong>,</p>"
+                          . "<p style='color:#555;font-size:13px;line-height:1.6;margin:0 0 16px;'>Great news! Your account has been <strong>approved</strong> by <strong>" . htmlspecialchars($approvedBy) . "</strong>. You can now log in to MushroomOS.</p>"
+                          . "<p style='background:#e6f7ef;border-left:4px solid #1a9e5c;padding:10px 14px;border-radius:4px;color:#155724;margin:0 0 16px;'>&#10003; Your account is now <strong>active</strong>. Welcome to the team!</p>"
+                          . "<table style='width:100%;border-collapse:collapse;margin-bottom:16px;font-size:13px;'>"
+                          . "<tr><td style='padding:8px 12px;background:#f7f8fa;color:#6e7681;width:40%;'>Username</td><td style='padding:8px 12px;font-weight:600;'>" . htmlspecialchars($staff['username']) . "</td></tr>"
+                          . "<tr><td style='padding:8px 12px;color:#6e7681;'>Role</td><td style='padding:8px 12px;font-weight:600;'>Staff</td></tr>"
+                          . "<tr><td style='padding:8px 12px;background:#f7f8fa;color:#6e7681;'>Approved By</td><td style='padding:8px 12px;font-weight:600;'>" . htmlspecialchars($approvedBy) . "</td></tr>"
+                          . "</table>"
+                          . "<hr style='border:none;border-top:1px solid #eee;margin:16px 0;'>"
+                          . "<p style='font-size:12px;color:#aaa;text-align:center;margin:0;'>MushroomOS &middot; J.WHO Mushroom Farm</p>"
+                          . "</div></div>";
+                    $emailResult = sendEmail($staff['email'], $subject, $body);
+                    if ($emailResult !== "SUCCESS") error_log("Approval email failed for {$staff['email']}: " . $emailResult);
+                }
+            }
+            $u->close();
+        }
     }
 }
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reject_user'])) {
     if (($_SESSION['role']??'')!=='owner') { $errors[]="Access denied."; } else {
-        $rid=intval($_POST['reject_user_id']??0);
-        $d=$conn->prepare("DELETE FROM users WHERE id=?");
-        if ($d) { $d->bind_param("i",$rid); if ($d->execute()) { $success="User rejected."; logActivity($conn,$user['id'],"Rejected ID: {$rid}"); } $d->close(); }
+        $rid = intval($_POST['reject_user_id'] ?? 0);
+        // Fetch staff info before deleting so we can email them
+        $si = $conn->prepare("SELECT fullname, email FROM users WHERE id=? LIMIT 1");
+        $si->bind_param("i", $rid); $si->execute();
+        $staff = $si->get_result()->fetch_assoc(); $si->close();
+
+        $d = $conn->prepare("DELETE FROM users WHERE id=?");
+        if ($d) {
+            $d->bind_param("i", $rid);
+            if ($d->execute()) {
+                $success = "User rejected.";
+                logActivity($conn, $user['id'], "Rejected ID: {$rid}");
+
+                // ── Email the staff: account rejected ──
+                if ($staff && !empty($staff['email'])) {
+                    $subject = "MushroomOS — Account Registration Update";
+                    $body = "<div style='font-family:sans-serif;max-width:480px;margin:0 auto;'>"
+                          . "<div style='background:#2b4d30;padding:24px;border-radius:12px 12px 0 0;text-align:center;'>"
+                          . "<h2 style='color:#c8e8b8;margin:0;font-size:20px;'>&#127812; MushroomOS</h2>"
+                          . "<p style='color:rgba(200,232,184,0.6);font-size:12px;margin:6px 0 0;'>J.WHO Mushroom Farm</p>"
+                          . "</div>"
+                          . "<div style='background:#ffffff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #e0e0e0;'>"
+                          . "<p style='font-size:15px;margin:0 0 8px;'>Hello <strong>" . htmlspecialchars($staff['fullname']) . "</strong>,</p>"
+                          . "<p style='color:#555;font-size:13px;line-height:1.6;margin:0 0 16px;'>We regret to inform you that your account registration request for MushroomOS has not been approved at this time.</p>"
+                          . "<p style='background:#fff0f0;border-left:4px solid #e53935;padding:10px 14px;border-radius:4px;color:#b71c1c;margin:0 0 16px;'>&#10007; Your account request was <strong>not approved</strong>.</p>"
+                          . "<p style='color:#555;font-size:13px;'>If you believe this is a mistake, please contact the farm owner directly.</p>"
+                          . "<hr style='border:none;border-top:1px solid #eee;margin:16px 0;'>"
+                          . "<p style='font-size:12px;color:#aaa;text-align:center;margin:0;'>MushroomOS &middot; J.WHO Mushroom Farm</p>"
+                          . "</div></div>";
+                    sendEmail($staff['email'], $subject, $body);
+                }
+            }
+            $d->close();
+        }
     }
 }
 
