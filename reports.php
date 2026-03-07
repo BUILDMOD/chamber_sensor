@@ -151,8 +151,6 @@ function navUrl($view, $year, $month, $day) {
     /* SIDEBAR */
     .sidebar{position:fixed;inset:0 auto 0 0;width:220px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:50;}
     .sidebar-logo{padding:22px 20px 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);position:relative;}
-    .sidebar-close{display:none;position:absolute;top:50%;right:14px;transform:translateY(-50%);width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);align-items:center;justify-content:center;cursor:pointer;color:var(--muted);font-size:13px;transition:all .15s;}
-    .sidebar-close:hover{background:var(--red-lt);color:var(--red);border-color:var(--red);}
     .sidebar-logo img{width:36px;height:36px;border-radius:8px;}
     .sidebar-logo-text{font-size:14px;font-weight:700;color:var(--text);line-height:1.2;}
     .sidebar-logo-sub{font-size:11px;color:var(--muted);}
@@ -338,8 +336,6 @@ function navUrl($view, $year, $month, $day) {
         box-shadow:4px 0 24px rgba(0,0,0,.12);
       }
       .sidebar.open{transform:translateX(0);}
-      .hamburger.open{display:none!important;}
-      .sidebar.open ~ * .hamburger, .hamburger.open{opacity:0;pointer-events:none;}
 
       /* Main fills full width */
       .main{margin-left:0!important;width:100%!important;}
@@ -469,7 +465,6 @@ function navUrl($view, $year, $month, $day) {
       <div class="sidebar-logo-text">MushroomOS</div>
       <div class="sidebar-logo-sub">Cultivation System</div>
     </div>
-    <button class="sidebar-close" id="sidebarClose" aria-label="Close menu"><i class="fas fa-xmark"></i></button>
   </div>
   <nav class="sidebar-nav">
     <a href="dashboard.php"><i class="fas fa-table-cells-large"></i> Dashboard</a>
@@ -900,7 +895,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'sensor_csv' && !empty($data))
   const hamburger = document.getElementById('hamburger');
   const sidebar   = document.querySelector('.sidebar');
   const overlay   = document.getElementById('sidebarOverlay');
-  const closeBtn  = document.getElementById('sidebarClose');
   if(!hamburger || !sidebar || !overlay) return;
 
   function openSidebar(){
@@ -920,7 +914,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'sensor_csv' && !empty($data))
     e.stopPropagation();
     sidebar.classList.contains('open') ? closeSidebar() : openSidebar();
   });
-  if(closeBtn) closeBtn.addEventListener('click', closeSidebar);
   overlay.addEventListener('click', closeSidebar);
 
   sidebar.querySelectorAll('.sidebar-nav a').forEach(function(a){

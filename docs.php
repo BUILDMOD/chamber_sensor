@@ -274,6 +274,49 @@ footer{background:var(--charcoal);padding:28px 44px;display:flex;align-items:cen
 @media(max-width:1024px){.main-wrap{grid-template-columns:1fr;padding:0 32px 60px;}.sidebar{display:none;}.ph-inner{flex-direction:column;gap:0;padding:100px 32px 44px;}.ph-count{display:none;}.tab-inner{padding:0 24px;}}
 @media(max-width:768px){nav{padding:0 20px;}.nc-date{display:none;}.ph-inner{padding:90px 24px 40px;}.ph-title{font-size:44px;}.main-wrap{padding:0 24px 60px;}}
 @media(max-width:540px){.nav-clock{display:none;}.nav-sep{display:none;}footer{padding:20px 24px;flex-direction:column;gap:8px;text-align:center;}.mgrid{grid-template-columns:1fr;}}
+/* ── MOBILE FIXES ── */
+@media(max-width:480px){
+  /* Nav — icon-only buttons on small screens */
+  nav{padding:0 14px;}
+  .nav-logo img{width:32px;height:32px;}
+  .logo-text{font-size:16px;}
+  .nav-clock{display:none;}
+  .nav-sep{display:none;}
+  .nl{padding:6px 11px;font-size:11px;letter-spacing:0;}
+
+  /* Hero */
+  .hero-inner{padding:80px 22px 52px;}
+  .hero-title{font-size:38px;line-height:1.05;}
+  .hero-desc{font-size:13.5px;max-width:100%;}
+  .hero-btns{flex-direction:column;align-items:stretch;gap:10px;}
+  .btn-hero-primary{justify-content:center;padding:14px 20px;font-size:14px;}
+
+  /* Features */
+  .features{padding:40px 18px;}
+  .feat-grid{grid-template-columns:1fr;}
+  .features-top{flex-direction:column;}
+  .feat-heading{font-size:32px;}
+
+  /* Footer */
+  footer{padding:18px 20px;flex-direction:column;gap:6px;text-align:center;}
+
+  /* Modals — comfortable on small phones */
+  .modal-backdrop{padding:16px 14px;align-items:center;}
+  .modal{border-radius:18px;padding:28px 18px 22px;max-height:88vh;}
+  #loginModal .modal,#registerModal .modal{max-width:100%;}
+  .mgrid{grid-template-columns:1fr;}
+  .modal-title{font-size:22px;}
+  .mfield input,.mfield select{font-size:14px;padding:11px 36px 11px 13px;}
+  .modal-btn{padding:13px;font-size:14px;}
+}
+
+@media(max-width:380px){
+  .hero-title{font-size:32px;}
+  .logo-text{font-size:14px;}
+}
+
+
+
 
 /* ── SCROLL-TO-TOP FAB ── */
 .scroll-top{
@@ -314,6 +357,8 @@ footer{background:var(--charcoal);padding:28px 44px;display:flex;align-items:cen
     <button class="nl nl-cta" onclick="openLogin()">Log In →</button>
   </div>
 </nav>
+
+
 
 <!-- ══════════ LOGIN MODAL ══════════ -->
 <div class="modal-backdrop" id="loginModal" onclick="handleBackdrop(event,'loginModal')">
@@ -667,6 +712,7 @@ sections.forEach(s=>sio.observe(s));
     window.scrollTo({top: 0, behavior: 'smooth'});
   });
 })();
+
 </script>
 </body>
 </html>
