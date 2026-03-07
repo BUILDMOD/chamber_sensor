@@ -2,9 +2,6 @@
 include('includes/auth_check.php');
 include('includes/db_connect.php');
 
-// Auto-add suffix column if it doesn't exist
-$conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS suffix VARCHAR(20) NOT NULL DEFAULT '' AFTER last_name");
-
 if (session_status() === PHP_SESSION_NONE) session_start();
 
 $currentUsername = null;
@@ -39,7 +36,7 @@ function logActivity($conn, $userId, $action) {
 }
 
 $user = null;
-$stmt = $conn->prepare("SELECT id, first_name, middle_name, last_name, suffix, fullname, email, phone, username, created_at FROM users WHERE username = ? LIMIT 1");
+$stmt = $conn->prepare("SELECT id, first_name, middle_name, last_name, fullname, email, phone, username, created_at FROM users WHERE username = ? LIMIT 1");
 if ($stmt) { $stmt->bind_param("s", $currentUsername); $stmt->execute(); $res = $stmt->get_result(); if ($res && $res->num_rows > 0) $user = $res->fetch_assoc(); $stmt->close(); }
 
 $errors = []; $success = "";
@@ -48,7 +45,7 @@ $errors = []; $success = "";
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
     $sessionRole = $_SESSION['role'] ?? '';
     if ($sessionRole !== 'owner') { $errors[] = "Access denied."; } else {
-        $a_first=$_POST['a_first_name']??''; $a_middle=$_POST['a_middle_name']??''; $a_last=$_POST['a_last_name']??''; $a_suffix=$_POST['a_suffix']??'';
+        $a_first=$_POST['a_first_name']??''; $a_middle=$_POST['a_middle_name']??''; $a_last=$_POST['a_last_name']??'';
         $a_email=$_POST['a_email']??''; $a_phone=$_POST['a_phone']??''; $a_username=$_POST['a_username']??''; $a_password_raw=$_POST['a_password']??'';
         $a_role=in_array($_POST['a_role']??'staff',['owner','staff'])?$_POST['a_role']:'staff';
         if (!$a_first) $errors[]="First name required."; if (!$a_last) $errors[]="Last name required.";
@@ -60,9 +57,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
             if ($chk) { $chk->bind_param("ss",$a_username,$a_email); $chk->execute(); $chk->store_result(); if ($chk->num_rows>0) $errors[]="Username or email already exists."; $chk->close(); }
         }
         if (empty($errors)) {
-            $a_fullname=trim($a_first.' '.($a_middle?$a_middle.' ':'').$a_last.($a_suffix?', '.$a_suffix:'')); $a_hashed=password_hash($a_password_raw,PASSWORD_DEFAULT);
-            $ins=$conn->prepare("INSERT INTO users (first_name,middle_name,last_name,suffix,fullname,email,phone,username,password,role,verified) VALUES (?,?,?,?,?,?,?,?,?,?,1)");
-            if ($ins) { $ins->bind_param("ssssssssss",$a_first,$a_middle,$a_last,$a_suffix,$a_fullname,$a_email,$a_phone,$a_username,$a_hashed,$a_role);
+            $a_fullname=trim($a_first.' '.($a_middle?$a_middle.' ':'').$a_last); $a_hashed=password_hash($a_password_raw,PASSWORD_DEFAULT);
+            $ins=$conn->prepare("INSERT INTO users (first_name,middle_name,last_name,fullname,email,phone,username,password,role,verified) VALUES (?,?,?,?,?,?,?,?,?,1)");
+            if ($ins) { $ins->bind_param("sssssssss",$a_first,$a_middle,$a_last,$a_fullname,$a_email,$a_phone,$a_username,$a_hashed,$a_role);
                 if ($ins->execute()) { $success="User created successfully."; if ($user) logActivity($conn,$user['id'],"Created user: {$a_username}"); } else $errors[]="Database error."; $ins->close(); }
         }
     }
@@ -86,7 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_user'])) {
 // EDIT USER
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_user'])) {
     $sessionRole=$_SESSION['role']??''; if ($sessionRole!=='owner') { $errors[]="Access denied."; } else {
-        $eid=intval($_POST['edit_user_id']??0); $ef=$_POST['e_first_name']??''; $em=$_POST['e_middle_name']??''; $el=$_POST['e_last_name']??''; $es=$_POST['e_suffix']??''; $ee=$_POST['e_email']??''; $ep=$_POST['e_phone']??''; $er=in_array($_POST['e_role']??'staff',['owner','staff'])?$_POST['e_role']:'staff';
+        $eid=intval($_POST['edit_user_id']??0); $ef=$_POST['e_first_name']??''; $em=$_POST['e_middle_name']??''; $el=$_POST['e_last_name']??''; $ee=$_POST['e_email']??''; $ep=$_POST['e_phone']??''; $er=in_array($_POST['e_role']??'staff',['owner','staff'])?$_POST['e_role']:'staff';
         if (!$ef) $errors[]="First name required."; if (!$el) $errors[]="Last name required."; if (!$ee) $errors[]="Email required."; if ($eid<=0) $errors[]="Invalid ID.";
         if (empty($errors)) {
             $eu=null; $s=$conn->prepare("SELECT id,username,role FROM users WHERE id=? LIMIT 1");
@@ -95,9 +92,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_user'])) {
                 $chk=$conn->prepare("SELECT id FROM users WHERE email=? AND id!=? LIMIT 1");
                 if ($chk) { $chk->bind_param("si",$ee,$eid); $chk->execute(); $chk->store_result(); if ($chk->num_rows>0) $errors[]="Email exists."; $chk->close(); }
                 if (empty($errors)) {
-                    $ef_full=trim($ef.' '.($em?$em.' ':'').$el.($es?', '.$es:''));
-                    $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,suffix=?,fullname=?,email=?,phone=?,role=? WHERE id=?");
-                    if ($u) { $u->bind_param("ssssssssi",$ef,$em,$el,$es,$ef_full,$ee,$ep,$er,$eid); if ($u->execute()) { $success="User updated."; logActivity($conn,$user['id'],"Edited: {$eu['username']}"); } else $errors[]="DB error."; $u->close(); }
+                    $ef_full=trim($ef.' '.($em?$em.' ':'').$el);
+                    $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,fullname=?,email=?,phone=?,role=? WHERE id=?");
+                    if ($u) { $u->bind_param("sssssssi",$ef,$em,$el,$ef_full,$ee,$ep,$er,$eid); if ($u->execute()) { $success="User updated."; logActivity($conn,$user['id'],"Edited: {$eu['username']}"); } else $errors[]="DB error."; $u->close(); }
                 }
             }
         }
@@ -122,12 +119,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reject_user'])) {
 
 // UPDATE PROFILE
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile']) && $user) {
-    $first=trim($_POST['first_name']??''); $middle=trim($_POST['middle_name']??''); $last=trim($_POST['last_name']??''); $suffix=trim($_POST['suffix']??''); $email=trim($_POST['email']??''); $phone=trim($_POST['phone']??'');
+    $first=trim($_POST['first_name']??''); $middle=trim($_POST['middle_name']??''); $last=trim($_POST['last_name']??''); $email=trim($_POST['email']??''); $phone=trim($_POST['phone']??'');
     if (!$first) $errors[]="First name required."; if (!$last) $errors[]="Last name required."; if (!$email) $errors[]="Email required."; if (!$phone) $errors[]="Phone required.";
     if (empty($errors)) {
-        $fullname=trim($first.' '.($middle?$middle.' ':'').$last.($suffix?', '.$suffix:''));
-        $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,suffix=?,fullname=?,email=?,phone=? WHERE id=?");
-        if ($u) { $u->bind_param("sssssssi",$first,$middle,$last,$suffix,$fullname,$email,$phone,$user['id']); if ($u->execute()) { $success="Profile updated."; logActivity($conn,$user['id'],"Profile updated"); $stmt=$conn->prepare("SELECT id,first_name,middle_name,last_name,suffix,fullname,email,phone,username,created_at FROM users WHERE id=? LIMIT 1"); if ($stmt) { $stmt->bind_param("i",$user['id']); $stmt->execute(); $r=$stmt->get_result(); if ($r&&$r->num_rows>0) $user=$r->fetch_assoc(); $stmt->close(); } } else $errors[]="DB error."; $u->close(); }
+        $fullname=trim($first.' '.($middle?$middle.' ':'').$last);
+        $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,fullname=?,email=?,phone=? WHERE id=?");
+        if ($u) { $u->bind_param("ssssssi",$first,$middle,$last,$fullname,$email,$phone,$user['id']); if ($u->execute()) { $success="Profile updated."; logActivity($conn,$user['id'],"Profile updated"); $stmt=$conn->prepare("SELECT id,first_name,middle_name,last_name,fullname,email,phone,username,created_at FROM users WHERE id=? LIMIT 1"); if ($stmt) { $stmt->bind_param("i",$user['id']); $stmt->execute(); $r=$stmt->get_result(); if ($r&&$r->num_rows>0) $user=$r->fetch_assoc(); $stmt->close(); } } else $errors[]="DB error."; $u->close(); }
     }
 }
 
@@ -164,7 +161,7 @@ if (isset($_SESSION['role']) && $_SESSION['role'] === 'owner') {
 // Staff users
 $staff_users = [];
 if (isset($_SESSION['role']) && $_SESSION['role'] === 'owner') {
-    $su = $conn->query("SELECT id,first_name,middle_name,last_name,suffix,fullname,username,email,phone,role FROM users WHERE role='staff' AND verified=1 ORDER BY id ASC");
+    $su = $conn->query("SELECT id,first_name,middle_name,last_name,fullname,username,email,phone,role FROM users WHERE role='staff' AND verified=1 ORDER BY id ASC");
     if ($su) while ($r=$su->fetch_assoc()) $staff_users[]=$r;
 }
 
@@ -206,8 +203,6 @@ body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); col
 /* ── SIDEBAR ── */
 .sidebar { position: fixed; inset: 0 auto 0 0; width: 220px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 50; }
 .sidebar-logo { padding: 22px 20px 18px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); position: relative; }
-    .sidebar-close{display:none;position:absolute;top:50%;right:14px;transform:translateY(-50%);width:28px;height:28px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);align-items:center;justify-content:center;cursor:pointer;color:var(--muted);font-size:13px;transition:all .15s;}
-    .sidebar-close:hover{background:var(--red-lt);color:var(--red);border-color:var(--red);}
 .sidebar-logo img { width: 36px; height: 36px; border-radius: 8px; }
 .sidebar-logo-text { font-size: 14px; font-weight: 700; color: var(--text); line-height: 1.2; }
 .sidebar-logo-sub  { font-size: 11px; color: var(--muted); }
@@ -379,7 +374,6 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
     @media(max-width:768px){
       /* Show hamburger */
       .hamburger{display:flex;}
-      .sidebar-close{display:flex;}
 
       /* Sidebar slides in */
       .sidebar{
@@ -389,8 +383,6 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
         box-shadow:4px 0 24px rgba(0,0,0,.12);
       }
       .sidebar.open{transform:translateX(0);}
-      .hamburger.open{display:none!important;}
-      .sidebar.open ~ * .hamburger, .hamburger.open{opacity:0;pointer-events:none;}
 
       /* Main fills full width */
       .main{margin-left:0!important;width:100%!important;overflow-x:hidden;}
@@ -434,22 +426,28 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
       .filter-bar{flex-direction:column;align-items:stretch!important;gap:8px;}
       .filter-bar select,.filter-bar input[type=date]{width:100%;font-size:12px;}
 
-      /* Profile layout */
-      .profile-layout{grid-template-columns:1fr!important;}
+      /* Profile layout - stack everything */
+      .profile-layout{display:flex!important;flex-direction:column!important;gap:12px!important;}
+      .profile-main{display:flex;flex-direction:column;gap:12px;width:100%;}
+      .profile-side{display:flex;flex-direction:column;gap:12px;width:100%;}
       .form-grid-2,.form-grid-3{grid-template-columns:1fr!important;}
-      /* Profile page mobile fixes */
       .profile-hero{padding:14px;}
       .profile-hero-info h2{font-size:14px;}
-      .field-row{padding:9px 14px;}
-      .field-label{font-size:11px;}
-      .field-val{font-size:12px;max-width:55%;}
+      .field-row{padding:9px 14px;display:flex;justify-content:space-between;align-items:center;}
+      .field-label{font-size:11px;flex-shrink:0;}
+      .field-val{font-size:12px;max-width:58%;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
       .field-val.mono{font-size:11px;}
-      .action-bar{padding:10px 14px;gap:6px;}
-      .action-bar .btn{flex:1;justify-content:center;}
-      /* Manage users table scroll */
-      .card .card-body{overflow-x:auto;}
-      .tbl{min-width:420px;font-size:12px;}
-      .tbl thead th,.tbl tbody td{padding:8px 10px;}
+      .action-bar{padding:10px 14px;gap:6px;flex-wrap:wrap;}
+      .action-bar .btn{flex:1;justify-content:center;min-width:0;}
+      .inline-form{padding:14px;}
+      .form-actions{flex-wrap:wrap;gap:8px;}
+      /* Tables scroll */
+      .card>div{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+      table.mgmt{min-width:460px;font-size:12px;}
+      .mgmt thead th,.mgmt tbody td{padding:8px 10px;white-space:nowrap;}
+      /* Sensor card */
+      .sensor-row{flex-wrap:wrap;}
+      .sensor-item{flex:1;min-width:80px;}
 
       /* Tabs */
       .tab-bar{overflow-x:auto;width:100%;-webkit-overflow-scrolling:touch;}
@@ -515,7 +513,6 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
       <div class="sidebar-logo-text">MushroomOS</div>
       <div class="sidebar-logo-sub">Cultivation System</div>
     </div>
-    <button class="sidebar-close" id="sidebarClose" aria-label="Close menu"><i class="fas fa-xmark"></i></button>
   </div>
   <nav class="sidebar-nav">
     <a href="dashboard.php"><i class="fas fa-table-cells-large"></i> Dashboard</a>
@@ -570,10 +567,6 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
           <!-- Fields -->
           <div class="field-list">
             <div class="field-row">
-              <span class="field-label">Suffix</span>
-              <span class="field-val mono"><?= htmlspecialchars($user['suffix'] ?? '—') ?></span>
-            </div>
-            <div class="field-row">
               <span class="field-label">Email</span>
               <span class="field-val mono"><?= htmlspecialchars($user['email'] ?? '—') ?></span>
             </div>
@@ -618,10 +611,6 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
               <div class="form-group">
                 <label>Last Name</label>
                 <input type="text" name="last_name" value="<?= htmlspecialchars($user['last_name'] ?? '') ?>" required>
-              </div>
-              <div class="form-group">
-                <label>Suffix <span style="color:var(--muted);font-weight:400;">(e.g. Jr., Sr., III)</span></label>
-                <input type="text" name="suffix" value="<?= htmlspecialchars($user['suffix'] ?? '') ?>" placeholder="Optional">
               </div>
               <div class="form-grid-2">
                 <div class="form-group">
@@ -750,7 +739,6 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
                         data-first="<?= htmlspecialchars($u['first_name']??'') ?>"
                         data-middle="<?= htmlspecialchars($u['middle_name']??'') ?>"
                         data-last="<?= htmlspecialchars($u['last_name']) ?>"
-                        data-suffix="<?= htmlspecialchars($u['suffix']??'') ?>"
                         data-email="<?= htmlspecialchars($u['email']) ?>"
                         data-phone="<?= htmlspecialchars($u['phone']??'') ?>"
                         data-role="<?= htmlspecialchars($u['role']) ?>">
@@ -836,7 +824,6 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
         <div class="form-group"><label>Middle Name</label><input type="text" name="a_middle_name"></div>
       </div>
       <div class="form-group"><label>Last Name</label><input type="text" name="a_last_name" required></div>
-      <div class="form-group"><label>Suffix <span style="color:var(--muted);font-weight:400;">(e.g. Jr., Sr., III)</span></label><input type="text" name="a_suffix" placeholder="Optional"></div>
       <div class="form-grid-2">
         <div class="form-group"><label>Email</label><input type="email" name="a_email" required></div>
         <div class="form-group"><label>Phone</label><input type="text" name="a_phone"></div>
@@ -877,7 +864,6 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
         <div class="form-group"><label>Middle Name</label><input type="text" name="e_middle_name" id="e_middle_name"></div>
       </div>
       <div class="form-group"><label>Last Name</label><input type="text" name="e_last_name" id="e_last_name" required></div>
-      <div class="form-group"><label>Suffix <span style="color:var(--muted);font-weight:400;">(e.g. Jr., Sr., III)</span></label><input type="text" name="e_suffix" id="e_suffix" placeholder="Optional"></div>
       <div class="form-grid-2">
         <div class="form-group"><label>Email</label><input type="email" name="e_email" id="e_email" required></div>
         <div class="form-group"><label>Phone</label><input type="text" name="e_phone" id="e_phone"></div>
@@ -975,7 +961,6 @@ document.addEventListener('click', e => {
   document.getElementById('e_first_name').value  = btn.dataset.first  || '';
   document.getElementById('e_middle_name').value = btn.dataset.middle || '';
   document.getElementById('e_last_name').value   = btn.dataset.last   || '';
-  document.getElementById('e_suffix').value       = btn.dataset.suffix || '';
   document.getElementById('e_email').value        = btn.dataset.email  || '';
   document.getElementById('e_phone').value        = btn.dataset.phone  || '';
   document.getElementById('e_role').value         = btn.dataset.role   || 'staff';
@@ -1006,8 +991,6 @@ document.getElementById('editUserForm')?.addEventListener('submit', () => {
   }
 
   hamburger.addEventListener('click', ()=> sidebar.classList.contains('open') ? closeSidebar() : openSidebar());
-  const closeBtn = document.getElementById('sidebarClose');
-  if(closeBtn) closeBtn.addEventListener('click', closeSidebar);
   overlay.addEventListener('click', closeSidebar);
 
   // Close sidebar when a nav link is tapped on mobile

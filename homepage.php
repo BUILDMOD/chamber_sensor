@@ -280,8 +280,53 @@ footer{background:var(--charcoal);padding:28px 44px;display:flex;align-items:cen
 @keyframes fadeUp{from{opacity:0;transform:translateY(22px);}to{opacity:1;transform:translateY(0);}}
 
 @media(max-width:1024px){.hero-logo-watermark{width:240px;height:240px;right:3%;}.feat-grid{grid-template-columns:1fr 1fr;}.features-top{flex-direction:column;align-items:flex-start;}}
-@media(max-width:768px){.hero-inner{padding:90px 36px 60px;}.hero-title{font-size:56px;}.hero-logo-watermark{display:none;}nav{padding:0 20px;}.nc-date{display:none;}.feat-grid{grid-template-columns:1fr;}.features{padding:56px 24px;}}
-@media(max-width:540px){.hero-title{font-size:44px;}.hero-btns{flex-direction:column;align-items:flex-start;}.nav-clock{display:none;}.nav-sep{display:none;}footer{padding:20px 24px;flex-direction:column;gap:8px;text-align:center;}.mgrid{grid-template-columns:1fr;}}
+@media(max-width:768px){.hero-inner{padding:90px 36px 60px;max-width:100%;}.hero-title{font-size:56px;}.hero-logo-watermark{display:none;}.hero-overlay{background:linear-gradient(to bottom,rgba(10,18,10,0.80) 0%,rgba(10,18,10,0.60) 60%,rgba(10,18,10,0.75) 100%);}nav{padding:0 20px;}.nc-date{display:none;}.feat-grid{grid-template-columns:1fr;}.features{padding:56px 24px;}}
+@media(max-width:540px){.hero-title{font-size:44px;}.nav-clock{display:none;}.nav-sep{display:none;}footer{padding:20px 24px;flex-direction:column;gap:8px;text-align:center;}.mgrid{grid-template-columns:1fr;}}
+/* ── MOBILE FIXES ── */
+@media(max-width:480px){
+  /* Nav — icon-only buttons on small screens */
+  nav{padding:0 14px;}
+  .nav-logo img{width:32px;height:32px;}
+  .logo-text{font-size:16px;}
+  .nav-clock{display:none;}
+  .nav-sep{display:none;}
+  .nl{padding:6px 11px;font-size:11px;letter-spacing:0;}
+
+  /* Hero */
+  .hero{align-items:flex-start;}
+  .hero-inner{padding:100px 22px 52px;max-width:100%;text-align:left;}
+  .hero-eyebrow{justify-content:flex-start;margin-bottom:100px;}
+  .hero-title{font-size:65px;line-height:1.03;text-align:left;margin-bottom:30px;}
+  .hero-desc{font-size:13.5px;max-width:100%;text-align:left;margin-bottom:150px;}
+  .hero-btns{flex-direction:column;align-items:stretch;gap:100px;}
+  .btn-hero-primary{justify-content:center;padding:15px 20px;font-size:14px;width:100%;}
+
+  /* Features */
+  .features{padding:40px 18px;}
+  .feat-grid{grid-template-columns:1fr;}
+  .features-top{flex-direction:column;}
+  .feat-heading{font-size:32px;}
+
+  /* Footer */
+  footer{padding:18px 20px;flex-direction:column;gap:6px;text-align:center;}
+
+  /* Modals — comfortable on small phones */
+  .modal-backdrop{padding:16px 14px;align-items:center;}
+  .modal{border-radius:18px;padding:28px 18px 22px;max-height:88vh;}
+  #loginModal .modal,#registerModal .modal{max-width:100%;}
+  .mgrid{grid-template-columns:1fr;}
+  .modal-title{font-size:22px;}
+  .mfield input,.mfield select{font-size:14px;padding:11px 36px 11px 13px;}
+  .modal-btn{padding:13px;font-size:14px;}
+}
+
+@media(max-width:380px){
+  .hero-title{font-size:32px;}
+  .logo-text{font-size:14px;}
+}
+
+
+
 
 /* ── SCROLL-TO-TOP FAB ── */
 .scroll-top{
@@ -322,6 +367,8 @@ footer{background:var(--charcoal);padding:28px 44px;display:flex;align-items:cen
     <button class="nl nl-cta" onclick="openLogin()">Log In →</button>
   </div>
 </nav>
+
+
 
 <!-- ══════════ LOGIN MODAL ══════════ -->
 <div class="modal-backdrop" id="loginModal" onclick="handleBackdrop(event,'loginModal')">
@@ -603,6 +650,7 @@ function checkStrength(v){
     window.scrollTo({top: 0, behavior: 'smooth'});
   });
 })();
+
 </script>
 </body>
 </html>
