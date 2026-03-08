@@ -218,7 +218,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
 
     /* Hamburger button */
     .hamburger{
-      display:none;position:fixed;top:4px;left:10px;z-index:500;
+      display:none;position:fixed;top:4px;left:10px;z-index:200;
       width:38px;height:38px;border-radius:9px;
       background:var(--surface);border:1px solid var(--border);
       box-shadow:var(--shadow);
@@ -228,9 +228,6 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
       pointer-events:auto;
     }
     .hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
-    .hamburger.open span:nth-child(1){transform:translateY(6px) rotate(45deg);}
-    .hamburger.open span:nth-child(2){opacity:0;transform:scaleX(0);}
-    .hamburger.open span:nth-child(3){transform:translateY(-6px) rotate(-45deg);}
 
     /* Overlay behind sidebar */
     .sidebar-overlay{
@@ -244,6 +241,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
     @media(max-width:768px){
       /* Show hamburger */
       .hamburger{display:flex;}
+      .sidebar.open ~ * .hamburger, .hamburger.open{display:none!important;}
 
       /* Sidebar slides in */
       .sidebar{
@@ -258,7 +256,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
       .main{margin-left:0!important;width:100%!important;overflow-x:hidden;}
 
       /* Topbar — room for hamburger on left */
-      .topbar{padding:0 10px 0 58px;height:52px;gap:6px;position:fixed!important;top:0;left:0;right:0;z-index:40;}
+      .topbar{padding:0 10px 0 58px;height:52px;gap:6px;position:fixed!important;top:0;left:0;right:0;z-index:50;}
       .topbar-title{font-size:14px;}
       .topbar-right{gap:6px;}
       .topbar-time{font-size:11px;padding:4px 10px;}
@@ -364,7 +362,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
 <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
 
-<aside class="sidebar">
+<aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <img src="assets/img/logo.png" alt="logo">
     <div><div class="sidebar-logo-text">MushroomOS</div><div class="sidebar-logo-sub">Cultivation System</div></div>
@@ -575,35 +573,22 @@ function submitSmtp(action) {
   document.getElementById('smtpForm').submit();
 }
 
-// ── Mobile sidebar toggle ──
-(function(){
-  const hamburger = document.getElementById('hamburger');
-  const sidebar   = document.querySelector('.sidebar');
-  const overlay   = document.getElementById('sidebarOverlay');
-  if(!hamburger||!sidebar||!overlay) return;
-
-  function openSidebar(){
-    sidebar.classList.add('open');
-    overlay.classList.add('open');
-    hamburger.classList.add('open');
-  }
-  function closeSidebar(){
-    sidebar.classList.remove('open');
-    overlay.classList.remove('open');
-    hamburger.classList.remove('open');
-  }
-
-  hamburger.addEventListener('click', ()=> sidebar.classList.contains('open') ? closeSidebar() : openSidebar());
-  overlay.addEventListener('click', closeSidebar);
-
-  // Close sidebar when a nav link is tapped on mobile
-  sidebar.querySelectorAll('.sidebar-nav a').forEach(a => {
-    a.addEventListener('click', ()=>{ if(window.innerWidth<=768) closeSidebar(); });
-  });
-})();
 
 </script>
-
-
+<script>
+(function() {
+  var h = document.getElementById('hamburger');
+  var s = document.getElementById('sidebar');
+  var o = document.getElementById('sidebarOverlay');
+  if (!h || !s || !o) return;
+  function open()  { s.classList.add('open');    o.classList.add('open');    h.classList.add('open');    }
+  function close() { s.classList.remove('open'); o.classList.remove('open'); h.classList.remove('open'); }
+  h.addEventListener('click', function() { s.classList.contains('open') ? close() : open(); });
+  o.addEventListener('click', close);
+  s.querySelectorAll('.sidebar-nav a').forEach(function(a) {
+    a.addEventListener('click', function() { if (window.innerWidth <= 768) close(); });
+  });
+})();
+</script>
 </body>
 </html>

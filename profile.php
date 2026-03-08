@@ -46,11 +46,17 @@ $errors = []; $success = "";
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
     $sessionRole = $_SESSION['role'] ?? '';
     if ($sessionRole !== 'owner') { $errors[] = "Access denied."; } else {
-        $a_first=$_POST['a_first_name']??''; $a_middle=$_POST['a_middle_name']??''; $a_last=$_POST['a_last_name']??'';
+        $a_first=$_POST['a_first_name']??''; $a_middle=$_POST['a_middle_name']??''; $a_last=$_POST['a_last_name']??''; $a_suffix=$_POST['a_suffix']??'';
         $a_email=$_POST['a_email']??''; $a_phone=$_POST['a_phone']??''; $a_username=$_POST['a_username']??''; $a_password_raw=$_POST['a_password']??'';
         $a_role=in_array($_POST['a_role']??'staff',['owner','staff'])?$_POST['a_role']:'staff';
         if (!$a_first) $errors[]="First name required."; if (!$a_last) $errors[]="Last name required.";
         if (!$a_email) $errors[]="Email required."; if (!$a_username) $errors[]="Username required."; if (!$a_password_raw) $errors[]="Password required.";
+        if ($a_first && !preg_match("/^[A-Za-z\s]+$/", $a_first)) $errors[]="First name must contain letters only.";
+        if ($a_middle && !preg_match("/^[A-Za-z\s]+$/", $a_middle)) $errors[]="Middle name must contain letters only.";
+        if ($a_last && !preg_match("/^[A-Za-z\s]+$/", $a_last)) $errors[]="Last name must contain letters only.";
+        if ($a_phone && !preg_match("/^[0-9]+$/", $a_phone)) $errors[]="Phone number must contain numbers only.";
+        if ($a_username && !preg_match("/^[A-Za-z0-9]+$/", $a_username)) $errors[]="Username must contain letters and numbers only.";
+        if ($a_email && !filter_var($a_email, FILTER_VALIDATE_EMAIL)) $errors[]="Invalid email format.";
         if (!preg_match('@[A-Z]@',$a_password_raw)||!preg_match('@[a-z]@',$a_password_raw)||!preg_match('@[0-9]@',$a_password_raw)||!preg_match('@[^\w]@',$a_password_raw)||strlen($a_password_raw)<8)
             $errors[]="Password must be 8+ chars with uppercase, lowercase, number, and special character.";
         if (empty($errors)) {
@@ -58,9 +64,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
             if ($chk) { $chk->bind_param("ss",$a_username,$a_email); $chk->execute(); $chk->store_result(); if ($chk->num_rows>0) $errors[]="Username or email already exists."; $chk->close(); }
         }
         if (empty($errors)) {
-            $a_fullname=trim($a_first.' '.($a_middle?$a_middle.' ':'').$a_last); $a_hashed=password_hash($a_password_raw,PASSWORD_DEFAULT);
-            $ins=$conn->prepare("INSERT INTO users (first_name,middle_name,last_name,fullname,email,phone,username,password,role,verified) VALUES (?,?,?,?,?,?,?,?,?,1)");
-            if ($ins) { $ins->bind_param("sssssssss",$a_first,$a_middle,$a_last,$a_fullname,$a_email,$a_phone,$a_username,$a_hashed,$a_role);
+            $a_fullname=trim($a_first.' '.($a_middle?$a_middle.' ':'').$a_last.($a_suffix?', '.$a_suffix:'')); $a_hashed=password_hash($a_password_raw,PASSWORD_DEFAULT);
+            $ins=$conn->prepare("INSERT INTO users (first_name,middle_name,last_name,suffix,fullname,email,phone,username,password,role,verified) VALUES (?,?,?,?,?,?,?,?,?,?,1)");
+            if ($ins) { $ins->bind_param("ssssssssss",$a_first,$a_middle,$a_last,$a_suffix,$a_fullname,$a_email,$a_phone,$a_username,$a_hashed,$a_role);
                 if ($ins->execute()) {
                     $success="User created successfully.";
                     if ($user) logActivity($conn,$user['id'],"Created user: {$a_username}");
@@ -119,7 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_user'])) {
 // EDIT USER
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_user'])) {
     $sessionRole=$_SESSION['role']??''; if ($sessionRole!=='owner') { $errors[]="Access denied."; } else {
-        $eid=intval($_POST['edit_user_id']??0); $ef=$_POST['e_first_name']??''; $em=$_POST['e_middle_name']??''; $el=$_POST['e_last_name']??''; $ee=$_POST['e_email']??''; $ep=$_POST['e_phone']??''; $er=in_array($_POST['e_role']??'staff',['owner','staff'])?$_POST['e_role']:'staff';
+        $eid=intval($_POST['edit_user_id']??0); $ef=$_POST['e_first_name']??''; $em=$_POST['e_middle_name']??''; $el=$_POST['e_last_name']??''; $es=$_POST['e_suffix']??''; $ee=$_POST['e_email']??''; $ep=$_POST['e_phone']??''; $er=in_array($_POST['e_role']??'staff',['owner','staff'])?$_POST['e_role']:'staff';
         if (!$ef) $errors[]="First name required."; if (!$el) $errors[]="Last name required."; if (!$ee) $errors[]="Email required."; if ($eid<=0) $errors[]="Invalid ID.";
         if (empty($errors)) {
             $eu=null; $s=$conn->prepare("SELECT id,username,role FROM users WHERE id=? LIMIT 1");
@@ -128,9 +134,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_user'])) {
                 $chk=$conn->prepare("SELECT id FROM users WHERE email=? AND id!=? LIMIT 1");
                 if ($chk) { $chk->bind_param("si",$ee,$eid); $chk->execute(); $chk->store_result(); if ($chk->num_rows>0) $errors[]="Email exists."; $chk->close(); }
                 if (empty($errors)) {
-                    $ef_full=trim($ef.' '.($em?$em.' ':'').$el);
-                    $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,fullname=?,email=?,phone=?,role=? WHERE id=?");
-                    if ($u) { $u->bind_param("sssssssi",$ef,$em,$el,$ef_full,$ee,$ep,$er,$eid); if ($u->execute()) { $success="User updated."; logActivity($conn,$user['id'],"Edited: {$eu['username']}"); } else $errors[]="DB error."; $u->close(); }
+                    $ef_full=trim($ef.' '.($em?$em.' ':'').$el.($es?', '.$es:''));
+                    $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,suffix=?,fullname=?,email=?,phone=?,role=? WHERE id=?");
+                    if ($u) { $u->bind_param("ssssssssi",$ef,$em,$el,$es,$ef_full,$ee,$ep,$er,$eid); if ($u->execute()) { $success="User updated."; logActivity($conn,$user['id'],"Edited: {$eu['username']}"); } else $errors[]="DB error."; $u->close(); }
                 }
             }
         }
@@ -223,12 +229,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reject_user'])) {
 
 // UPDATE PROFILE
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile']) && $user) {
-    $first=trim($_POST['first_name']??''); $middle=trim($_POST['middle_name']??''); $last=trim($_POST['last_name']??''); $email=trim($_POST['email']??''); $phone=trim($_POST['phone']??'');
+    $first=trim($_POST['first_name']??''); $middle=trim($_POST['middle_name']??''); $last=trim($_POST['last_name']??''); $suffix=trim($_POST['suffix']??''); $email=trim($_POST['email']??''); $phone=trim($_POST['phone']??'');
     if (!$first) $errors[]="First name required."; if (!$last) $errors[]="Last name required."; if (!$email) $errors[]="Email required."; if (!$phone) $errors[]="Phone required.";
     if (empty($errors)) {
-        $fullname=trim($first.' '.($middle?$middle.' ':'').$last);
-        $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,fullname=?,email=?,phone=? WHERE id=?");
-        if ($u) { $u->bind_param("ssssssi",$first,$middle,$last,$fullname,$email,$phone,$user['id']); if ($u->execute()) { $success="Profile updated."; logActivity($conn,$user['id'],"Profile updated"); $stmt=$conn->prepare("SELECT id,first_name,middle_name,last_name,fullname,email,phone,username,created_at FROM users WHERE id=? LIMIT 1"); if ($stmt) { $stmt->bind_param("i",$user['id']); $stmt->execute(); $r=$stmt->get_result(); if ($r&&$r->num_rows>0) $user=$r->fetch_assoc(); $stmt->close(); } } else $errors[]="DB error."; $u->close(); }
+        $fullname=trim($first.' '.($middle?$middle.' ':'').$last.($suffix?', '.$suffix:''));
+        $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,suffix=?,fullname=?,email=?,phone=? WHERE id=?");
+        if ($u) { $u->bind_param("sssssssi",$first,$middle,$last,$suffix,$fullname,$email,$phone,$user['id']); if ($u->execute()) { $success="Profile updated."; logActivity($conn,$user['id'],"Profile updated"); $stmt=$conn->prepare("SELECT id,first_name,middle_name,last_name,fullname,email,phone,username,created_at FROM users WHERE id=? LIMIT 1"); if ($stmt) { $stmt->bind_param("i",$user['id']); $stmt->execute(); $r=$stmt->get_result(); if ($r&&$r->num_rows>0) $user=$r->fetch_assoc(); $stmt->close(); } } else $errors[]="DB error."; $u->close(); }
     }
 }
 
@@ -462,9 +468,6 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
       pointer-events:auto;
     }
     .hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
-    .hamburger.open span:nth-child(1){transform:translateY(6px) rotate(45deg);}
-    .hamburger.open span:nth-child(2){opacity:0;transform:scaleX(0);}
-    .hamburger.open span:nth-child(3){transform:translateY(-6px) rotate(-45deg);}
 
     /* Overlay behind sidebar */
     .sidebar-overlay{
@@ -478,6 +481,7 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
     @media(max-width:768px){
       /* Show hamburger */
       .hamburger{display:flex;}
+      .sidebar.open ~ * .hamburger, .hamburger.open{display:none!important;}
 
       /* Sidebar slides in */
       .sidebar{
@@ -610,7 +614,7 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
 
 
 <!-- ── SIDEBAR ── -->
-<aside class="sidebar">
+<aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <img src="assets/img/logo.png" alt="logo">
     <div>
@@ -705,16 +709,22 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
               <div class="form-grid-2">
                 <div class="form-group">
                   <label>First Name</label>
-                  <input type="text" name="first_name" value="<?= htmlspecialchars($user['first_name'] ?? '') ?>" required>
+                  <input type="text" name="first_name" value="<?= htmlspecialchars($user['first_name'] ?? '') ?>" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')">
                 </div>
                 <div class="form-group">
                   <label>Middle Name</label>
-                  <input type="text" name="middle_name" value="<?= htmlspecialchars($user['middle_name'] ?? '') ?>">
+                  <input type="text" name="middle_name" value="<?= htmlspecialchars($user['middle_name'] ?? '') ?>" oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')">
                 </div>
               </div>
-              <div class="form-group">
-                <label>Last Name</label>
-                <input type="text" name="last_name" value="<?= htmlspecialchars($user['last_name'] ?? '') ?>" required>
+              <div class="form-grid-2">
+                <div class="form-group">
+                  <label>Last Name</label>
+                  <input type="text" name="last_name" value="<?= htmlspecialchars($user['last_name'] ?? '') ?>" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')">
+                </div>
+                <div class="form-group">
+                  <label>Suffix</label>
+                  <input type="text" name="suffix" value="<?= htmlspecialchars($user['suffix'] ?? '') ?>" oninput="this.value=this.value.replace(/[^A-Za-z0-9.\s]/g,'')" maxlength="10" placeholder="Jr., Sr., III (optional)">
+                </div>
               </div>
               <div class="form-grid-2">
                 <div class="form-group">
@@ -723,7 +733,7 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
                 </div>
                 <div class="form-group">
                   <label>Phone</label>
-                  <input type="tel" name="phone" value="<?= htmlspecialchars($user['phone'] ?? '') ?>" required>
+                  <input type="tel" name="phone" value="<?= htmlspecialchars($user['phone'] ?? '') ?>" required oninput="this.value=this.value.replace(/[^0-9]/g,'')" maxlength="11">
                 </div>
               </div>
               <p class="username-note">Username: <strong><?= htmlspecialchars($user['username'] ?? '') ?></strong> — cannot be changed</p>
@@ -843,6 +853,7 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
                         data-first="<?= htmlspecialchars($u['first_name']??'') ?>"
                         data-middle="<?= htmlspecialchars($u['middle_name']??'') ?>"
                         data-last="<?= htmlspecialchars($u['last_name']) ?>"
+                        data-suffix="<?= htmlspecialchars($u['suffix']??''  ) ?>"
                         data-email="<?= htmlspecialchars($u['email']) ?>"
                         data-phone="<?= htmlspecialchars($u['phone']??'') ?>"
                         data-role="<?= htmlspecialchars($u['role']) ?>">
@@ -924,15 +935,18 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
     <form method="POST" id="addUserForm">
       <input type="hidden" name="add_user" value="1">
       <div class="form-grid-2">
-        <div class="form-group"><label>First Name</label><input type="text" name="a_first_name" required></div>
-        <div class="form-group"><label>Middle Name</label><input type="text" name="a_middle_name"></div>
+        <div class="form-group"><label>First Name</label><input type="text" name="a_first_name" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')" placeholder="Letters only"></div>
+        <div class="form-group"><label>Middle Name</label><input type="text" name="a_middle_name" oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')" placeholder="Letters only (optional)"></div>
       </div>
-      <div class="form-group"><label>Last Name</label><input type="text" name="a_last_name" required></div>
       <div class="form-grid-2">
-        <div class="form-group"><label>Email</label><input type="email" name="a_email" required></div>
-        <div class="form-group"><label>Phone</label><input type="text" name="a_phone"></div>
+        <div class="form-group"><label>Last Name</label><input type="text" name="a_last_name" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')" placeholder="Letters only"></div>
+        <div class="form-group"><label>Suffix</label><input type="text" name="a_suffix" oninput="this.value=this.value.replace(/[^A-Za-z0-9.\s]/g,'')" maxlength="10" placeholder="Jr., Sr., III (optional)"></div>
       </div>
-      <div class="form-group"><label>Username</label><input type="text" name="a_username" required></div>
+      <div class="form-grid-2">
+        <div class="form-group"><label>Email</label><input type="email" name="a_email" required placeholder="example@email.com"></div>
+        <div class="form-group"><label>Phone</label><input type="text" name="a_phone" oninput="this.value=this.value.replace(/[^0-9]/g,'')" maxlength="11" placeholder="Numbers only"></div>
+      </div>
+      <div class="form-group"><label>Username</label><input type="text" name="a_username" required oninput="this.value=this.value.replace(/[^A-Za-z0-9]/g,'')" placeholder="Letters and numbers only"></div>
       <div class="form-group">
         <label>Password</label>
         <div class="pw-wrap">
@@ -964,13 +978,16 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
       <input type="hidden" name="edit_user" value="1">
       <input type="hidden" name="edit_user_id" id="edit_user_id">
       <div class="form-grid-2">
-        <div class="form-group"><label>First Name</label><input type="text" name="e_first_name" id="e_first_name" required></div>
-        <div class="form-group"><label>Middle Name</label><input type="text" name="e_middle_name" id="e_middle_name"></div>
+        <div class="form-group"><label>First Name</label><input type="text" name="e_first_name" id="e_first_name" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')" placeholder="Letters only"></div>
+        <div class="form-group"><label>Middle Name</label><input type="text" name="e_middle_name" id="e_middle_name" oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')" placeholder="Letters only (optional)"></div>
       </div>
-      <div class="form-group"><label>Last Name</label><input type="text" name="e_last_name" id="e_last_name" required></div>
       <div class="form-grid-2">
-        <div class="form-group"><label>Email</label><input type="email" name="e_email" id="e_email" required></div>
-        <div class="form-group"><label>Phone</label><input type="text" name="e_phone" id="e_phone"></div>
+        <div class="form-group"><label>Last Name</label><input type="text" name="e_last_name" id="e_last_name" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')" placeholder="Letters only"></div>
+        <div class="form-group"><label>Suffix</label><input type="text" name="e_suffix" id="e_suffix" oninput="this.value=this.value.replace(/[^A-Za-z0-9.\s]/g,'')" maxlength="10" placeholder="Jr., Sr., III (optional)"></div>
+      </div>
+      <div class="form-grid-2">
+        <div class="form-group"><label>Email</label><input type="email" name="e_email" id="e_email" required placeholder="example@email.com"></div>
+        <div class="form-group"><label>Phone</label><input type="text" name="e_phone" id="e_phone" oninput="this.value=this.value.replace(/[^0-9]/g,'')" maxlength="11" placeholder="Numbers only"></div>
       </div>
       <div class="form-group">
         <label>Role</label>
@@ -1065,6 +1082,7 @@ document.addEventListener('click', e => {
   document.getElementById('e_first_name').value  = btn.dataset.first  || '';
   document.getElementById('e_middle_name').value = btn.dataset.middle || '';
   document.getElementById('e_last_name').value   = btn.dataset.last   || '';
+  document.getElementById('e_suffix').value       = btn.dataset.suffix || '';
   document.getElementById('e_email').value        = btn.dataset.email  || '';
   document.getElementById('e_phone').value        = btn.dataset.phone  || '';
   document.getElementById('e_role').value         = btn.dataset.role   || 'staff';
@@ -1076,33 +1094,22 @@ document.getElementById('editUserForm')?.addEventListener('submit', () => {
   document.getElementById('editModalMsg').className = 'modal-msg ok';
 });
 
-// ── Mobile sidebar toggle ──
-(function(){
-  const hamburger = document.getElementById('hamburger');
-  const sidebar   = document.querySelector('.sidebar');
-  const overlay   = document.getElementById('sidebarOverlay');
-  if(!hamburger||!sidebar||!overlay) return;
 
-  function openSidebar(){
-    sidebar.classList.add('open');
-    overlay.classList.add('open');
-    hamburger.classList.add('open');
-  }
-  function closeSidebar(){
-    sidebar.classList.remove('open');
-    overlay.classList.remove('open');
-    hamburger.classList.remove('open');
-  }
-
-  hamburger.addEventListener('click', ()=> sidebar.classList.contains('open') ? closeSidebar() : openSidebar());
-  overlay.addEventListener('click', closeSidebar);
-
-  // Close sidebar when a nav link is tapped on mobile
-  sidebar.querySelectorAll('.sidebar-nav a').forEach(a => {
-    a.addEventListener('click', ()=>{ if(window.innerWidth<=768) closeSidebar(); });
+</script>
+<script>
+(function() {
+  var h = document.getElementById('hamburger');
+  var s = document.getElementById('sidebar');
+  var o = document.getElementById('sidebarOverlay');
+  if (!h || !s || !o) return;
+  function open()  { s.classList.add('open');    o.classList.add('open');    h.classList.add('open');    }
+  function close() { s.classList.remove('open'); o.classList.remove('open'); h.classList.remove('open'); }
+  h.addEventListener('click', function() { s.classList.contains('open') ? close() : open(); });
+  o.addEventListener('click', close);
+  s.querySelectorAll('.sidebar-nav a').forEach(function(a) {
+    a.addEventListener('click', function() { if (window.innerWidth <= 768) close(); });
   });
 })();
-
 </script>
 </body>
 </html>

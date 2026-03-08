@@ -72,6 +72,39 @@ foreach ($data as $row) {
     if ($ins) { $ins->bind_param("sddddddi",$row['summary_date'],$row['avg_temp'],$row['min_temp'],$row['max_temp'],$row['avg_hum'],$row['min_hum'],$row['max_hum'],$row['readings']); $ins->execute(); $ins->close(); }
 }
 
+// ── CSV EXPORT — must be before any HTML output ──
+if (isset($_GET['export']) && $_GET['export'] === 'sensor_csv') {
+    // Re-query data for export (uses same $date_from/$date_to already set)
+    $exp_sql = "SELECT DATE(timestamp) as summary_date,
+                  AVG(temperature) as avg_temp, MIN(temperature) as min_temp, MAX(temperature) as max_temp,
+                  AVG(humidity) as avg_hum, MIN(humidity) as min_hum, MAX(humidity) as max_hum,
+                  COUNT(*) as readings
+                FROM sensor_data
+                WHERE DATE(timestamp) BETWEEN '$date_from' AND '$date_to'
+                GROUP BY DATE(timestamp) ORDER BY summary_date ASC";
+    $exp_result = $conn->query($exp_sql);
+    $exp_data = [];
+    if ($exp_result) while ($r = $exp_result->fetch_assoc()) $exp_data[] = $r;
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="sensor_report_' . date('Ymd') . '.csv"');
+    header('Pragma: no-cache');
+    $out = fopen('php://output', 'w');
+    fputcsv($out, ['Date','Avg Temp (°C)','Min Temp (°C)','Max Temp (°C)','Avg Humidity (%)','Min Humidity (%)','Max Humidity (%)','Readings']);
+    foreach ($exp_data as $row)
+        fputcsv($out, [
+            date('M j, Y', strtotime($row['summary_date'])),
+            number_format($row['avg_temp'], 2),
+            number_format($row['min_temp'], 2),
+            number_format($row['max_temp'], 2),
+            number_format($row['avg_hum'],  2),
+            number_format($row['min_hum'],  2),
+            number_format($row['max_hum'],  2),
+            $row['readings']
+        ]);
+    fclose($out);
+    exit;
+}
+
 // ── Compute changes ──
 $temp_changes = []; $hum_changes = []; $change_dates = [];
 for ($i = 1; $i < count($data); $i++) {
@@ -124,6 +157,7 @@ function navUrl($view, $year, $month, $day) {
     return "?view=$view&year=$year&month=$month&day=$day";
 }
 ?>
+<!-- FIXED VERSION: hamburger z-index:9999 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -161,9 +195,9 @@ function navUrl($view, $year, $month, $day) {
     .sidebar-nav a.active{background:var(--green-lt);color:var(--green);font-weight:600;}
 .sidebar-nav .nav-bottom{margin-top:auto;padding-top:8px;border-top:1px solid var(--border);}
 
-    .main{margin-left:220px;min-height:100vh;width:calc(100% - 220px);box-sizing:border-box;}
+    .main{margin-left:220px;min-height:100vh;width:calc(100% - 220px);box-sizing:border-box;padding-top:56px;}
 
-    .topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:30;}
+    .topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px 0 248px;height:56px;display:flex;align-items:center;justify-content:space-between;position:fixed;top:0;left:0;right:0;z-index:40;}
     .topbar-title{font-size:15px;font-weight:700;color:var(--text);letter-spacing:-.2px;}
     .topbar-right{display:flex;align-items:center;gap:10px;}
     .topbar-time{font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);background:var(--surface2);padding:5px 12px;border-radius:20px;border:1px solid var(--border);}
@@ -302,18 +336,16 @@ function navUrl($view, $year, $month, $day) {
 
     /* Hamburger button */
     .hamburger{
-      display:none;position:fixed;top:4px;left:10px;z-index:600;pointer-events:auto;
+      display:none;position:fixed;top:4px;left:10px;z-index:500;
       width:38px;height:38px;border-radius:9px;
       background:var(--surface);border:1px solid var(--border);
       box-shadow:var(--shadow);
       align-items:center;justify-content:center;
       cursor:pointer;flex-direction:column;gap:4px;padding:9px;
       touch-action:manipulation;
+      pointer-events:auto;
     }
     .hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
-    .hamburger.open span:nth-child(1){transform:translateY(6px) rotate(45deg);}
-    .hamburger.open span:nth-child(2){opacity:0;transform:scaleX(0);}
-    .hamburger.open span:nth-child(3){transform:translateY(-6px) rotate(-45deg);}
 
     /* Overlay behind sidebar */
     .sidebar-overlay{
@@ -327,21 +359,23 @@ function navUrl($view, $year, $month, $day) {
     @media(max-width:768px){
       /* Hamburger visible */
       .hamburger{display:flex;}
+      .sidebar.open ~ * .hamburger, .hamburger.open{display:none!important;}
 
       /* Sidebar slides in */
       .sidebar{
         transform:translateX(-100%);
         transition:transform .28s cubic-bezier(.4,0,.2,1);
-        z-index:100;
+        z-index:500;
         box-shadow:4px 0 24px rgba(0,0,0,.12);
       }
       .sidebar.open{transform:translateX(0);}
 
       /* Main fills full width */
-      .main{margin-left:0!important;width:100%!important;}
+      .main{margin-left:0!important;width:100%!important;padding-top:0!important;}
+      .main > *{pointer-events:auto;}
 
       /* Topbar */
-      .topbar{padding:0 10px 0 58px;height:52px;position:fixed!important;top:0;left:0;right:0;z-index:40;}
+      .topbar{padding:0 10px 0 58px;height:52px;position:fixed;top:0;left:0;right:0;z-index:40;}
       .topbar-title{font-size:14px;}
       .topbar-time{font-size:11px;padding:4px 10px;}
 
@@ -418,7 +452,7 @@ function navUrl($view, $year, $month, $day) {
     }
 
     @media(max-width:480px){
-      .topbar{height:48px;position:fixed!important;top:0;left:0;right:0;}
+      .topbar{height:48px;position:fixed!important;top:0;left:0;right:0;z-index:40;}
       .topbar-title{font-size:13px;}
       .topbar-time{display:none;}
 
@@ -451,6 +485,26 @@ function navUrl($view, $year, $month, $day) {
 </style>
 </head>
 <body>
+<script>
+// ── Sidebar toggle — runs immediately ──
+window.addEventListener('DOMContentLoaded', function() {
+  var h = document.getElementById('hamburger');
+  var s = document.getElementById('sidebar');
+  var o = document.getElementById('sidebarOverlay');
+  if (!h || !s || !o) { console.log('MISSING:', !h, !s, !o); return; }
+  h.onclick = function() {
+    var isOpen = s.classList.contains('open');
+    s.classList[isOpen ? 'remove' : 'add']('open');
+    o.classList[isOpen ? 'remove' : 'add']('open');
+    h.classList[isOpen ? 'remove' : 'add']('open');
+  };
+  o.onclick = function() {
+    s.classList.remove('open');
+    o.classList.remove('open');
+    h.classList.remove('open');
+  };
+});
+</script>
 <button class="hamburger" id="hamburger" aria-label="Menu">
   <span></span><span></span><span></span>
 </button>
@@ -458,7 +512,7 @@ function navUrl($view, $year, $month, $day) {
 
 
 <!-- SIDEBAR -->
-<aside class="sidebar">
+<aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <img src="assets/img/logo.png" alt="logo">
     <div>
@@ -477,14 +531,14 @@ function navUrl($view, $year, $month, $day) {
   </nav>
 </aside>
 
-<main class="main">
-  <header class="topbar">
-    <span class="topbar-title">Reports</span>
-    <div class="topbar-right">
-      <span class="topbar-time" id="phTime" data-server-ts="<?= $server_ts_ms ?>"><?= htmlspecialchars($server_time_formatted) ?></span>
-    </div>
-  </header>
+<header class="topbar">
+  <span class="topbar-title">Reports</span>
+  <div class="topbar-right">
+    <span class="topbar-time" id="phTime" data-server-ts="<?= $server_ts_ms ?>"><?= htmlspecialchars($server_time_formatted) ?></span>
+  </div>
+</header>
 
+<main class="main">
   <div class="page">
 
     <?php
@@ -839,17 +893,6 @@ function navUrl($view, $year, $month, $day) {
   </div><!-- end page -->
 </main>
 
-<?php
-// ── CSV EXPORT ──
-if (isset($_GET['export']) && $_GET['export'] === 'sensor_csv' && !empty($data)) {
-    header('Content-Type: text/csv');
-    header('Content-Disposition: attachment; filename="sensor_report_'.date('Ymd').'.csv"');
-    $out = fopen('php://output','w');
-    fputcsv($out,['Date','Avg Temp (°C)','Min Temp (°C)','Max Temp (°C)','Avg Humidity (%)','Min Humidity (%)','Max Humidity (%)','Readings']);
-    foreach ($data as $row) fputcsv($out,[date('M j, Y',strtotime($row['summary_date'])),number_format($row['avg_temp'],2),number_format($row['min_temp'],2),number_format($row['max_temp'],2),number_format($row['avg_hum'],2),number_format($row['min_hum'],2),number_format($row['max_hum'],2),$row['readings']]);
-    fclose($out); exit;
-}
-?>
 
 <script>
 // PH Time
@@ -891,31 +934,29 @@ if (isset($_GET['export']) && $_GET['export'] === 'sensor_csv' && !empty($data))
 })();
 
 // ── Mobile sidebar toggle ──
-(function(){
-  const hamburger = document.getElementById('hamburger');
-  const sidebar   = document.querySelector('.sidebar');
-  const overlay   = document.getElementById('sidebarOverlay');
-  if(!hamburger||!sidebar||!overlay) return;
-
-  function openSidebar(){
-    sidebar.classList.add('open');
-    overlay.classList.add('open');
-    hamburger.classList.add('open');
-  }
-  function closeSidebar(){
-    sidebar.classList.remove('open');
-    overlay.classList.remove('open');
-    hamburger.classList.remove('open');
-  }
-
-  hamburger.addEventListener('click', ()=> sidebar.classList.contains('open') ? closeSidebar() : openSidebar());
-  overlay.addEventListener('click', closeSidebar);
-
-  // Close sidebar when a nav link is tapped on mobile
-  sidebar.querySelectorAll('.sidebar-nav a').forEach(a => {
-    a.addEventListener('click', ()=>{ if(window.innerWidth<=768) closeSidebar(); });
+document.getElementById('hamburger').onclick = function() {
+  var s = document.querySelector('.sidebar');
+  var o = document.getElementById('sidebarOverlay');
+  var h = document.getElementById('hamburger');
+  var open = s.classList.contains('open');
+  s.classList[open?'remove':'add']('open');
+  o.classList[open?'remove':'add']('open');
+  h.classList[open?'remove':'add']('open');
+};
+document.getElementById('sidebarOverlay').onclick = function() {
+  document.querySelector('.sidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('open');
+  document.getElementById('hamburger').classList.remove('open');
+};
+document.querySelectorAll('.sidebar-nav a').forEach(function(a){
+  a.addEventListener('click', function(){ 
+    if(window.innerWidth<=768){
+      document.querySelector('.sidebar').classList.remove('open');
+      document.getElementById('sidebarOverlay').classList.remove('open');
+      document.getElementById('hamburger').classList.remove('open');
+    }
   });
-})();
+});
 
 </script>
 </body>
