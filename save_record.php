@@ -5,12 +5,12 @@ ob_start();
 header('Content-Type: application/json');
 
 try {
-    require_once __DIR__ . '/includes/auth_check.php';
+    if (session_status() === PHP_SESSION_NONE) session_start();
     require_once __DIR__ . '/includes/db_connect.php';
     ob_clean();
     if (!isset($conn) || $conn->connect_error) throw new Exception('DB connection failed');
 
-    if (!isset($_SESSION['user_id'])) {
+    if (empty($_SESSION['user'])) {
         echo json_encode(['success'=>false,'error'=>'Not logged in']);
         exit;
     }
@@ -34,7 +34,7 @@ try {
             mushroom_count INT NOT NULL DEFAULT 0,
             growth_stage VARCHAR(50) DEFAULT '',
             notes TEXT DEFAULT '',
-            created_by INT DEFAULT NULL,
+            created_by VARCHAR(100) DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )");
         $r = $conn->query("SELECT record_date, mushroom_count, growth_stage, notes

@@ -1,5 +1,6 @@
 <?php  
-include 'includes/db_connect.php';
+include('includes/auth_check.php');
+include('includes/db_connect.php');
 include 'send_email.php';
 session_start();
 if (isset($_SESSION['user'])) { header("Location: dashboard.php"); exit; }
