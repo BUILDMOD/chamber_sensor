@@ -427,7 +427,7 @@ footer{background:var(--charcoal);padding:28px 44px;display:flex;align-items:cen
       <div class="mfield">
         <label>Suffix <span style="font-weight:400;opacity:.5;">(e.g. Jr., Sr., III)</span></label>
         <div class="mfield-wrap">
-          <input type="text" name="suffix" placeholder="Optional">
+          <input type="text" name="suffix" placeholder="Jr., Sr., III (optional)" oninput="this.value=this.value.replace(/[^A-Za-z0-9.\s]/g,'')" maxlength="10">
         </div>
       </div>
       <div class="mgrid">

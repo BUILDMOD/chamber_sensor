@@ -98,7 +98,8 @@ $isOwner = $sessionRole === 'owner';
     .topbar-title{font-size:15px;font-weight:700;color:var(--text);letter-spacing:-.2px;}
     .topbar-time{font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);background:var(--surface2);padding:5px 12px;border-radius:20px;border:1px solid var(--border);}
     .topbar-right{display:flex;align-items:center;gap:10px;}
-    .user-badge{display:flex;align-items:center;gap:8px;padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);font-size:12px;font-weight:600;color:var(--text);}
+    .user-badge{display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:var(--surface2);font-size:12px;font-weight:600;color:var(--text);max-width:280px;overflow:hidden;}
+    .user-badge .user-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;}
     .role-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;text-transform:uppercase;letter-spacing:.5px;}
     .role-owner{background:var(--amber-lt);color:var(--amber);}
     .role-staff{background:var(--blue-lt);color:var(--blue);}
@@ -278,9 +279,6 @@ $isOwner = $sessionRole === 'owner';
       pointer-events:auto;
     }
     .hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
-    .hamburger.open span:nth-child(1){transform:translateY(6px) rotate(45deg);}
-    .hamburger.open span:nth-child(2){opacity:0;transform:scaleX(0);}
-    .hamburger.open span:nth-child(3){transform:translateY(-6px) rotate(-45deg);}
 
     /* Overlay behind sidebar */
     .sidebar-overlay{
@@ -294,6 +292,7 @@ $isOwner = $sessionRole === 'owner';
     @media(max-width:768px){
       /* Show hamburger */
       .hamburger{display:flex;}
+      .sidebar.open ~ * .hamburger, .hamburger.open{display:none!important;}
 
       /* Sidebar slides in */
       .sidebar{
@@ -308,12 +307,13 @@ $isOwner = $sessionRole === 'owner';
       .main{margin-left:0!important;width:100%!important;overflow-x:hidden;}
 
       /* Topbar — room for hamburger on left */
-      .topbar{padding:0 10px 0 58px;height:52px;gap:6px;position:fixed!important;top:0;left:0;right:0;z-index:40;}
-      .topbar-title{font-size:14px;}
-      .topbar-right{gap:6px;}
-      .topbar-time{font-size:11px;padding:4px 10px;}
-      .user-badge{padding:4px 10px;font-size:11px;}
-      .user-badge .role-pill{display:none;}
+      .topbar{padding:0 10px 0 58px;height:52px;gap:6px;position:fixed!important;top:0;left:0;right:0;z-index:40;overflow:hidden;}
+      .topbar-title{font-size:14px;flex-shrink:0;}
+      .topbar-right{gap:6px;min-width:0;flex:1;justify-content:flex-end;overflow:hidden;}
+      .topbar-time{font-size:11px;padding:4px 10px;flex-shrink:0;}
+      .user-badge{padding:4px 8px;font-size:11px;max-width:calc(100vw - 140px);gap:5px;min-width:0;}
+      .user-badge .user-name{max-width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+      .user-badge .role-pill{font-size:9px;padding:2px 6px;flex-shrink:0;white-space:nowrap;}
       /* Hide button text labels on mobile, show icon only */
       .btn-label{display:none;}
       .btn{padding:7px 10px;gap:0;}
@@ -321,7 +321,7 @@ $isOwner = $sessionRole === 'owner';
 
       /* Page & grid padding */
       .page{padding:14px!important;}
-      .grid{padding:14px!important;gap:10px!important;}
+      .grid{padding:14px!important;padding-top:66px!important;gap:10px!important;}
 
       /* All columns go full width */
       .col-3,.col-4,.col-5,.col-6,.col-7,.col-8,.col-9,.col-12{grid-column:span 12!important;}
@@ -330,12 +330,12 @@ $isOwner = $sessionRole === 'owner';
       .stats-row{grid-template-columns:1fr 1fr!important;gap:10px;}
 
       /* Gauges — side by side and compact */
-      .gauges-row{flex-direction:row;gap:8px;}
-      .gauge-item{flex:1;padding:10px 6px;}
-      .gauge-wrap{width:100px;height:62px;}
-      .gauge-val{font-size:15px;}
+      .gauges-row{flex-direction:row;gap:8px;width:100%;box-sizing:border-box;}
+      .gauge-item{flex:1;padding:10px 4px;min-width:0;}
+      .gauge-wrap{width:100%;max-width:110px;height:62px;margin:0 auto;}
+      .gauge-val{font-size:14px;}
       .gauge-label{font-size:10px;}
-      .gauge-status{font-size:10px;}
+      .gauge-status{font-size:10px;white-space:nowrap;}
 
       /* Cards */
       .card-header{flex-wrap:wrap;gap:8px;padding:12px 16px 10px;}
@@ -383,14 +383,17 @@ $isOwner = $sessionRole === 'owner';
       .topbar{height:48px;position:fixed!important;top:0;left:0;right:0;}
       .topbar-title{font-size:13px;}
       .topbar-time{display:none;}
+      .user-badge{max-width:calc(100vw - 120px);padding:3px 7px;}
+      .user-badge .user-name{max-width:100px;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+      .user-badge .role-pill{font-size:8px;padding:1px 5px;flex-shrink:0;}
 
       /* Gauges still side by side but smaller */
       .gauge-wrap{width:88px;height:55px;}
       .gauge-val{font-size:13px;}
 
       /* Page */
-      .page{padding:10px!important;padding-top:58px!important;}
-      .grid{padding:10px!important;gap:8px!important;}
+      .page{padding:10px!important;}
+      .grid{padding:10px!important;padding-top:62px!important;gap:8px!important;}
 
       /* Buttons */
       .btn{padding:7px 12px;font-size:12px;}
@@ -407,7 +410,7 @@ $isOwner = $sessionRole === 'owner';
 
 
 <!-- SIDEBAR -->
-<aside class="sidebar">
+<aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <img src="assets/img/logo.png" alt="logo">
     <div>
@@ -432,9 +435,9 @@ $isOwner = $sessionRole === 'owner';
     <span class="topbar-title">Dashboard</span>
     <div class="topbar-right">
       <div class="user-badge">
-        <i class="fas fa-circle-user" style="color:var(--muted);font-size:14px;"></i>
-        <?= htmlspecialchars($displayName) ?>
-        <span class="role-pill <?= $isOwner ? 'role-owner' : 'role-staff' ?>">
+        <i class="fas fa-circle-user" style="color:var(--muted);font-size:14px;flex-shrink:0;"></i>
+        <span class="user-name"><?= htmlspecialchars($displayName) ?></span>
+        <span class="role-pill <?= $isOwner ? 'role-owner' : 'role-staff' ?>" style="flex-shrink:0;">
           <?= $isOwner ? '👑 Owner' : '🧑 Staff' ?>
         </span>
       </div>
@@ -986,33 +989,22 @@ bindModal(['alertInfoIcon'],'alertInfoModal');
 
 
 
-// ── Mobile sidebar toggle ──
-(function(){
-  const hamburger = document.getElementById('hamburger');
-  const sidebar   = document.querySelector('.sidebar');
-  const overlay   = document.getElementById('sidebarOverlay');
-  if(!hamburger||!sidebar||!overlay) return;
 
-  function openSidebar(){
-    sidebar.classList.add('open');
-    overlay.classList.add('open');
-    hamburger.classList.add('open');
-  }
-  function closeSidebar(){
-    sidebar.classList.remove('open');
-    overlay.classList.remove('open');
-    hamburger.classList.remove('open');
-  }
-
-  hamburger.addEventListener('click', ()=> sidebar.classList.contains('open') ? closeSidebar() : openSidebar());
-  overlay.addEventListener('click', closeSidebar);
-
-  // Close sidebar when a nav link is tapped on mobile
-  sidebar.querySelectorAll('.sidebar-nav a').forEach(a => {
-    a.addEventListener('click', ()=>{ if(window.innerWidth<=768) closeSidebar(); });
+</script>
+<script>
+(function() {
+  var h = document.getElementById('hamburger');
+  var s = document.getElementById('sidebar');
+  var o = document.getElementById('sidebarOverlay');
+  if (!h || !s || !o) return;
+  function open()  { s.classList.add('open');    o.classList.add('open');    h.classList.add('open');    }
+  function close() { s.classList.remove('open'); o.classList.remove('open'); h.classList.remove('open'); }
+  h.addEventListener('click', function() { s.classList.contains('open') ? close() : open(); });
+  o.addEventListener('click', close);
+  s.querySelectorAll('.sidebar-nav a').forEach(function(a) {
+    a.addEventListener('click', function() { if (window.innerWidth <= 768) close(); });
   });
 })();
-
 </script>
 </body>
 </html>
