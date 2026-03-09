@@ -15,6 +15,12 @@ $createMushroomTableSql = "CREATE TABLE IF NOT EXISTS mushroom_records (
 if (!$conn->query($createMushroomTableSql)) { /* silent */ }
 
 if (!ini_get('date.timezone')) date_default_timezone_set('Asia/Manila');
+// Load camera interval from system_settings
+$camera_interval_ms = 10000; // default 10s
+$r_ci = $conn->query("SELECT setting_value FROM system_settings WHERE setting_key='camera_interval_sec'");
+if ($r_ci && $row_ci = $r_ci->fetch_assoc()) {
+    $camera_interval_ms = intval($row_ci['setting_value']) * 1000;
+}
 $server_ts_ms = round(microtime(true) * 1000);
 $server_time_formatted = date('M j, Y — h:i:s A');
 
@@ -522,6 +528,23 @@ $isOwner = $sessionRole === 'owner';
       </div>
       <div class="card-body" style="padding:14px 16px;">
 
+        <!-- Monthly Summary Bar Chart -->
+        <div id="monthlySummaryWrap" style="margin-bottom:16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Monthly Harvest Comparison</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <button onclick="shiftMonthRange(-1)" style="background:none;border:1px solid var(--border);border-radius:5px;padding:2px 7px;cursor:pointer;font-size:12px;color:var(--muted);">‹</button>
+              <span id="monthRangeLabel" style="font-size:11px;font-weight:600;color:var(--text);min-width:120px;text-align:center;"></span>
+              <button onclick="shiftMonthRange(1)" style="background:none;border:1px solid var(--border);border-radius:5px;padding:2px 7px;cursor:pointer;font-size:12px;color:var(--muted);">›</button>
+            </div>
+          </div>
+          <div id="monthlyBars" style="display:flex;align-items:flex-end;gap:6px;height:80px;padding:0 2px;">
+            <div style="color:var(--muted);font-size:11px;margin:auto;">Loading…</div>
+          </div>
+          <div id="monthlyBarLabels" style="display:flex;gap:6px;margin-top:4px;"></div>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--border);margin-bottom:14px;">
+
         <!-- Log Form -->
         <div class="rec-form" id="recForm" style="display:none;">
           <div class="rec-form-row">
@@ -846,7 +869,7 @@ async function loadCameraImages(){
   }catch(_){}
 }
 loadCameraImages();
-setInterval(loadCameraImages,10000);
+setInterval(loadCameraImages, <?= $camera_interval_ms ?>);
 
 // ── Records Date Picker ──
 // ── Monthly Records ──
@@ -949,6 +972,82 @@ $$('recSaveBtn').addEventListener('click', async function(){
   this.disabled = false;
   this.innerHTML = '<i class="fas fa-plus"></i> Save Record';
 });
+
+// ── Monthly Summary Bar Chart ──
+let monthRangeStart = 0; // offset from current month, 0 = show last 6 months ending now
+
+async function loadMonthlySummary() {
+  try {
+    const now = new Date();
+    // Build 6-month range ending at (current month + monthRangeStart)
+    const endDate = new Date(now.getFullYear(), now.getMonth() + monthRangeStart, 1);
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(endDate.getFullYear(), endDate.getMonth() - i, 1);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      months.push({ key: `${y}-${m}`, label: d.toLocaleDateString('en-PH', { month: 'short', year: '2-digit' }) });
+    }
+
+    // Fetch totals for each month in parallel
+    const results = await Promise.all(months.map(async mo => {
+      const res = await fetch(`get_calendar_data.php?type=monthly_total&month=${mo.key}`, { cache: 'no-store' });
+      const json = await res.json();
+      return { ...mo, total: json.total || 0 };
+    }));
+
+    // Update range label
+    $$('monthRangeLabel').textContent = `${results[0].label} — ${results[5].label}`;
+
+    // Render bars
+    const maxVal = Math.max(...results.map(r => r.total), 1);
+    const barsEl = $$('monthlyBars');
+    const labelsEl = $$('monthlyBarLabels');
+    barsEl.innerHTML = '';
+    labelsEl.innerHTML = '';
+
+    results.forEach(mo => {
+      const pct = Math.max((mo.total / maxVal) * 100, mo.total > 0 ? 8 : 2);
+      const isCurrentMonth = mo.key === `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      const barColor = isCurrentMonth ? 'var(--green)' : 'var(--green-lt)';
+      const textColor = isCurrentMonth ? 'var(--green)' : 'var(--muted)';
+
+      // Bar
+      const barWrap = document.createElement('div');
+      barWrap.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px;height:100%;cursor:pointer;';
+      barWrap.title = `${mo.label}: ${mo.total} harvested`;
+      barWrap.innerHTML = `
+        <span style="font-size:10px;font-weight:700;color:${textColor};">${mo.total > 0 ? mo.total : ''}</span>
+        <div style="width:100%;height:${pct}%;background:${barColor};border-radius:4px 4px 0 0;transition:height .3s;min-height:3px;"></div>
+      `;
+      barWrap.addEventListener('click', () => {
+        // Auto-set date picker to first day of that month
+        const picker = $$('recDatePicker');
+        picker.value = mo.key + '-01';
+        picker.dispatchEvent(new Event('change'));
+      });
+      barsEl.appendChild(barWrap);
+
+      // Label
+      const lbl = document.createElement('div');
+      lbl.style.cssText = `flex:1;text-align:center;font-size:10px;font-weight:${isCurrentMonth?'700':'500'};color:${textColor};`;
+      lbl.textContent = mo.label;
+      labelsEl.appendChild(lbl);
+    });
+
+  } catch(e) {
+    $$('monthlyBars').innerHTML = '<div style="color:var(--muted);font-size:11px;margin:auto;">No data yet</div>';
+  }
+}
+
+function shiftMonthRange(dir) {
+  monthRangeStart += dir;
+  // Don't go past current month
+  if (monthRangeStart > 0) monthRangeStart = 0;
+  loadMonthlySummary();
+}
+
+loadMonthlySummary();
 
 // ── Camera Date Picker ──
 const camPicker = $$('camDatePicker');

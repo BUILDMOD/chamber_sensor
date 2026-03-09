@@ -25,6 +25,29 @@ $conn->query("CREATE TABLE IF NOT EXISTS notification_settings (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 )");
 
+$conn->query("CREATE TABLE IF NOT EXISTS system_settings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    setting_key VARCHAR(60) NOT NULL UNIQUE,
+    setting_value TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+)");
+
+// Seed system_settings defaults
+$defaults = [
+    'fault_timeout_min'   => '5',
+    'stuck_timeout_min'   => '60',
+    'camera_interval_sec' => '600',
+    'data_retention_days' => '90',
+    'notify_temp'         => '1',
+    'notify_hum'          => '1',
+    'notify_offline'      => '1',
+    'notify_emergency'    => '1',
+    'notify_cooldown_min' => '30',
+];
+foreach ($defaults as $k => $v) {
+    $conn->query("INSERT IGNORE INTO system_settings (setting_key,setting_value) VALUES ('$k','$v')");
+}
+
 // ── Seed defaults if empty ──
 $r = $conn->query("SELECT COUNT(*) as c FROM alert_thresholds");
 if ($r && $r->fetch_assoc()['c'] == 0) {
@@ -123,6 +146,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['send_test']) || ($_P
     }
 }
 
+// ── Save Notification Preferences ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_notif_prefs'])) {
+    if (!$isOwner) { $errors[] = 'Access denied.'; } else {
+        $keys = ['notify_temp','notify_hum','notify_offline','notify_emergency','notify_cooldown_min'];
+        foreach ($keys as $k) {
+            $val = ($k === 'notify_cooldown_min') ? intval($_POST[$k] ?? 30) : (isset($_POST[$k]) ? '1' : '0');
+            $val = (string)$val;
+            $s = $conn->prepare("INSERT INTO system_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
+            if ($s) { $s->bind_param("ss", $k, $val); $s->execute(); $s->close(); }
+        }
+        if (empty($errors)) $success = 'Notification preferences saved.';
+    }
+}
+
+// ── Save Auto Engine Settings ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_auto_engine'])) {
+    if (!$isOwner) { $errors[] = 'Access denied.'; } else {
+        $keys = ['fault_timeout_min','stuck_timeout_min'];
+        foreach ($keys as $k) {
+            $val = (string)intval($_POST[$k] ?? 5);
+            $s = $conn->prepare("INSERT INTO system_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
+            if ($s) { $s->bind_param("ss", $k, $val); $s->execute(); $s->close(); }
+        }
+        if (empty($errors)) $success = 'Auto engine settings saved.';
+    }
+}
+
+// ── Save Camera Settings ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_camera'])) {
+    if (!$isOwner) { $errors[] = 'Access denied.'; } else {
+        $keys = ['camera_interval_sec'];
+        foreach ($keys as $k) {
+            $val = (string)intval($_POST[$k] ?? 60);
+            $s = $conn->prepare("INSERT INTO system_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
+            if ($s) { $s->bind_param("ss", $k, $val); $s->execute(); $s->close(); }
+        }
+        if (empty($errors)) $success = 'Camera settings saved.';
+    }
+}
+
+
 // ── Fetch current settings for display ──
 $thresholds = [];
 $r = $conn->query("SELECT * FROM alert_thresholds");
@@ -133,6 +197,11 @@ $r = $conn->query("SELECT setting_key,setting_value FROM notification_settings")
 if ($r) while ($row = $r->fetch_assoc()) $ns[$row['setting_key']] = $row['setting_value'];
 
 function ns($ns, $k, $default = '') { return htmlspecialchars($ns[$k] ?? $default); }
+
+$ss = [];
+$r = $conn->query("SELECT setting_key,setting_value FROM system_settings");
+if ($r) while ($row = $r->fetch_assoc()) $ss[$row['setting_key']] = $row['setting_value'];
+function ss($ss, $k, $default = '') { return htmlspecialchars($ss[$k] ?? $default); }
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -512,37 +581,105 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
       </div>
     </div>
 
-    <!-- PHPMailer Integration Guide -->
+
+    <!-- ── Notification Preferences ── -->
     <div class="card">
       <div class="card-header">
-        <div class="card-title"><span class="icon icon-green"><i class="fas fa-code"></i></span> Integration Guide</div>
+        <div class="card-title"><span class="icon icon-amber"><i class="fas fa-bell"></i></span> Notification Preferences</div>
       </div>
       <div class="card-body">
-        <p class="section-title">send_email.php template used by this system</p>
-        <div style="background:#0d1117;border-radius:8px;padding:14px 18px;font-family:'DM Mono',monospace;font-size:12px;color:#e6edf3;line-height:1.8;overflow-x:auto;">
-<pre style="margin:0;white-space:pre-wrap;"><span style="color:#ff7b72;">use</span> <span style="color:#79c0ff;">PHPMailer\PHPMailer\PHPMailer</span>;
-<span style="color:#ff7b72;">require</span> <span style="color:#a5d6ff;">'PHPMailer-master/src/PHPMailer.php'</span>;
-<span style="color:#ff7b72;">require</span> <span style="color:#a5d6ff;">'PHPMailer-master/src/SMTP.php'</span>;
-<span style="color:#ff7b72;">require</span> <span style="color:#a5d6ff;">'PHPMailer-master/src/Exception.php'</span>;
+        <form method="POST">
+          <input type="hidden" name="save_notif_prefs" value="1">
+          <p class="section-title">Choose which events trigger email alerts</p>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">
+            <?php
+            $notif_items = [
+              ['notify_temp',      '🌡️', 'Temperature Alerts'],
+              ['notify_hum',       '💧', 'Humidity Alerts'],
+              ['notify_offline',   '📡', 'Device Offline Alerts'],
+              ['notify_emergency', '🚨', 'Emergency / Fault Alerts'],
+            ];
+            foreach ($notif_items as [$key, $emoji, $label]):
+              $checked = ($ss[$key]??'1')==='1' ? 'checked' : '';
+              $disabled = !$isOwner ? 'disabled' : '';
+            ?>
+            <label style="display:flex;align-items:center;gap:12px;cursor:pointer;padding:10px 14px;border:1px solid var(--border);border-radius:9px;background:var(--surface2);">
+              <div style="position:relative;flex-shrink:0;width:40px;height:22px;">
+                <input type="checkbox" name="<?=$key?>" value="1" <?=$checked?> <?=$disabled?> style="opacity:0;width:0;height:0;position:absolute;">
+                <span onclick="if(!this.previousElementSibling.disabled){this.previousElementSibling.checked=!this.previousElementSibling.checked;this.style.background=this.previousElementSibling.checked?'var(--green)':'#ddd';this.querySelector('span').style.left=this.previousElementSibling.checked?'20px':'3px';}" style="position:absolute;inset:0;border-radius:20px;background:<?= ($ss[$key]??'1')==='1'?'var(--green)':'#ddd' ?>;transition:.2s;cursor:pointer;"><span style="position:absolute;width:16px;height:16px;background:white;border-radius:50%;top:3px;left:<?= ($ss[$key]??'1')==='1'?'20px':'3px' ?>;transition:.2s;"></span></span>
+              </div>
+              <span style="font-size:13px;font-weight:600;"><?=$emoji?> <?=$label?></span>
+            </label>
+            <?php endforeach; ?>
+          </div>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label>Email Cooldown (minutes)</label>
+              <input type="number" name="notify_cooldown_min" min="1" max="1440" value="<?= ss($ss,'notify_cooldown_min','30') ?>" <?= !$isOwner?'disabled':'' ?>>
+              <span style="font-size:11px;color:var(--muted);">Minimum gap between repeated alert emails (default: 30 min)</span>
+            </div>
+          </div>
+          <?php if ($isOwner): ?>
+          <div class="form-footer" style="margin-top:14px;">
+            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> <span class="btn-label">Save Preferences</span></button>
+          </div>
+          <?php endif; ?>
+        </form>
+      </div>
+    </div>
 
-<span style="color:#ff7b72;">function</span> <span style="color:#d2a8ff;">sendEmail</span>($to, $subject, $body) {
-  $mail = <span style="color:#ff7b72;">new</span> PHPMailer(<span style="color:#79c0ff;">true</span>);
-  $mail->isSMTP();
-  $mail->Host       = <span style="color:#a5d6ff;">'smtp.gmail.com'</span>;
-  $mail->SMTPAuth   = <span style="color:#79c0ff;">true</span>;
-  $mail->Username   = <span style="color:#a5d6ff;">'your@gmail.com'</span>;
-  $mail->Password   = <span style="color:#a5d6ff;">'your-app-password'</span>;
-  $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-  $mail->Port       = <span style="color:#79c0ff;">587</span>;
-  $mail->setFrom(<span style="color:#a5d6ff;">'your@gmail.com'</span>, <span style="color:#a5d6ff;">'MushroomOS'</span>);
-  $mail->addAddress($to);
-  $mail->isHTML(<span style="color:#79c0ff;">true</span>);
-  $mail->Subject = $subject;
-  $mail->Body    = $body;
-  $mail->AltBody = strip_tags($body);
-  <span style="color:#ff7b72;">return</span> $mail->send() ? <span style="color:#a5d6ff;">"SUCCESS"</span> : <span style="color:#a5d6ff;">"FAILED"</span>;
-}</pre>
-        </div>
+    <!-- ── Auto Engine Settings ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon icon-green"><i class="fas fa-robot"></i></span> Auto Engine Settings</div>
+      </div>
+      <div class="card-body">
+        <form method="POST">
+          <input type="hidden" name="save_auto_engine" value="1">
+          <p class="section-title">Configure fault detection and protection timers</p>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label>Fault Detection Timeout (minutes)</label>
+              <input type="number" name="fault_timeout_min" min="1" max="60" value="<?= ss($ss,'fault_timeout_min','5') ?>" <?= !$isOwner?'disabled':'' ?>>
+              <span style="font-size:11px;color:var(--muted);">Device forced OFF if sensor stops responding after this many minutes (default: 5)</span>
+            </div>
+            <div class="form-group">
+              <label>Stuck-On Detection Timeout (minutes)</label>
+              <input type="number" name="stuck_timeout_min" min="10" max="480" value="<?= ss($ss,'stuck_timeout_min','60') ?>" <?= !$isOwner?'disabled':'' ?>>
+              <span style="font-size:11px;color:var(--muted);">Device forced OFF if continuously ON longer than this (default: 60)</span>
+            </div>
+          </div>
+          <?php if ($isOwner): ?>
+          <div class="form-footer" style="margin-top:14px;">
+            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> <span class="btn-label">Save Engine Settings</span></button>
+          </div>
+          <?php endif; ?>
+        </form>
+      </div>
+    </div>
+
+    <!-- ── Camera Settings ── -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon icon-blue"><i class="fas fa-camera"></i></span> Camera Settings</div>
+      </div>
+      <div class="card-body">
+        <form method="POST">
+          <input type="hidden" name="save_camera" value="1">
+          <p class="section-title">Configure chamber camera capture behavior</p>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label>Capture Interval (seconds)</label>
+              <input type="number" name="camera_interval_sec" min="10" max="3600" value="<?= ss($ss,'camera_interval_sec','600') ?>" <?= !$isOwner?'disabled':'' ?>>
+              <span style="font-size:11px;color:var(--muted);">How often the camera takes a new photo (default: 600 = every 10 min)</span>
+            </div>
+          </div>
+          <?php if ($isOwner): ?>
+          <div class="form-footer" style="margin-top:14px;">
+            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> <span class="btn-label">Save Camera Settings</span></button>
+          </div>
+          <?php endif; ?>
+        </form>
       </div>
     </div>
 

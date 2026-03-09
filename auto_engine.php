@@ -13,8 +13,10 @@ date_default_timezone_set('Asia/Manila');
 
 // Fault timing — read from DB if available, else safe defaults
 // These can be added to alert_thresholds table as 'fault_no_response_min' and 'fault_max_on_min'
-define('FAULT_NO_RESPONSE_MINUTES', 5);
-define('FAULT_MAX_ON_MINUTES', 60);
+// Fault timers loaded from DB inside runAutoEngine()
+// Defaults used as fallback
+define('FAULT_NO_RESPONSE_MINUTES_DEFAULT', 5);
+define('FAULT_MAX_ON_MINUTES_DEFAULT', 60);
 
 $DEVICE_SENSOR_EXPECTATION = [
     'mist'    => ['sensor' => 'humidity',    'direction' => 'rising'],
@@ -24,6 +26,13 @@ $DEVICE_SENSOR_EXPECTATION = [
 ];
 
 function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
+    // Load configurable timers from system_settings
+    $ss_r = $conn->query("SELECT setting_key,setting_value FROM system_settings");
+    $ss = [];
+    if ($ss_r) while ($row_ss = $ss_r->fetch_assoc()) $ss[$row_ss['setting_key']] = $row_ss['setting_value'];
+    $FAULT_NO_RESPONSE_MINUTES = intval($ss['fault_timeout_min'] ?? FAULT_NO_RESPONSE_MINUTES_DEFAULT);
+    $FAULT_MAX_ON_MINUTES      = intval($ss['stuck_timeout_min'] ?? FAULT_MAX_ON_MINUTES_DEFAULT);
+
     global $DEVICE_SENSOR_EXPECTATION;
 
     // Ensure buzzer column exists
@@ -119,13 +128,13 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
         $faultReason = null;
 
         // Fault A: stuck ON too long
-        if ($onMinutes >= FAULT_MAX_ON_MINUTES) {
+        if ($onMinutes >= $FAULT_MAX_ON_MINUTES) {
             $faultType   = 'stuck_on';
-            $faultReason = "Fault: {$device} ON for " . round($onMinutes) . " min (max " . FAULT_MAX_ON_MINUTES . " min) — forced OFF";
+            $faultReason = "Fault: {$device} ON for " . round($onMinutes) . " min (max " . $FAULT_MAX_ON_MINUTES . " min) — forced OFF";
         }
 
         // Fault B: no sensor response after threshold time
-        if (!$faultType && $onMinutes >= FAULT_NO_RESPONSE_MINUTES) {
+        if (!$faultType && $onMinutes >= $FAULT_NO_RESPONSE_MINUTES) {
             $valAtOn = $conn->query(
                 "SELECT " . $expect['sensor'] . " FROM sensor_data
                  WHERE timestamp <= '{$onSince->format('Y-m-d H:i:s')}'
@@ -249,5 +258,50 @@ function _logAlert($conn, $type, $severity, $message, $value) {
     )");
     $stmt = $conn->prepare("INSERT INTO alert_logs (alert_type,severity,message,value) VALUES (?,?,?,?)");
     if ($stmt) { $stmt->bind_param("sssd",$type,$severity,$message,$value); $stmt->execute(); $stmt->close(); }
+
+    // Send email for device faults and system alerts (buzzer handles physical alert)
+    // Only if notify_emergency or notify_offline is enabled in settings
+    $ns = []; $ss = [];
+    $r = $conn->query("SELECT setting_key,setting_value FROM notification_settings");
+    if ($r) while ($row=$r->fetch_assoc()) $ns[$row['setting_key']] = $row['setting_value'];
+    $r2 = $conn->query("SELECT setting_key,setting_value FROM system_settings");
+    if ($r2) while ($row=$r2->fetch_assoc()) $ss[$row['setting_key']] = $row['setting_value'];
+
+    $should_email = false;
+    if ($type === 'device' && ($ss['notify_emergency'] ?? '1') === '1') $should_email = true;
+    if ($type === 'system' && ($ss['notify_offline']   ?? '1') === '1') $should_email = true;
+
+    if ($should_email) {
+        $cooldown_min = intval($ss['notify_cooldown_min'] ?? $ns['notify_cooldown_min'] ?? 30);
+        $owner = $conn->query("SELECT email FROM users WHERE role='owner' LIMIT 1");
+        $recipient = $ns['smtp_to_email'] ?? '';
+        if ($owner && $row = $owner->fetch_assoc()) $recipient = $row['email'];
+        if (!$recipient) return;
+
+        // Throttle check
+        $tq = $conn->prepare("SELECT last_sent FROM email_throttle WHERE email=?");
+        if ($tq) {
+            $tq->bind_param("s",$recipient); $tq->execute();
+            $tr = $tq->get_result();
+            if ($tr->num_rows > 0) {
+                $last = strtotime($tr->fetch_assoc()['last_sent']);
+                if ((time()-$last) < ($cooldown_min*60)) return;
+            }
+            $tq->close();
+        }
+
+        if (file_exists(__DIR__.'/send_email.php')) {
+            require_once __DIR__.'/send_email.php';
+            $icon = $type === 'device' ? '🔧' : '📡';
+            $subj = "$icon MushroomOS " . ucfirst($type) . " Alert";
+            $body = "<b>$icon " . ucfirst($severity) . " Alert</b><br><br>" . nl2br(htmlspecialchars($message)) .
+                    "<br><br><small>Triggered: " . date('M j, Y h:i:s A') . "</small>";
+            sendEmail($recipient, $subj, $body);
+
+            $now = date('Y-m-d H:i:s');
+            $us = $conn->prepare("INSERT INTO email_throttle (email,last_sent) VALUES (?,?) ON DUPLICATE KEY UPDATE last_sent=?");
+            if ($us) { $us->bind_param("sss",$recipient,$now,$now); $us->execute(); $us->close(); }
+        }
+    }
 }
 ?>
