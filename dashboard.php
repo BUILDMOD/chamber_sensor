@@ -63,7 +63,7 @@ $isOwner = $sessionRole === 'owner';
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Mushroom Dashboard</title>
+  <title>Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -594,13 +594,15 @@ $isOwner = $sessionRole === 'owner';
         <div class="card-title"><span class="icon icon-blue"><i class="fas fa-camera"></i></span> Chamber Camera Analysis</div>
         <div class="date-picker-wrap">
           <input type="date" id="camDatePicker" class="dash-datepicker" title="Pick a date to view captures">
-          <span style="font-size:11px;color:var(--muted);" id="imgLastUpdate">Auto-refreshing…</span>
         </div>
       </div>
       <div class="card-body" style="padding:14px 16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-          <span style="font-size:12px;font-weight:700;color:var(--text);" id="camDetailTitle">Latest captures</span>
-          <button class="detail-clear-btn" id="camClearBtn" style="display:none;">✕ Back to live</button>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;" id="camDetailTitle">Latest captures</span>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:11px;color:var(--muted);" id="imgLastUpdate">Auto-refreshing…</span>
+            <button class="detail-clear-btn" id="camClearBtn" style="display:none;">✕ Back to live</button>
+          </div>
         </div>
         <div class="img-grid" id="mushroomImageGrid">
           <div class="empty-state" id="noImages" style="grid-column:1/-1;">
