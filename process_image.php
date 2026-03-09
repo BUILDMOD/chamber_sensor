@@ -101,6 +101,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['image'])) {
         $result['id'] = $conn->insert_id;
         $result['image_path'] = $targetPath;
         $result['success'] = true;
+
+        // ── Send harvest email notification if Ready for Harvest or Overripe ──
+        if (in_array($result['harvest_status'], ['Ready for Harvest', 'Overripe'])) {
+            _sendHarvestEmail($conn, $result['harvest_status'], $result['diameter_cm'], $targetPath);
+        }
+
         echo json_encode($result);
     } else {
         echo json_encode([
@@ -112,6 +118,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['image'])) {
     $stmt->close();
     $conn->close();
     exit;
+}
+
+// ── Harvest Email Notification ──
+function _sendHarvestEmail($conn, $status, $diameter, $imagePath) {
+    // Read notification settings
+    $ns = []; $ss = [];
+    $r = $conn->query("SELECT setting_key,setting_value FROM notification_settings");
+    if ($r) while ($row = $r->fetch_assoc()) $ns[$row['setting_key']] = $row['setting_value'];
+    $r2 = $conn->query("SELECT setting_key,setting_value FROM system_settings");
+    if ($r2) while ($row = $r2->fetch_assoc()) $ss[$row['setting_key']] = $row['setting_value'];
+
+    // Use separate harvest cooldown — 10 minutes default
+    $cooldown_min = 10;
+    $throttle_key = 'harvest_notify';
+
+    // Check throttle using harvest_notify key in email_throttle
+    $conn->query("CREATE TABLE IF NOT EXISTS email_throttle (
+        email VARCHAR(255) PRIMARY KEY,
+        last_sent DATETIME NOT NULL
+    )");
+    $tq = $conn->prepare("SELECT last_sent FROM email_throttle WHERE email=?");
+    if ($tq) {
+        $tq->bind_param("s", $throttle_key);
+        $tq->execute();
+        $tr = $tq->get_result();
+        if ($tr->num_rows > 0) {
+            $last = strtotime($tr->fetch_assoc()['last_sent']);
+            if ((time() - $last) < ($cooldown_min * 60)) return; // Still in cooldown
+        }
+        $tq->close();
+    }
+
+    // Get recipient — owner email
+    $recipient = $ns['smtp_to_email'] ?? '';
+    $owner = $conn->query("SELECT email FROM users WHERE role='owner' LIMIT 1");
+    if ($owner && $row = $owner->fetch_assoc()) $recipient = $row['email'];
+    if (!$recipient) return;
+
+    // Send email
+    if (file_exists(__DIR__ . '/send_email.php')) {
+        require_once __DIR__ . '/send_email.php';
+
+        $icon      = $status === 'Ready for Harvest' ? '🍄' : '⚠️';
+        $colorHex  = $status === 'Ready for Harvest' ? '#1a9e5c' : '#b45309';
+        $subject   = "$icon MushroomOS — {$status} Detected";
+        $body      = "
+            <div style='font-family:sans-serif;max-width:480px;'>
+                <h2 style='color:{$colorHex};'>{$icon} {$status}</h2>
+                <p>The chamber camera has detected a mushroom that is <strong>{$status}</strong>.</p>
+                <table style='margin:12px 0;border-collapse:collapse;'>
+                    <tr><td style='padding:4px 12px 4px 0;color:#666;'>Diameter</td><td><strong>{$diameter} cm</strong></td></tr>
+                    <tr><td style='padding:4px 12px 4px 0;color:#666;'>Status</td><td><strong style='color:{$colorHex};'>{$status}</strong></td></tr>
+                    <tr><td style='padding:4px 12px 4px 0;color:#666;'>Detected at</td><td>" . date('M j, Y h:i:s A') . "</td></tr>
+                </table>
+                " . ($status === 'Ready for Harvest'
+                    ? "<p style='color:#1a9e5c;font-weight:600;'>✅ Please harvest your mushrooms now for best quality.</p>"
+                    : "<p style='color:#b45309;font-weight:600;'>⚠️ Mushrooms are overripe — harvest immediately to prevent further deterioration.</p>"
+                ) . "
+                <hr style='border:none;border-top:1px solid #eee;margin:16px 0;'>
+                <small style='color:#999;'>MushroomOS Cultivation System &mdash; Automated Camera Alert</small>
+            </div>
+        ";
+
+        sendEmail($recipient, $subject, $body);
+
+        // Update throttle
+        $now = date('Y-m-d H:i:s');
+        $us = $conn->prepare("INSERT INTO email_throttle (email,last_sent) VALUES (?,?) ON DUPLICATE KEY UPDATE last_sent=?");
+        if ($us) { $us->bind_param("sss", $throttle_key, $now, $now); $us->execute(); $us->close(); }
+    }
 }
 
 // Handle GET request - return recent analyses for dashboard display
