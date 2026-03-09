@@ -394,6 +394,23 @@ footer{background:var(--charcoal);padding:28px 44px;display:flex;align-items:cen
       <button type="submit" class="modal-btn">Sign In</button>
     </form>
     <div class="modal-switch">Don't have an account? <a onclick="switchTo('registerModal')">Create one</a></div>
+    <div class="modal-info-card" onclick="this.classList.toggle('expanded')" title="Click to expand">
+      <div class="mic-header">
+        <span class="mic-icon"><i class="fa fa-circle-info"></i></span>
+        <span class="mic-label">Account Access Info</span>
+        <span class="mic-arrow"><i class="fa fa-chevron-down"></i></span>
+      </div>
+      <div class="mic-body">
+        <div class="mic-row">
+          <span class="mic-badge mic-staff"><i class="fa fa-user"></i> Staff</span>
+          <span class="mic-text">Requires <strong>owner approval</strong> before you can log in.</span>
+        </div>
+        <div class="mic-row">
+          <span class="mic-badge mic-owner"><i class="fa fa-crown"></i> Owner</span>
+          <span class="mic-text">Has <strong>immediate access</strong> — no approval needed.</span>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -483,7 +500,7 @@ footer{background:var(--charcoal);padding:28px 44px;display:flex;align-items:cen
     <div>
       <div class="ph-eyebrow">📖 System Documentation</div>
       <h1 class="ph-title">The Complete<br><em>Usage Guide</em></h1>
-      <p class="ph-sub">Everything you need to know — from first login to harvest analytics, in ten clear sections.</p>
+      <p class="ph-sub">Everything you need to know — from first login to camera analysis, automation faults, and harvest analytics, in ten clear sections.</p>
     </div>
     <div class="ph-count">
       <div class="ph-num">10</div>
@@ -497,13 +514,13 @@ footer{background:var(--charcoal);padding:28px 44px;display:flex;align-items:cen
   <div class="tab-inner">
     <a href="#s1"  class="tab-link active"><span class="tab-num">01</span> Setup</a>
     <a href="#s2"  class="tab-link"><span class="tab-num">02</span> Dashboard</a>
-    <a href="#s3"  class="tab-link"><span class="tab-num">03</span> Environment</a>
-    <a href="#s4"  class="tab-link"><span class="tab-num">04</span> Control</a>
+    <a href="#s3"  class="tab-link"><span class="tab-num">03</span> Camera</a>
+    <a href="#s4"  class="tab-link"><span class="tab-num">04</span> Automation</a>
     <a href="#s5"  class="tab-link"><span class="tab-num">05</span> Records</a>
     <a href="#s6"  class="tab-link"><span class="tab-num">06</span> Reports</a>
-    <a href="#s7"  class="tab-link"><span class="tab-num">07</span> Profile</a>
-    <a href="#s8"  class="tab-link"><span class="tab-num">08</span> Practices</a>
-    <a href="#s9"  class="tab-link"><span class="tab-num">09</span> Troubleshoot</a>
+    <a href="#s7"  class="tab-link"><span class="tab-num">07</span> Logs</a>
+    <a href="#s8"  class="tab-link"><span class="tab-num">08</span> Settings</a>
+    <a href="#s9"  class="tab-link"><span class="tab-num">09</span> Profile</a>
     <a href="#s10" class="tab-link"><span class="tab-num">10</span> Safety</a>
   </div>
 </div>
@@ -515,113 +532,154 @@ footer{background:var(--charcoal);padding:28px 44px;display:flex;align-items:cen
     <ul class="sidebar-list">
       <li class="sl"><a href="#s1"><span class="sl-num">01</span><span class="sl-ico">🚀</span>Getting Started</a></li>
       <li class="sl"><a href="#s2"><span class="sl-num">02</span><span class="sl-ico">📊</span>Dashboard</a></li>
-      <li class="sl"><a href="#s3"><span class="sl-num">03</span><span class="sl-ico">🌡️</span>Environment</a></li>
-      <li class="sl"><a href="#s4"><span class="sl-num">04</span><span class="sl-ico">⚙️</span>Device Control</a></li>
+      <li class="sl"><a href="#s3"><span class="sl-num">03</span><span class="sl-ico">📷</span>Camera Analysis</a></li>
+      <li class="sl"><a href="#s4"><span class="sl-num">04</span><span class="sl-ico">⚙️</span>Automation</a></li>
       <li class="sl"><a href="#s5"><span class="sl-num">05</span><span class="sl-ico">🍄</span>Growth Records</a></li>
       <li class="sl"><a href="#s6"><span class="sl-num">06</span><span class="sl-ico">📈</span>Reports</a></li>
-      <li class="sl"><a href="#s7"><span class="sl-num">07</span><span class="sl-ico">👤</span>Profile</a></li>
-      <li class="sl"><a href="#s8"><span class="sl-num">08</span><span class="sl-ico">✅</span>Best Practices</a></li>
-      <li class="sl"><a href="#s9"><span class="sl-num">09</span><span class="sl-ico">🔧</span>Troubleshooting</a></li>
+      <li class="sl"><a href="#s7"><span class="sl-num">07</span><span class="sl-ico">📋</span>Logs</a></li>
+      <li class="sl"><a href="#s8"><span class="sl-num">08</span><span class="sl-ico">🔧</span>Settings</a></li>
+      <li class="sl"><a href="#s9"><span class="sl-num">09</span><span class="sl-ico">👤</span>Profile</a></li>
       <li class="sl"><a href="#s10"><span class="sl-num">10</span><span class="sl-ico">🛡️</span>Safety</a></li>
     </ul>
   </aside>
 
   <div class="content">
 
+    <!-- 01 GETTING STARTED -->
     <div class="step-card" id="s1">
       <div class="step-card-header"><div class="step-number">01</div><div class="step-header-content"><div><div class="step-tag">Getting Started</div><div class="step-title">First-time Setup</div></div><div class="step-icon-wrap">🚀</div></div></div>
       <div class="step-body"><ul>
-        <li><strong>Registration:</strong> Click "Create an account" on the login page — owner approval is required before access is granted.</li>
-        <li><strong>Login:</strong> Use your approved username and password to sign in at the login page.</li>
-        <li><strong>Dashboard:</strong> After login you'll be redirected immediately to the main control panel.</li>
+        <li><strong>Registration:</strong> Click "Create an account" on the login page. Fill in your full name, email, phone, username, and a strong password (8+ chars, uppercase, lowercase, number, and special character required).</li>
+        <li><strong>Account Roles:</strong> Staff accounts require <strong>owner approval</strong> before they can log in. Owner accounts have immediate access with no approval needed.</li>
+        <li><strong>Login:</strong> Use your approved username and password. After successful login you are redirected directly to the Dashboard.</li>
+        <li><strong>Hardware:</strong> The system uses two boards — an <strong>ESP32 WROOM</strong> (sensors, relays, buzzer, LCD) and an <strong>ESP32-CAM</strong> (camera). Both connect independently to the same WiFi and server.</li>
+        <li><strong>Server:</strong> The system runs on a local XAMPP server. Make sure XAMPP Apache and MySQL are running before powering the boards.</li>
       </ul></div>
     </div>
 
+    <!-- 02 DASHBOARD -->
     <div class="step-card" id="s2">
       <div class="step-card-header"><div class="step-number">02</div><div class="step-header-content"><div><div class="step-tag">Dashboard</div><div class="step-title">Understanding the Dashboard</div></div><div class="step-icon-wrap">📊</div></div></div>
       <div class="step-body"><ul>
-        <li><strong>Live Status:</strong> Real-time temperature and humidity gauges with color-coded indicators.</li>
-        <li><strong>Device Control:</strong> Toggle between Auto and Manual modes for full automation or direct control.</li>
-        <li><strong>Alerts:</strong> Instant notifications when environmental conditions fall outside ideal ranges.</li>
-        <li><strong>Mushroom Records:</strong> Log growth stages, counts, and field observations directly from the dashboard.</li>
+        <li><strong>Live Gauges:</strong> Real-time temperature and humidity with color-coded status — blue = too low, green = ideal, red = too high. Shows "Offline" if the ESP32 stops sending data.</li>
+        <li><strong>Device Control:</strong> Toggle between <strong>Auto</strong> and <strong>Manual</strong> modes. In Auto, the server controls all devices. In Manual, you control each relay directly from the dashboard.</li>
+        <li><strong>Devices:</strong> Mist, Fan, Heater, Sprayer, and Exhaust — each shows its current ON/OFF state and trigger type (Auto, Manual, Schedule, Emergency, or Fault).</li>
+        <li><strong>Monthly Harvest Chart:</strong> A bar chart showing total harvested mushrooms per month for the last 6 months. Click the arrows to navigate months. Click a bar to jump to that month's calendar records.</li>
+        <li><strong>Growth Records:</strong> Log or view mushroom records by date using the calendar picker below the harvest chart.</li>
+        <li><strong>Active Alerts:</strong> Unresolved temperature, humidity, offline, or fault alerts appear prominently. Alerts send email notifications based on your settings.</li>
       </ul></div>
     </div>
 
+    <!-- 03 CAMERA -->
     <div class="step-card" id="s3">
-      <div class="step-card-header"><div class="step-number">03</div><div class="step-header-content"><div><div class="step-tag">Environment</div><div class="step-title">Monitoring Conditions</div></div><div class="step-icon-wrap">🌡️</div></div></div>
+      <div class="step-card-header"><div class="step-number">03</div><div class="step-header-content"><div><div class="step-tag">Camera</div><div class="step-title">Chamber Camera Analysis</div></div><div class="step-icon-wrap">📷</div></div></div>
       <div class="step-body"><ul>
-        <li><strong>Temperature:</strong> Target 22–28°C. Color-coded: blue = too low, green = ideal, red = too high.</li>
-        <li><strong>Humidity:</strong> Target 85–95%. Blue = too low, green = ideal, red = too high.</li>
-        <li><strong>Alerts:</strong> Address out-of-range conditions promptly to prevent crop loss.</li>
+        <li><strong>Auto Capture:</strong> The ESP32-CAM automatically takes a photo every 30 minutes (configurable in Settings) and uploads it to the server.</li>
+        <li><strong>First Capture:</strong> One photo is taken immediately on boot once WiFi is connected — no need to wait 30 minutes on first run.</li>
+        <li><strong>AI Analysis:</strong> Each uploaded image is automatically analyzed for mushroom diameter (cm) and harvest status — results appear in the dashboard camera section.</li>
+        <li><strong>Harvest Status Labels:</strong> Images are tagged as <em>Too Young</em>, <em>Growing</em>, <em>Ready for Harvest</em>, or <em>Overripe</em> based on AI analysis.</li>
+        <li><strong>Harvest Email Alert:</strong> When a photo is analyzed as <em>Ready for Harvest</em> or <em>Overripe</em>, an email notification is sent automatically (10-minute cooldown between alerts).</li>
+        <li><strong>Browse by Date:</strong> Use the date picker in the Camera card header to view all captures from a specific day. Images auto-refresh every 30 seconds.</li>
+        <li><strong>Flash LED:</strong> The built-in flash on the ESP32-CAM activates briefly during each capture for consistent lighting.</li>
       </ul></div>
     </div>
 
+    <!-- 04 AUTOMATION -->
     <div class="step-card" id="s4">
-      <div class="step-card-header"><div class="step-number">04</div><div class="step-header-content"><div><div class="step-tag">Control</div><div class="step-title">Device Control & Overrides</div></div><div class="step-icon-wrap">⚙️</div></div></div>
+      <div class="step-card-header"><div class="step-number">04</div><div class="step-header-content"><div><div class="step-tag">Automation</div><div class="step-title">Device Control & Automation</div></div><div class="step-icon-wrap">⚙️</div></div></div>
       <div class="step-body"><ul>
-        <li><strong>Auto Mode:</strong> Recommended. System automatically adjusts devices based on sensor readings.</li>
-        <li><strong>Manual Mode:</strong> Direct control for emergencies or specific targeted adjustments.</li>
-        <li><strong>Status Badges:</strong> Check ON, OFF, or UNKNOWN states for each connected device.</li>
-      </ul><div class="callout">⚠️ Manual overrides are for emergency use only. The system is optimized for Auto mode and should return to it once the situation is resolved.</div></div>
+        <li><strong>Auto Mode:</strong> The server's auto engine runs automatically every time sensor data arrives. It controls all devices based on current temperature and humidity vs. your configured thresholds.</li>
+        <li><strong>Manual Mode:</strong> Switch to Manual for direct control of each relay. Use this for targeted adjustments or emergencies. Always return to Auto when done.</li>
+        <li><strong>Custom Rules:</strong> Add automation rules — choose a device, a sensor metric (temp/humidity), a condition (above/below), a threshold value, and a duration. Rules activate automatically when conditions match.</li>
+        <li><strong>Scheduled Tasks:</strong> Schedule any device to run at a specific time for a set duration on selected days of the week (e.g. Sprayer every day at 8:00 AM for 15 minutes).</li>
+        <li><strong>Trigger Types:</strong> Each device action is logged with its trigger type — <span style="color:#1a9e5c;font-weight:600;">Auto</span>, <span style="color:#1a6bba;font-weight:600;">Manual</span>, <span style="color:#7c3aed;font-weight:600;">Schedule</span>, <span style="color:#d97706;font-weight:600;">Emergency</span>, or <span style="color:#dc2626;font-weight:600;">Fault</span>.</li>
+        <li><strong>Built-in Protections:</strong> The system has automatic safeguards that cannot be disabled — emergency shutoff when temp/humidity reaches critical levels, and fault detection for devices stuck ON or not responding.</li>
+        <li><strong>Active Faults Panel:</strong> Unresolved device faults appear at the top of the Automation page. Each fault shows the device, fault type, and time detected. Click "Mark Resolved" once the hardware issue is fixed.</li>
+        <li><strong>Buzzer:</strong> The buzzer on the ESP32 activates automatically on device fault or emergency — beeps for 30 seconds in a 300ms ON / 200ms OFF pattern.</li>
+      </ul>
+      <div class="callout">⚠️ Manual mode disables automatic device responses to sensor changes. Only use it temporarily — the chamber can go out of range quickly without Auto mode active.</div>
+      </div>
     </div>
 
+    <!-- 05 RECORDS -->
     <div class="step-card" id="s5">
       <div class="step-card-header"><div class="step-number">05</div><div class="step-header-content"><div><div class="step-tag">Records</div><div class="step-title">Tracking Mushroom Growth</div></div><div class="step-icon-wrap">🍄</div></div></div>
       <div class="step-body"><ul>
-        <li><strong>Add Records:</strong> Log the date, mushroom count, growth stage, and any field observations.</li>
-        <li><strong>Growth Stages:</strong> Spawn Run → Primordia Formation → Fruiting Body → Harvest.</li>
-        <li><strong>Monthly View:</strong> Records are organized by month for easy progress monitoring and comparison.</li>
+        <li><strong>Add Records:</strong> From the Dashboard calendar, select a date and log the mushroom count, growth stage, and optional field notes.</li>
+        <li><strong>Growth Stages:</strong> Spawn Run → Primordia Formation → Fruiting Body → Harvest. Select the current stage when logging.</li>
+        <li><strong>Harvest Count:</strong> Records with stage "Harvest" are counted in the Monthly Harvest bar chart on the Dashboard.</li>
+        <li><strong>Monthly View:</strong> Navigate months using the bar chart arrows. Click a bar to jump to that month's records in the calendar.</li>
+        <li><strong>Historical Data:</strong> All records are stored permanently in the database — no automatic deletion. Review past growth anytime.</li>
       </ul></div>
     </div>
 
+    <!-- 06 REPORTS -->
     <div class="step-card" id="s6">
-      <div class="step-card-header"><div class="step-number">06</div><div class="step-header-content"><div><div class="step-tag">Reports</div><div class="step-title">Viewing Reports & Analytics</div></div><div class="step-icon-wrap">📈</div></div></div>
+      <div class="step-card-header"><div class="step-number">06</div><div class="step-header-content"><div><div class="step-tag">Reports</div><div class="step-title">Sensor Reports & Analytics</div></div><div class="step-icon-wrap">📈</div></div></div>
       <div class="step-body"><ul>
-        <li><strong>Sensor Data:</strong> Temperature and humidity trends charted over the last 7 days.</li>
-        <li><strong>Changes Report:</strong> Daily averages and overall environmental trend analysis.</li>
-        <li><strong>Data Persistence:</strong> All reports are saved to the database for long-term historical review.</li>
+        <li><strong>Date Range Filter:</strong> Set a custom start and end date to view sensor data summaries for any period.</li>
+        <li><strong>Summary Table:</strong> Daily averages, min/max values for both temperature and humidity across the selected date range.</li>
+        <li><strong>Charts:</strong> Visual line charts for temperature and humidity trends — quickly spot patterns and anomalies.</li>
+        <li><strong>CSV Export:</strong> Download the full sensor report as a CSV file for offline analysis or record-keeping.</li>
+        <li><strong>Data Persistence:</strong> All sensor data is stored permanently. No rolling deletions — you can review data from any past date.</li>
       </ul></div>
     </div>
 
+    <!-- 07 LOGS -->
     <div class="step-card" id="s7">
-      <div class="step-card-header"><div class="step-number">07</div><div class="step-header-content"><div><div class="step-tag">Profile</div><div class="step-title">Profile & System Management</div></div><div class="step-icon-wrap">👤</div></div></div>
+      <div class="step-card-header"><div class="step-number">07</div><div class="step-header-content"><div><div class="step-tag">Logs</div><div class="step-title">System & Alert Logs</div></div><div class="step-icon-wrap">📋</div></div></div>
       <div class="step-body"><ul>
-        <li><strong>Profile Update:</strong> Edit personal information and contact details at any time.</li>
-        <li><strong>Password:</strong> Change your password regularly to maintain account security.</li>
-        <li><strong>Activity Log:</strong> Review your recent system interactions and login history.</li>
-        <li><strong>User Management (Owner):</strong> Approve new registrations and manage staff access levels.</li>
+        <li><strong>Alert Logs:</strong> All temperature, humidity, offline, and device fault alerts — with severity level (Info, Warning, Critical), timestamp, and resolved status.</li>
+        <li><strong>System Logs:</strong> A record of all user actions — logins, setting changes, manual device overrides, approvals, and password changes.</li>
+        <li><strong>Filter:</strong> Filter logs by type, severity, or date range. Up to 200 entries per view.</li>
+        <li><strong>Resolve Alerts:</strong> Mark all active alerts as resolved in one click using the "Resolve All" button. Individual alerts auto-resolve when the condition normalizes.</li>
+        <li><strong>Alert Summary:</strong> A quick count of active warnings and critical alerts is shown at the top of the Logs page.</li>
       </ul></div>
     </div>
 
+    <!-- 08 SETTINGS -->
     <div class="step-card" id="s8">
-      <div class="step-card-header"><div class="step-number">08</div><div class="step-header-content"><div><div class="step-tag">Best Practices</div><div class="step-title">Tips for Optimal Results</div></div><div class="step-icon-wrap">✅</div></div></div>
+      <div class="step-card-header"><div class="step-number">08</div><div class="step-header-content"><div><div class="step-tag">Settings</div><div class="step-title">System Configuration</div></div><div class="step-icon-wrap">🔧</div></div></div>
       <div class="step-body"><ul>
-        <li>Check the dashboard daily to ensure conditions remain within optimal ranges.</li>
-        <li>Address alerts promptly — delayed response can cause significant crop loss.</li>
-        <li>Keep sensor hardware clean and calibrated for reliable readings and automation.</li>
-        <li>Update mushroom growth records consistently for more accurate long-term tracking.</li>
-        <li>Use strong passwords and always log out after each session.</li>
-      </ul></div>
+        <li><strong>Alert Thresholds:</strong> Set ideal temperature range (min/max), humidity range (min/max), and emergency limits for temp and humidity. These are read by the auto engine and the ESP32 as fallback values.</li>
+        <li><strong>Email Notifications (SMTP):</strong> Configure your Gmail SMTP credentials and recipient email. Test the connection before saving. Only the owner can modify these settings.</li>
+        <li><strong>Notification Preferences:</strong> Toggle email alerts for temperature, humidity, device offline, and emergency events individually. Set a cooldown (minutes) between repeat alerts of the same type.</li>
+        <li><strong>Auto Engine Settings:</strong> Configure how long a device must be continuously ON before a "stuck-on" fault is triggered (default: 60 min), and how long a device must be unresponsive before a "no-response" fault triggers (default: 60 min).</li>
+        <li><strong>Camera Settings:</strong> Set the capture interval in seconds (default: 1800 = every 30 minutes). This value is used by the ESP32-CAM to schedule automatic captures.</li>
+        <li><strong>Owner Only:</strong> All settings are only editable by the owner. Staff can view but not change any configuration.</li>
+      </ul>
+      <div class="callout">💡 After updating thresholds or SMTP settings, the ESP32 will sync the new values on its next poll cycle (every 6 seconds).</div>
+      </div>
     </div>
 
+    <!-- 09 PROFILE -->
     <div class="step-card" id="s9">
-      <div class="step-card-header"><div class="step-number">09</div><div class="step-header-content"><div><div class="step-tag">Troubleshooting</div><div class="step-title">Common Issues & Fixes</div></div><div class="step-icon-wrap">🔧</div></div></div>
+      <div class="step-card-header"><div class="step-number">09</div><div class="step-header-content"><div><div class="step-tag">Profile</div><div class="step-title">Profile & User Management</div></div><div class="step-icon-wrap">👤</div></div></div>
       <div class="step-body"><ul>
-        <li><strong>Offline Sensors:</strong> Check device connections and verify power supply to the ESP32.</li>
-        <li><strong>Alerts Not Clearing:</strong> Verify environmental conditions have normalized and device responses are active.</li>
-        <li><strong>Login Issues:</strong> Ensure your account is approved by the owner and credentials are correct.</li>
-        <li><strong>Manual Controls Not Working:</strong> Switch to Manual mode explicitly before attempting overrides.</li>
-      </ul><div class="callout">If problems persist, contact the system administrator or owner directly for assistance.</div></div>
+        <li><strong>Edit Profile:</strong> Update your full name, email, and phone number at any time. Changes are saved immediately.</li>
+        <li><strong>Change Password:</strong> Enter your current password, then a new password (same strength requirements as registration). Logged as a security event.</li>
+        <li><strong>Activity Log:</strong> View a history of your own actions — logins, profile edits, device overrides, and password changes.</li>
+        <li><strong>Pending Approvals (Owner):</strong> The owner sees a list of staff accounts awaiting approval. Click Approve to grant access (sends an email to the staff) or Reject to deny.</li>
+        <li><strong>User Management (Owner):</strong> View all registered users, edit their details and roles, or add new users directly without going through registration.</li>
+        <li><strong>Role Assignment (Owner):</strong> Assign staff or owner roles to any user. Only owners can change roles.</li>
+      </ul></div>
     </div>
 
+    <!-- 10 SAFETY -->
     <div class="step-card" id="s10">
-      <div class="step-card-header"><div class="step-number">10</div><div class="step-header-content"><div><div class="step-tag">Safety</div><div class="step-title">Safety & Maintenance</div></div><div class="step-icon-wrap">🛡️</div></div></div>
+      <div class="step-card-header"><div class="step-number">10</div><div class="step-header-content"><div><div class="step-tag">Safety</div><div class="step-title">Safety, Maintenance & Troubleshooting</div></div><div class="step-icon-wrap">🛡️</div></div></div>
       <div class="step-body"><ul>
-        <li><strong>Electrical Safety:</strong> Ensure all devices are properly grounded and protected from moisture.</li>
-        <li><strong>Cleanliness:</strong> Keep the chamber and sensors clean to prevent contamination and false readings.</li>
-        <li><strong>Calibration:</strong> Calibrate sensors periodically to maintain accurate environmental measurements.</li>
-        <li><strong>Backup Power:</strong> Consider a UPS or backup power source for uninterrupted 24/7 operation.</li>
-      </ul></div>
+        <li><strong>Electrical Safety:</strong> All relay-controlled devices should be properly fused and grounded. Keep AC wiring away from the ESP32 boards and sensor wires.</li>
+        <li><strong>Moisture Protection:</strong> Protect the ESP32 WROOM and ESP32-CAM from direct humidity exposure — mount them outside the chamber if possible.</li>
+        <li><strong>Sensor Calibration:</strong> Clean and verify the DHT22 sensor periodically. A faulty sensor can cause incorrect auto-control decisions.</li>
+        <li><strong>Backup Power:</strong> Use a UPS or backup battery for the server and ESP32 boards to prevent data loss and keep automation running during power interruptions.</li>
+        <li><strong>Offline Sensors:</strong> If the dashboard shows "Offline", check that the ESP32 WROOM is powered, connected to WiFi, and that XAMPP is running.</li>
+        <li><strong>Camera Not Uploading:</strong> Re-seat the OV2640 ribbon cable, confirm the ESP32-CAM has 5V power and WiFi, and verify the server IP in the CAM code matches your XAMPP IP.</li>
+        <li><strong>Login Issues:</strong> Confirm your account is approved by the owner. If you forgot your password, ask the owner to reset it from the Profile page.</li>
+        <li><strong>Fault Alerts:</strong> If a device fault is triggered, check the physical relay and device wiring. Once resolved, mark the fault as resolved in the Automation page Active Faults panel.</li>
+      </ul>
+      <div class="callout">💡 Best practice: check the Dashboard daily, address all alerts promptly, and keep mushroom growth records updated consistently for accurate harvest analytics.</div>
+      </div>
     </div>
 
   </div>

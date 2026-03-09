@@ -36,7 +36,7 @@ $conn->query("CREATE TABLE IF NOT EXISTS system_settings (
 $defaults = [
     'fault_timeout_min'   => '5',
     'stuck_timeout_min'   => '60',
-    'camera_interval_sec' => '600',
+    'camera_interval_sec' => '1800',
     'data_retention_days' => '90',
     'notify_temp'         => '1',
     'notify_hum'          => '1',
@@ -367,10 +367,10 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
       .profile-layout{grid-template-columns:1fr!important;}
       .form-grid-2,.form-grid-3{grid-template-columns:1fr!important;}
       /* Settings: full-width buttons on mobile */
-      .form-footer{flex-direction:column!important;align-items:stretch!important;}
-      .form-footer-btns{flex-direction:row!important;width:100%;}
-      .form-footer-btns .btn{flex:1;justify-content:center;}
-      .form-footer span{text-align:center;font-size:11px;}
+      .form-footer{flex-direction:column!important;align-items:flex-start!important;}
+      .form-footer-btns{flex-direction:row!important;width:auto;}
+      .form-footer-btns .btn{flex:0 0 auto;justify-content:center;}
+      .form-footer span{text-align:left;font-size:11px;}
       /* Threshold row single column */
       .threshold-row{grid-template-columns:1fr 1fr!important;gap:8px!important;}
       .threshold-row>*:first-child{grid-column:span 2;}
@@ -670,8 +670,8 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
           <div class="form-grid-2">
             <div class="form-group">
               <label>Capture Interval (seconds)</label>
-              <input type="number" name="camera_interval_sec" min="10" max="3600" value="<?= ss($ss,'camera_interval_sec','600') ?>" <?= !$isOwner?'disabled':'' ?>>
-              <span style="font-size:11px;color:var(--muted);">How often the camera takes a new photo (default: 600 = every 10 min)</span>
+              <input type="number" name="camera_interval_sec" min="10" max="3600" value="<?= ss($ss,'camera_interval_sec','1800') ?>" <?= !$isOwner?'disabled':'' ?>>
+              <span style="font-size:11px;color:var(--muted);">How often the camera takes a new photo (default: 1800 = every 30 min)</span>
             </div>
           </div>
           <?php if ($isOwner): ?>
