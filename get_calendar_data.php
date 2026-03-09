@@ -5,12 +5,12 @@ ob_start();
 header('Content-Type: application/json');
 
 try {
-    require_once __DIR__ . '/includes/auth_check.php';
+    if (session_status() === PHP_SESSION_NONE) session_start();
     require_once __DIR__ . '/includes/db_connect.php';
     ob_clean();
     if (!isset($conn) || $conn->connect_error) throw new Exception('DB connection failed');
 
-    if (!isset($_SESSION['user_id'])) {
+    if (empty($_SESSION['user'])) {
         echo json_encode(['success'=>false,'error'=>'Not logged in']);
         exit;
     }
@@ -34,7 +34,7 @@ try {
             mushroom_count INT NOT NULL DEFAULT 0,
             growth_stage VARCHAR(50) DEFAULT '',
             notes TEXT DEFAULT '',
-            created_by INT DEFAULT NULL,
+            created_by VARCHAR(100) DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )");
         $r = $conn->query("SELECT record_date, mushroom_count, growth_stage, notes
@@ -47,13 +47,26 @@ try {
 
     } elseif ($type === 'camera') {
         $date = $day ?: date('Y-m-d');
-        $r = $conn->query("SELECT id, image_path, captured_at, analysis_result
-                           FROM camera_images
+        $r = $conn->query("SELECT id, image_path, captured_at, analyzed_at,
+                           diameter_cm, harvest_status, confidence_score
+                           FROM camera_captures
                            WHERE DATE(captured_at) = '$date'
-                           ORDER BY captured_at DESC LIMIT 20");
-        $data = [];
-        if ($r) while ($row = $r->fetch_assoc()) $data[] = $row;
-        echo json_encode(['success'=>true,'data'=>$data]);
+                           ORDER BY captured_at DESC");
+        $day_images = [];
+        if ($r) while ($row = $r->fetch_assoc()) $day_images[] = $row;
+        echo json_encode(['success'=>true,'day_images'=>$day_images,'count'=>count($day_images)]);
+
+    } elseif ($type === 'monthly_total') {
+        $month = $_GET['month'] ?? date('Y-m');
+        $month_start = $month . '-01';
+        $month_end   = date('Y-m-t', strtotime($month_start));
+        $r = $conn->query("SELECT COALESCE(SUM(mushroom_count),0) as total
+                           FROM mushroom_records
+                           WHERE record_date BETWEEN '$month_start' AND '$month_end'
+                           AND growth_stage = 'Harvest'");
+        $total = 0;
+        if ($r) { $row = $r->fetch_assoc(); $total = intval($row['total']); }
+        echo json_encode(['success'=>true,'total'=>$total,'month'=>$month]);
 
     } else {
         echo json_encode(['success'=>false,'error'=>'Unknown type']);

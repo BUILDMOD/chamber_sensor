@@ -157,8 +157,10 @@ if ($stmt->execute()) {
         // Respect per-type notification toggles from settings.php
         $should_notify = false;
         foreach ($alerts_triggered as $al) {
-            if ($al['type'] === 'temperature' && ($ns['notify_temp'] ?? '1') === '1') $should_notify = true;
-            if ($al['type'] === 'humidity'    && ($ns['notify_hum']  ?? '1') === '1') $should_notify = true;
+            if ($al['type'] === 'temperature' && ($ns['notify_temp']      ?? '1') === '1') $should_notify = true;
+            if ($al['type'] === 'humidity'    && ($ns['notify_hum']       ?? '1') === '1') $should_notify = true;
+            if ($al['type'] === 'device'      && ($ns['notify_emergency'] ?? '1') === '1') $should_notify = true;
+            if ($al['type'] === 'system'      && ($ns['notify_offline']   ?? '1') === '1') $should_notify = true;
         }
 
         if ($should_notify) {
