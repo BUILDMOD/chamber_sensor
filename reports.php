@@ -73,38 +73,6 @@ foreach ($data as $row) {
 }
 
 // ── CSV EXPORT — must be before any HTML output ──
-if (isset($_GET['export']) && $_GET['export'] === 'sensor_csv') {
-    // Re-query data for export (uses same $date_from/$date_to already set)
-    $exp_sql = "SELECT DATE(timestamp) as summary_date,
-                  AVG(temperature) as avg_temp, MIN(temperature) as min_temp, MAX(temperature) as max_temp,
-                  AVG(humidity) as avg_hum, MIN(humidity) as min_hum, MAX(humidity) as max_hum,
-                  COUNT(*) as readings
-                FROM sensor_data
-                WHERE DATE(timestamp) BETWEEN '$date_from' AND '$date_to'
-                GROUP BY DATE(timestamp) ORDER BY summary_date ASC";
-    $exp_result = $conn->query($exp_sql);
-    $exp_data = [];
-    if ($exp_result) while ($r = $exp_result->fetch_assoc()) $exp_data[] = $r;
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="sensor_report_' . date('Ymd') . '.csv"');
-    header('Pragma: no-cache');
-    $out = fopen('php://output', 'w');
-    fputcsv($out, ['Date','Avg Temp (°C)','Min Temp (°C)','Max Temp (°C)','Avg Humidity (%)','Min Humidity (%)','Max Humidity (%)','Readings']);
-    foreach ($exp_data as $row)
-        fputcsv($out, [
-            date('M j, Y', strtotime($row['summary_date'])),
-            number_format($row['avg_temp'], 2),
-            number_format($row['min_temp'], 2),
-            number_format($row['max_temp'], 2),
-            number_format($row['avg_hum'],  2),
-            number_format($row['min_hum'],  2),
-            number_format($row['max_hum'],  2),
-            $row['readings']
-        ]);
-    fclose($out);
-    exit;
-}
-
 // ── Compute changes ──
 $temp_changes = []; $hum_changes = []; $change_dates = [];
 for ($i = 1; $i < count($data); $i++) {
@@ -767,8 +735,8 @@ window.addEventListener('DOMContentLoaded', function() {
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <span class="card-sub"><?= htmlspecialchars($label) ?> · <?= count($data) ?> day<?= count($data)!=1?'s':'' ?> of data</span>
-          <a href="?<?= http_build_query(array_merge($_GET, ['export'=>'sensor_csv'])) ?>" class="csv-btn">
-            <i class="fas fa-download"></i> Export CSV
+          <a href="print_report.php?date_from=<?= urlencode($date_from) ?>&date_to=<?= urlencode($date_to) ?>" target="_blank" class="csv-btn" style="background:var(--green);color:#fff;border-color:var(--green);">
+            <i class="fas fa-print"></i> Print Report
           </a>
         </div>
       </div>
