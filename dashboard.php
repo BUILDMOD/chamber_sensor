@@ -708,8 +708,6 @@ function goOffline(){
   setGaugeStatus($$('humNote'),'gs-offline','Offline');
   [tempGauge,humGauge].forEach(g=>{g.data.datasets[0].data=[0,100];g.data.datasets[0].backgroundColor=['#e5e7eb','#f0f2f5'];g.update();});
   renderAlerts(['Device offline']);
-  // ── Trigger server-side offline email check ──
-  fetch('check_offline.php',{cache:'no-store'}).catch(()=>{});
 }
 
 async function loadLive(){
@@ -823,14 +821,31 @@ $$('modeSwitch').addEventListener('change',async function(){
 document.querySelectorAll('.toggle-btn[data-device]').forEach(btn=>{
   btn.addEventListener('click',async function(){
     const dev=this.dataset.device;
+    // ── Optimistic UI: flip current pill state immediately ──
+    const pill=$$('status_'+dev);
+    const currentlyOn = pill && pill.classList.contains('pill-on');
+    const newVal = currentlyOn ? 0 : 1;
+    if(pill){
+      if(newVal===1){pill.className='status-pill pill-on';pill.innerHTML='<span class="dot"></span> ON';}
+      else{pill.className='status-pill pill-off';pill.innerHTML='<span class="dot"></span> OFF';}
+    }
     this.classList.add('active');
     setTimeout(()=>this.classList.remove('active'),700);
     try{
-      await fetch(`update_device_status.php?device=${encodeURIComponent(dev)}`,{cache:'no-store'});
+      const r=await fetch(`update_device_status.php?device=${encodeURIComponent(dev)}`,{cache:'no-store'});
+      const j=await r.json();
+      // ── Sync with actual server response ──
+      if(j.success && j.data) applyPill(dev, j.data[dev]);
       const now=new Date().toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour12:false});
       $$('last_'+dev).textContent=now;
-      setTimeout(fetchDeviceStates,700);
-    }catch(_){}
+      setTimeout(fetchDeviceStates,1000);
+    }catch(_){
+      // Revert optimistic update on error
+      if(pill){
+        if(currentlyOn){pill.className='status-pill pill-on';pill.innerHTML='<span class="dot"></span> ON';}
+        else{pill.className='status-pill pill-off';pill.innerHTML='<span class="dot"></span> OFF';}
+      }
+    }
   });
 });
 
