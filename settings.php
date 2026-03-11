@@ -77,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_thresholds'])) {
 // ── Save SMTP Settings ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['save_smtp']) || ($_POST['form_action'] ?? '') === 'save')) {
     if (!$isOwner) { $errors[] = 'Access denied.'; } else {
-        $keys = ['smtp_host','smtp_port','smtp_user','smtp_from_name','smtp_to_email','notify_temp','notify_hum','notify_offline','notify_emergency','notify_cooldown_min'];
+        $keys = ['smtp_host','smtp_port','smtp_user','smtp_from_name','notify_temp','notify_hum','notify_offline','notify_emergency','notify_cooldown_min'];
         foreach ($keys as $k) {
             $val = trim($_POST[$k] ?? '');
             $s = $conn->prepare("INSERT INTO notification_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
@@ -535,10 +535,6 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
           </div>
 
           <p class="section-title" style="margin-top:4px;">Recipients & Triggers</p>
-          <div class="form-group" style="margin-bottom:14px;">
-            <label>Send Alerts To (email)</label>
-            <input type="email" name="smtp_to_email" value="<?= ns($ns,'smtp_to_email') ?>" placeholder="admin@example.com" <?= !$isOwner ? 'disabled' : '' ?>>
-          </div>
 
           <div style="background:var(--surface2);border-radius:10px;padding:14px 16px;border:1px solid var(--border);margin-bottom:14px;">
             <p style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Send email when…</p>
@@ -553,10 +549,6 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
             <div class="checkbox-row">
               <input type="checkbox" id="no" name="notify_offline" value="1" <?= ($ns['notify_offline'] ?? '1') === '1' ? 'checked' : '' ?> <?= !$isOwner ? 'disabled' : '' ?>>
               <div><label for="no">Sensor offline</label><div class="sub">Alert when no reading received for 5+ minutes</div></div>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="ne" name="notify_emergency" value="1" <?= ($ns['notify_emergency'] ?? '1') === '1' ? 'checked' : '' ?> <?= !$isOwner ? 'disabled' : '' ?>>
-              <div><label for="ne">Emergency / Device fault</label><div class="sub">Alert when emergency or device fault is detected</div></div>
             </div>
           </div>
 
