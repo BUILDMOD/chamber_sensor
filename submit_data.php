@@ -167,12 +167,25 @@ if ($stmt->execute()) {
             // Use cooldown from settings (default 60 min)
             $cooldown_min = intval($ns['notify_cooldown_min'] ?? 60);
 
-            // Fetch owner email
-            $owner_query = $conn->prepare("SELECT email FROM users WHERE role = 'owner' LIMIT 1");
-            $owner_query->execute();
-            $owner_result = $owner_query->get_result();
-            $recipient = $ns['smtp_to_email'] ?? 'angelodominguiano12345@gmail.com';
-            if ($owner_result->num_rows > 0) $recipient = $owner_result->fetch_assoc()['email'];
+            // Fetch recipient — use logged-in user's registered email, fallback to owner
+            $recipient = '';
+            session_start();
+            if (!empty($_SESSION['user'])) {
+                $uq = $conn->prepare("SELECT email FROM users WHERE username = ? LIMIT 1");
+                $uq->bind_param("s", $_SESSION['user']);
+                $uq->execute();
+                $ur = $uq->get_result();
+                if ($ur->num_rows > 0) $recipient = $ur->fetch_assoc()['email'];
+                $uq->close();
+            }
+            if (empty($recipient)) {
+                $owner_query = $conn->prepare("SELECT email FROM users WHERE role = 'owner' LIMIT 1");
+                $owner_query->execute();
+                $owner_result = $owner_query->get_result();
+                if ($owner_result->num_rows > 0) $recipient = $owner_result->fetch_assoc()['email'];
+                $owner_query->close();
+            }
+            if (empty($recipient)) $recipient = $ns['smtp_to_email'] ?? '';
             $owner_query->close();
 
             // Check throttle using cooldown from settings

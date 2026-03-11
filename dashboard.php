@@ -708,6 +708,8 @@ function goOffline(){
   setGaugeStatus($$('humNote'),'gs-offline','Offline');
   [tempGauge,humGauge].forEach(g=>{g.data.datasets[0].data=[0,100];g.data.datasets[0].backgroundColor=['#e5e7eb','#f0f2f5'];g.update();});
   renderAlerts(['Device offline']);
+  // ── Trigger server-side offline email check ──
+  fetch('check_offline.php',{cache:'no-store'}).catch(()=>{});
 }
 
 async function loadLive(){
