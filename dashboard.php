@@ -496,7 +496,7 @@ $isOwner = $sessionRole === 'owner';
               <span class="device-name"><?= $name ?></span>
               <span class="device-time" id="last_<?= $id ?>">—</span>
               <div id="status_<?= $id ?>" class="status-pill pill-unk"><span class="dot"></span> —</div>
-              <button class="toggle-btn" data-device="<?= $id ?>">Toggle</button>
+              <button class="toggle-btn" data-device="<?= $id ?>" id="btn_<?= $id ?>">Toggle</button>
             </div>
             <?php endforeach; ?>
           </div>
@@ -795,10 +795,18 @@ async function fetchDeviceStates(){
 }
 function applyPill(dev,status){
   const el=$$('status_'+dev); if(!el)return;
+  const btn=$$('btn_'+dev);
   const s=String(status||'').toUpperCase();
-  if(['ON','1','TRUE'].includes(s)){el.className='status-pill pill-on';el.innerHTML='<span class="dot"></span> ON';}
-  else if(['OFF','0','FALSE'].includes(s)){el.className='status-pill pill-off';el.innerHTML='<span class="dot"></span> OFF';}
-  else{el.className='status-pill pill-unk';el.innerHTML='<span class="dot"></span> —';}
+  if(['ON','1','TRUE'].includes(s)){
+    el.className='status-pill pill-on';el.innerHTML='<span class="dot"></span> ON';
+    if(btn){btn.textContent='Turn OFF';btn.style.background='var(--red)';btn.style.color='#fff';btn.style.borderColor='var(--red)';}
+  } else if(['OFF','0','FALSE'].includes(s)){
+    el.className='status-pill pill-off';el.innerHTML='<span class="dot"></span> OFF';
+    if(btn){btn.textContent='Turn ON';btn.style.background='var(--green)';btn.style.color='#fff';btn.style.borderColor='var(--green)';}
+  } else {
+    el.className='status-pill pill-unk';el.innerHTML='<span class="dot"></span> —';
+    if(btn){btn.textContent='Toggle';btn.style.background='';btn.style.color='';btn.style.borderColor='';}
+  }
 }
 fetchDeviceStates();
 setInterval(fetchDeviceStates,1000);
@@ -814,37 +822,33 @@ $$('modeSwitch').addEventListener('change',async function(){
   setMode(wantManual);
   try{
     await fetch(`update_device_status.php?mode=${wantManual?1:0}`,{cache:'no-store'});
+    if(wantManual){
+      // Switching to manual — set all devices ON in DB to match current auto state
+      await fetch('update_device_status.php?mist=1&fan=1&heater=1&sprayer=1&exhaust=1',{cache:'no-store'});
+      // Update pills immediately
+      ['mist','fan','heater','sprayer'].forEach(d=>applyPill(d,'1'));
+    }
   }catch(_){}
-  // Give server 2 seconds to persist, then allow polling to sync again
   setTimeout(()=>{ modeSwitching = false; }, 2000);
 });
 document.querySelectorAll('.toggle-btn[data-device]').forEach(btn=>{
   btn.addEventListener('click',async function(){
     const dev=this.dataset.device;
-    // ── Optimistic UI: flip current pill state immediately ──
     const pill=$$('status_'+dev);
     const currentlyOn = pill && pill.classList.contains('pill-on');
     const newVal = currentlyOn ? 0 : 1;
-    if(pill){
-      if(newVal===1){pill.className='status-pill pill-on';pill.innerHTML='<span class="dot"></span> ON';}
-      else{pill.className='status-pill pill-off';pill.innerHTML='<span class="dot"></span> OFF';}
-    }
-    this.classList.add('active');
-    setTimeout(()=>this.classList.remove('active'),700);
+    // Optimistic UI
+    applyPill(dev, newVal ? '1' : '0');
     try{
-      const r=await fetch(`update_device_status.php?device=${encodeURIComponent(dev)}`,{cache:'no-store'});
+      const r=await fetch(`update_device_status.php?${encodeURIComponent(dev)}=${newVal}`,{cache:'no-store'});
       const j=await r.json();
-      // ── Sync with actual server response ──
       if(j.success && j.data) applyPill(dev, j.data[dev]);
       const now=new Date().toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour12:false});
       $$('last_'+dev).textContent=now;
       setTimeout(fetchDeviceStates,1000);
     }catch(_){
-      // Revert optimistic update on error
-      if(pill){
-        if(currentlyOn){pill.className='status-pill pill-on';pill.innerHTML='<span class="dot"></span> ON';}
-        else{pill.className='status-pill pill-off';pill.innerHTML='<span class="dot"></span> OFF';}
-      }
+      // revert on error
+      applyPill(dev, currentlyOn ? '1' : '0');
     }
   });
 });
