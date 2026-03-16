@@ -491,7 +491,7 @@ $isOwner = $sessionRole === 'owner';
         </div>
         <div id="manualControls" style="display:none;">
           <div class="devices">
-            <?php foreach(['mist'=>'Mist','fan'=>'Fan','heater'=>'Heater','sprayer'=>'Sprayer'] as $id=>$name): ?>
+            <?php foreach(['mist'=>'Mist','fan'=>'Fan','heater'=>'Heater','sprayer'=>'Sprayer','exhaust'=>'Exhaust'] as $id=>$name): ?>
             <div class="device-row">
               <span class="device-name"><?= $name ?></span>
               <span class="device-time" id="last_<?= $id ?>">—</span>
@@ -769,26 +769,20 @@ async function fetchDeviceStates(){
     const r=await fetch('get_device_status.php',{cache:'no-store'});
     if(!r.ok)throw 0;
     const j=await r.json();
-    ['mist','fan','heater','sprayer'].forEach(d=>applyPill(d,j[d]));
-    const manual=j.manual_mode==1;
-    // Only sync the switch from server if user isn't actively toggling it
+    ['mist','fan','heater','sprayer','exhaust'].forEach(d=>applyPill(d,j[d]));
     if(!modeSwitching){
-      $$('modeSwitch').checked=manual;
-      setMode(manual);
+      $$('modeSwitch').checked=j.manual_mode==1;
+      setMode(j.manual_mode==1);
     }
-
-    // ── Show fault/buzzer alert on dashboard ──
+    const list=$$('alertList');
     if(j.buzzer==1){
-      const list=$$('alertList');
-      // Only add fault banner if not already shown
       if(!list.querySelector('.alert-fault')){
         const el=document.createElement('div');
         el.className='alert-item alert-err alert-fault';
-        el.innerHTML='<i class="fas fa-triangle-exclamation"></i> <strong>Device fault detected!</strong> A device was automatically shut off. Check the Automation log.';
+        el.innerHTML='<i class="fas fa-triangle-exclamation"></i> <strong>Device fault detected!</strong> Check the Automation log.';
         list.prepend(el);
       }
     } else {
-      // Remove fault banner when buzzer clears
       list.querySelector('.alert-fault')?.remove();
     }
   }catch(_){}
@@ -796,11 +790,12 @@ async function fetchDeviceStates(){
 function applyPill(dev,status){
   const el=$$('status_'+dev); if(!el)return;
   const btn=$$('btn_'+dev);
-  const s=String(status||'').toUpperCase();
-  if(['ON','1','TRUE'].includes(s)){
+  const on=['ON','1','TRUE'].includes(String(status||'').toUpperCase());
+  const off=['OFF','0','FALSE'].includes(String(status||'').toUpperCase());
+  if(on){
     el.className='status-pill pill-on';el.innerHTML='<span class="dot"></span> ON';
     if(btn){btn.textContent='Turn OFF';btn.style.background='var(--red)';btn.style.color='#fff';btn.style.borderColor='var(--red)';}
-  } else if(['OFF','0','FALSE'].includes(s)){
+  } else if(off){
     el.className='status-pill pill-off';el.innerHTML='<span class="dot"></span> OFF';
     if(btn){btn.textContent='Turn ON';btn.style.background='var(--green)';btn.style.color='#fff';btn.style.borderColor='var(--green)';}
   } else {
@@ -814,42 +809,39 @@ function setMode(manual){
   $$('modeLabel').textContent=manual?'Manual Mode':'Auto Mode';
   $$('manualControls').style.display=manual?'':'none';
 }
-let modeSwitching = false; // flag: user is actively changing mode
+let modeSwitching=false;
 
 $$('modeSwitch').addEventListener('change',async function(){
-  modeSwitching = true;
-  const wantManual = this.checked;
+  modeSwitching=true;
+  const wantManual=this.checked;
   setMode(wantManual);
   try{
-    await fetch(`update_device_status.php?mode=${wantManual?1:0}`,{cache:'no-store'});
-    if(wantManual){
-      // Switching to manual — set all devices ON in DB to match current auto state
-      await fetch('update_device_status.php?mist=1&fan=1&heater=1&sprayer=1&exhaust=1',{cache:'no-store'});
-      // Update pills immediately
-      ['mist','fan','heater','sprayer'].forEach(d=>applyPill(d,'1'));
-    }
+    await fetch('update_device_status.php?mode='+(wantManual?1:0),{cache:'no-store'});
+    // Wait for ESP32 to sync relay states to DB (ESP32 polls every 6s, give it 8s)
+    await fetchDeviceStates();
   }catch(_){}
-  setTimeout(()=>{ modeSwitching = false; }, 2000);
+  setTimeout(()=>{modeSwitching=false;fetchDeviceStates();},8000);
 });
 document.querySelectorAll('.toggle-btn[data-device]').forEach(btn=>{
   btn.addEventListener('click',async function(){
+    if(this.disabled)return;
+    this.disabled=true;
     const dev=this.dataset.device;
     const pill=$$('status_'+dev);
-    const currentlyOn = pill && pill.classList.contains('pill-on');
-    const newVal = currentlyOn ? 0 : 1;
-    // Optimistic UI
-    applyPill(dev, newVal ? '1' : '0');
+    const currentlyOn=pill&&pill.classList.contains('pill-on');
+    const newVal=currentlyOn?0:1;
+    applyPill(dev,newVal?'1':'0');
     try{
-      const r=await fetch(`update_device_status.php?${encodeURIComponent(dev)}=${newVal}`,{cache:'no-store'});
+      // Use plain key=value, no encodeURIComponent on the key
+      const r=await fetch('update_device_status.php?'+dev+'='+newVal,{cache:'no-store'});
       const j=await r.json();
-      if(j.success && j.data) applyPill(dev, j.data[dev]);
-      const now=new Date().toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour12:false});
-      $$('last_'+dev).textContent=now;
-      setTimeout(fetchDeviceStates,1000);
+      if(j.success&&j.data)applyPill(dev,j.data[dev]);
+      $$('last_'+dev).textContent=new Date().toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour12:false});
+      setTimeout(fetchDeviceStates,500);
     }catch(_){
-      // revert on error
-      applyPill(dev, currentlyOn ? '1' : '0');
+      applyPill(dev,currentlyOn?'1':'0');
     }
+    this.disabled=false;
   });
 });
 
