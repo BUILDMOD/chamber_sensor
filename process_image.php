@@ -87,12 +87,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['image'])) {
     $result = processMushroomImage($targetPath);
     
     // Save analysis to database
+    // bind_param types: s=string, d=float/double
+    // image_path(s), diameter_cm(d), estimated_size_cm(d), harvest_status(s), confidence_score(d), analysis_notes(s)
     $stmt = $conn->prepare("INSERT INTO image_analysis (image_path, diameter_cm, estimated_size_cm, harvest_status, confidence_score, analysis_notes) VALUES (?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param("sddss", 
-        $targetPath, 
-        $result['diameter_cm'], 
-        $result['estimated_size_cm'], 
-        $result['harvest_status'], 
+    $stmt->bind_param("sddsds",
+        $targetPath,
+        $result['diameter_cm'],
+        $result['estimated_size_cm'],
+        $result['harvest_status'],
         $result['confidence_score'],
         $result['analysis_notes']
     );
@@ -122,18 +124,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['image'])) {
 
 // ── Harvest Email Notification ──
 function _sendHarvestEmail($conn, $status, $diameter, $imagePath) {
-    // Read notification settings
     $ns = []; $ss = [];
     $r = $conn->query("SELECT setting_key,setting_value FROM notification_settings");
     if ($r) while ($row = $r->fetch_assoc()) $ns[$row['setting_key']] = $row['setting_value'];
     $r2 = $conn->query("SELECT setting_key,setting_value FROM system_settings");
     if ($r2) while ($row = $r2->fetch_assoc()) $ss[$row['setting_key']] = $row['setting_value'];
 
-    // Use separate harvest cooldown — 10 minutes default
     $cooldown_min = 10;
     $throttle_key = 'harvest_notify';
 
-    // Check throttle using harvest_notify key in email_throttle
     $conn->query("CREATE TABLE IF NOT EXISTS email_throttle (
         email VARCHAR(255) PRIMARY KEY,
         last_sent DATETIME NOT NULL
@@ -145,18 +144,16 @@ function _sendHarvestEmail($conn, $status, $diameter, $imagePath) {
         $tr = $tq->get_result();
         if ($tr->num_rows > 0) {
             $last = strtotime($tr->fetch_assoc()['last_sent']);
-            if ((time() - $last) < ($cooldown_min * 60)) return; // Still in cooldown
+            if ((time() - $last) < ($cooldown_min * 60)) return;
         }
         $tq->close();
     }
 
-    // Get recipient — owner email
     $recipient = $ns['smtp_to_email'] ?? '';
     $owner = $conn->query("SELECT email FROM users WHERE role='owner' LIMIT 1");
     if ($owner && $row = $owner->fetch_assoc()) $recipient = $row['email'];
     if (!$recipient) return;
 
-    // Send email
     if (file_exists(__DIR__ . '/send_email.php')) {
         require_once __DIR__ . '/send_email.php';
 
@@ -183,7 +180,6 @@ function _sendHarvestEmail($conn, $status, $diameter, $imagePath) {
 
         sendEmail($recipient, $subject, $body);
 
-        // Update throttle
         $now = date('Y-m-d H:i:s');
         $us = $conn->prepare("INSERT INTO email_throttle (email,last_sent) VALUES (?,?) ON DUPLICATE KEY UPDATE last_sent=?");
         if ($us) { $us->bind_param("sss", $throttle_key, $now, $now); $us->execute(); $us->close(); }
@@ -205,7 +201,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
     $analyses = [];
     while ($row = $result->fetch_assoc()) {
-        // Make image_path web-accessible (strip leading path if needed)
         $row['image_path'] = ltrim($row['image_path'], './');
         $analyses[] = $row;
     }
@@ -223,10 +218,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
 /**
  * Process mushroom image to estimate size and harvest readiness
- * Uses basic image processing with GD library
  */
 function processMushroomImage($imagePath) {
-    // Get image info
     $imageInfo = getimagesize($imagePath);
     if (!$imageInfo) {
         return [
@@ -242,7 +235,6 @@ function processMushroomImage($imagePath) {
     $height = $imageInfo[1];
     $mimeType = $imageInfo['mime'];
     
-    // Load image based on type
     switch ($mimeType) {
         case 'image/jpeg':
             $image = imagecreatefromjpeg($imagePath);
@@ -276,7 +268,6 @@ function processMushroomImage($imagePath) {
         ];
     }
     
-    // Resize for faster processing
     $maxDim = 300;
     $ratio = min($maxDim / $width, $maxDim / $height);
     $newWidth = (int)($width * $ratio);
@@ -285,34 +276,20 @@ function processMushroomImage($imagePath) {
     $resized = imagecreatetruecolor($newWidth, $newHeight);
     imagecopyresampled($resized, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
     
-    // Convert to grayscale
     $gray = imagecreatetruecolor($newWidth, $newHeight);
     imagefilter($resized, IMG_FILTER_GRAYSCALE);
-    
-    // Apply threshold to detect mushroom (assuming mushroom is darker than background)
-    // This is a simple approach - in production, you'd use more sophisticated methods
     imagefilter($resized, IMG_FILTER_CONTRAST, 40);
     
-    // Find bounding box of detected object
     $bounds = findMushroomBounds($resized, $newWidth, $newHeight);
     
-    // Calculate diameter in pixels
     $pixelDiameter = max($bounds['width'], $bounds['height']);
-    
-    // Estimate real-world size (assuming reference object or calibration)
-    // For demo, we'll estimate based on typical mushroom sizes
-    // In production, you'd use a reference object (like a coin) in the image
     $cmPerPixel = estimateCmPerPixel($pixelDiameter, $newWidth, $newHeight);
     $diameterCm = $pixelDiameter * $cmPerPixel;
     $sizeCm = ($bounds['width'] * $bounds['height']) * pow($cmPerPixel, 2);
     
-    // Determine harvest status based on diameter
     $harvestStatus = determineHarvestStatus($diameterCm);
-    
-    // Calculate confidence (based on how well-defined the detection is)
     $confidenceScore = calculateConfidence($bounds, $newWidth, $newHeight);
     
-    // Clean up
     imagedestroy($image);
     imagedestroy($resized);
     
@@ -325,9 +302,6 @@ function processMushroomImage($imagePath) {
     ];
 }
 
-/**
- * Find the bounding box of the mushroom in the image
- */
 function findMushroomBounds($image, $width, $height) {
     $minX = $width;
     $minY = $height;
@@ -335,7 +309,6 @@ function findMushroomBounds($image, $width, $height) {
     $maxY = 0;
     $pixelCount = 0;
     
-    // Scan for non-white pixels (assuming dark mushroom on light background)
     for ($y = 0; $y < $height; $y++) {
         for ($x = 0; $x < $width; $x++) {
             $rgb = imagecolorat($image, $x, $y);
@@ -343,7 +316,6 @@ function findMushroomBounds($image, $width, $height) {
             $g = ($rgb >> 8) & 0xFF;
             $b = $rgb & 0xFF;
             
-            // If pixel is darker than threshold (not white/light background)
             $brightness = ($r + $g + $b) / 3;
             if ($brightness < 200) {
                 $minX = min($minX, $x);
@@ -355,7 +327,6 @@ function findMushroomBounds($image, $width, $height) {
         }
     }
     
-    // If no significant object found, return default
     if ($pixelCount < ($width * $height * 0.01)) {
         return [
             'x' => 0,
@@ -375,25 +346,13 @@ function findMushroomBounds($image, $width, $height) {
     ];
 }
 
-/**
- * Estimate centimeters per pixel based on typical mushroom sizes
- * In production, this would use a reference object
- */
 function estimateCmPerPixel($pixelDiameter, $width, $height) {
-    // Default estimation: assume mushroom fills about 50% of image width
-    // This is a placeholder - in production, use calibration or reference object
-    $typicalMushroomCm = 5.0; // Typical max diameter in cm
-    $typicalPixelSize = $width * 0.5; // Assume mushroom is 50% of image width
-    
+    $typicalMushroomCm = 5.0;
+    $typicalPixelSize = $width * 0.5;
     return $typicalMushroomCm / $typicalPixelSize;
 }
 
-/**
- * Determine harvest status based on diameter
- */
 function determineHarvestStatus($diameterCm) {
-    // Thresholds for different mushroom types (can be adjusted)
-    // Typical oyster mushroom harvesting size: 4-8cm diameter
     if ($diameterCm < 3) {
         return "Not Ready";
     } elseif ($diameterCm < 5) {
@@ -405,24 +364,19 @@ function determineHarvestStatus($diameterCm) {
     }
 }
 
-/**
- * Calculate confidence score based on detection quality
- */
 function calculateConfidence($bounds, $width, $height) {
     $imageArea = $width * $height;
     $objectArea = $bounds['width'] * $bounds['height'];
-    
-    // Higher confidence if object is reasonable size (not too small or too large)
     $sizeRatio = $objectArea / $imageArea;
     
     if ($sizeRatio < 0.01) {
-        return 0.2; // Too small - likely noise
+        return 0.2;
     } elseif ($sizeRatio > 0.9) {
-        return 0.3; // Too large - likely edge case
+        return 0.3;
     } elseif ($sizeRatio > 0.1 && $sizeRatio < 0.7) {
-        return 0.85; // Good size range
+        return 0.85;
     } else {
-        return 0.6; // Acceptable
+        return 0.6;
     }
 }
 ?>

@@ -491,7 +491,7 @@ $isOwner = $sessionRole === 'owner';
         </div>
         <div id="manualControls" style="display:none;">
           <div class="devices">
-            <?php foreach(['mist'=>'Mist','fan'=>'Fan','heater'=>'Heater','sprayer'=>'Sprayer','exhaust'=>'Exhaust'] as $id=>$name): ?>
+            <?php foreach(['mist'=>'Mist','fan'=>'Fan','heater'=>'Heater','sprayer'=>'Sprayer'] as $id=>$name): ?>
             <div class="device-row">
               <span class="device-name"><?= $name ?></span>
               <span class="device-time" id="last_<?= $id ?>">—</span>
@@ -519,14 +519,14 @@ $isOwner = $sessionRole === 'owner';
     </div>
 
     <!-- Monthly Records -->
-    <div class="card col-6">
+    <div class="card col-6" style="display:flex;flex-direction:column;">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-green">🍄</span> Monthly Records</div>
         <div class="date-picker-wrap">
           <input type="date" id="recDatePicker" class="dash-datepicker" title="Pick a date to view records">
         </div>
       </div>
-      <div class="card-body" style="padding:14px 16px;">
+      <div class="card-body" style="padding:14px 16px;flex:1;">
 
         <!-- Monthly Summary Bar Chart -->
         <div id="monthlySummaryWrap" style="margin-bottom:16px;">
@@ -589,14 +589,14 @@ $isOwner = $sessionRole === 'owner';
     </div>
 
     <!-- Chamber Camera Analysis -->
-    <div class="card col-6">
+    <div class="card col-6" style="display:flex;flex-direction:column;">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-blue"><i class="fas fa-camera"></i></span> Chamber Camera Analysis</div>
         <div class="date-picker-wrap">
           <input type="date" id="camDatePicker" class="dash-datepicker" title="Pick a date to view captures">
         </div>
       </div>
-      <div class="card-body" style="padding:14px 16px;">
+      <div class="card-body" style="padding:14px 16px;flex:1;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
           <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;" id="camDetailTitle">Latest captures</span>
           <div style="display:flex;align-items:center;gap:6px;">
@@ -769,20 +769,26 @@ async function fetchDeviceStates(){
     const r=await fetch('get_device_status.php',{cache:'no-store'});
     if(!r.ok)throw 0;
     const j=await r.json();
-    ['mist','fan','heater','sprayer','exhaust'].forEach(d=>applyPill(d,j[d]));
+    ['mist','fan','heater','sprayer'].forEach(d=>applyPill(d,j[d]));
+    const manual=j.manual_mode==1;
+    // Only sync the switch from server if user isn't actively toggling it
     if(!modeSwitching){
-      $$('modeSwitch').checked=j.manual_mode==1;
-      setMode(j.manual_mode==1);
+      $$('modeSwitch').checked=manual;
+      setMode(manual);
     }
-    const list=$$('alertList');
+
+    // ── Show fault/buzzer alert on dashboard ──
     if(j.buzzer==1){
+      const list=$$('alertList');
+      // Only add fault banner if not already shown
       if(!list.querySelector('.alert-fault')){
         const el=document.createElement('div');
         el.className='alert-item alert-err alert-fault';
-        el.innerHTML='<i class="fas fa-triangle-exclamation"></i> <strong>Device fault detected!</strong> Check the Automation log.';
+        el.innerHTML='<i class="fas fa-triangle-exclamation"></i> <strong>Device fault detected!</strong> A device was automatically shut off. Check the Automation log.';
         list.prepend(el);
       }
     } else {
+      // Remove fault banner when buzzer clears
       list.querySelector('.alert-fault')?.remove();
     }
   }catch(_){}
@@ -790,12 +796,11 @@ async function fetchDeviceStates(){
 function applyPill(dev,status){
   const el=$$('status_'+dev); if(!el)return;
   const btn=$$('btn_'+dev);
-  const on=['ON','1','TRUE'].includes(String(status||'').toUpperCase());
-  const off=['OFF','0','FALSE'].includes(String(status||'').toUpperCase());
-  if(on){
+  const s=String(status||'').toUpperCase();
+  if(['ON','1','TRUE'].includes(s)){
     el.className='status-pill pill-on';el.innerHTML='<span class="dot"></span> ON';
     if(btn){btn.textContent='Turn OFF';btn.style.background='var(--red)';btn.style.color='#fff';btn.style.borderColor='var(--red)';}
-  } else if(off){
+  } else if(['OFF','0','FALSE'].includes(s)){
     el.className='status-pill pill-off';el.innerHTML='<span class="dot"></span> OFF';
     if(btn){btn.textContent='Turn ON';btn.style.background='var(--green)';btn.style.color='#fff';btn.style.borderColor='var(--green)';}
   } else {
@@ -809,39 +814,42 @@ function setMode(manual){
   $$('modeLabel').textContent=manual?'Manual Mode':'Auto Mode';
   $$('manualControls').style.display=manual?'':'none';
 }
-let modeSwitching=false;
+let modeSwitching = false; // flag: user is actively changing mode
 
 $$('modeSwitch').addEventListener('change',async function(){
-  modeSwitching=true;
-  const wantManual=this.checked;
+  modeSwitching = true;
+  const wantManual = this.checked;
   setMode(wantManual);
   try{
-    await fetch('update_device_status.php?mode='+(wantManual?1:0),{cache:'no-store'});
-    // Wait for ESP32 to sync relay states to DB (ESP32 polls every 6s, give it 8s)
-    await fetchDeviceStates();
+    await fetch(`update_device_status.php?mode=${wantManual?1:0}`,{cache:'no-store'});
+    if(wantManual){
+      // Switching to manual — set all devices ON in DB to match current auto state
+      await fetch('update_device_status.php?mist=1&fan=1&heater=1&sprayer=1&exhaust=1',{cache:'no-store'});
+      // Update pills immediately
+      ['mist','fan','heater','sprayer'].forEach(d=>applyPill(d,'1'));
+    }
   }catch(_){}
-  setTimeout(()=>{modeSwitching=false;fetchDeviceStates();},8000);
+  setTimeout(()=>{ modeSwitching = false; }, 2000);
 });
 document.querySelectorAll('.toggle-btn[data-device]').forEach(btn=>{
   btn.addEventListener('click',async function(){
-    if(this.disabled)return;
-    this.disabled=true;
     const dev=this.dataset.device;
     const pill=$$('status_'+dev);
-    const currentlyOn=pill&&pill.classList.contains('pill-on');
-    const newVal=currentlyOn?0:1;
-    applyPill(dev,newVal?'1':'0');
+    const currentlyOn = pill && pill.classList.contains('pill-on');
+    const newVal = currentlyOn ? 0 : 1;
+    // Optimistic UI
+    applyPill(dev, newVal ? '1' : '0');
     try{
-      // Use plain key=value, no encodeURIComponent on the key
-      const r=await fetch('update_device_status.php?'+dev+'='+newVal,{cache:'no-store'});
+      const r=await fetch(`update_device_status.php?${encodeURIComponent(dev)}=${newVal}`,{cache:'no-store'});
       const j=await r.json();
-      if(j.success&&j.data)applyPill(dev,j.data[dev]);
-      $$('last_'+dev).textContent=new Date().toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour12:false});
-      setTimeout(fetchDeviceStates,500);
+      if(j.success && j.data) applyPill(dev, j.data[dev]);
+      const now=new Date().toLocaleTimeString('en-PH',{timeZone:'Asia/Manila',hour12:false});
+      $$('last_'+dev).textContent=now;
+      setTimeout(fetchDeviceStates,1000);
     }catch(_){
-      applyPill(dev,currentlyOn?'1':'0');
+      // revert on error
+      applyPill(dev, currentlyOn ? '1' : '0');
     }
-    this.disabled=false;
   });
 });
 
