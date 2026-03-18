@@ -222,7 +222,8 @@ $isOwner = $sessionRole === 'owner';
     .detail-clear-btn:hover{background:var(--blue-lt);}
 
     /* IMAGE GRID */
-    .img-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;}
+    .img-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;max-height:380px;overflow-y:auto;scrollbar-width:none;}
+    .img-grid::-webkit-scrollbar{display:none;}
     .img-card{background:var(--surface);border-radius:10px;overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow);transition:transform .15s,box-shadow .15s;}
     .img-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg);}
     .img-card img{width:100%;height:130px;object-fit:cover;display:block;}
@@ -491,7 +492,7 @@ $isOwner = $sessionRole === 'owner';
         </div>
         <div id="manualControls" style="display:none;">
           <div class="devices">
-            <?php foreach(['mist'=>'Mist','fan'=>'Fan','heater'=>'Heater','sprayer'=>'Sprayer'] as $id=>$name): ?>
+            <?php foreach(['mist'=>'Mist','fan'=>'Fan','heater'=>'Heater','sprayer'=>'Sprayer','exhaust'=>'Exhaust'] as $id=>$name): ?>
             <div class="device-row">
               <span class="device-name"><?= $name ?></span>
               <span class="device-time" id="last_<?= $id ?>">—</span>
@@ -519,14 +520,14 @@ $isOwner = $sessionRole === 'owner';
     </div>
 
     <!-- Monthly Records -->
-    <div class="card col-6" style="display:flex;flex-direction:column;">
+    <div class="card col-6" style="min-height:520px;">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-green">🍄</span> Monthly Records</div>
         <div class="date-picker-wrap">
           <input type="date" id="recDatePicker" class="dash-datepicker" title="Pick a date to view records">
         </div>
       </div>
-      <div class="card-body" style="padding:14px 16px;flex:1;">
+      <div class="card-body" style="padding:14px 16px;">
 
         <!-- Monthly Summary Bar Chart -->
         <div id="monthlySummaryWrap" style="margin-bottom:16px;">
@@ -589,14 +590,14 @@ $isOwner = $sessionRole === 'owner';
     </div>
 
     <!-- Chamber Camera Analysis -->
-    <div class="card col-6" style="display:flex;flex-direction:column;">
+    <div class="card col-6" style="min-height:520px;">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-blue"><i class="fas fa-camera"></i></span> Chamber Camera Analysis</div>
         <div class="date-picker-wrap">
           <input type="date" id="camDatePicker" class="dash-datepicker" title="Pick a date to view captures">
         </div>
       </div>
-      <div class="card-body" style="padding:14px 16px;flex:1;">
+      <div class="card-body" style="padding:14px 16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
           <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;" id="camDetailTitle">Latest captures</span>
           <div style="display:flex;align-items:center;gap:6px;">
@@ -769,7 +770,7 @@ async function fetchDeviceStates(){
     const r=await fetch('get_device_status.php',{cache:'no-store'});
     if(!r.ok)throw 0;
     const j=await r.json();
-    ['mist','fan','heater','sprayer'].forEach(d=>applyPill(d,j[d]));
+    ['mist','fan','heater','sprayer','exhaust'].forEach(d=>applyPill(d,j[d]));
     const manual=j.manual_mode==1;
     // Only sync the switch from server if user isn't actively toggling it
     if(!modeSwitching){
