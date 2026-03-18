@@ -134,7 +134,27 @@ function navUrl($view, $year, $month, $day) {
   <title>Reports</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+.print-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 20px;
+      background: var(--green); color: #fff; border: 1px solid var(--green);
+      font-size: 12px; font-weight: 600; text-decoration: none; box-shadow: var(--shadow);
+      transition: all .15s; white-space: nowrap;
+    }
+    .print-btn:hover { 
+      background: #14804a; 
+      box-shadow: 0 2px 8px rgba(26,158,92,.3); 
+    }
+    @media (max-width: 768px) {
+      .print-btn { 
+        padding: 4px 10px; 
+        font-size: 11px; 
+        gap: 4px;
+      }
+    }
+  </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
@@ -501,7 +521,10 @@ window.addEventListener('DOMContentLoaded', function() {
 
 <header class="topbar">
   <span class="topbar-title">Reports</span>
-  <div class="topbar-right">
+<div class="topbar-right">
+    <a href="print_report.php?date_from=<?php echo urlencode($date_from); ?>&date_to=<?php echo urlencode($date_to); ?>" target="_blank" class="print-btn" title="Print Report">
+      <i class="fas fa-print" style="margin-right:4px;"></i> Print Report
+    </a>
     <span class="topbar-time" id="phTime" data-server-ts="<?= $server_ts_ms ?>"><?= htmlspecialchars($server_time_formatted) ?></span>
   </div>
 </header>
@@ -733,11 +756,8 @@ window.addEventListener('DOMContentLoaded', function() {
           <span class="icon icon-blue"><i class="fas fa-table"></i></span>
           Sensor Data Report
         </div>
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span class="card-sub"><?= htmlspecialchars($label) ?> · <?= count($data) ?> day<?= count($data)!=1?'s':'' ?> of data</span>
-          <a href="print_report.php?date_from=<?= urlencode($date_from) ?>&date_to=<?= urlencode($date_to) ?>" target="_blank" class="csv-btn" style="background:var(--green);color:#fff;border-color:var(--green);">
-            <i class="fas fa-print"></i> Print Report
-          </a>
+<div style="display:flex;align-items:center;gap:10px;">
+          <span class="card-sub"><?php echo htmlspecialchars($label); ?> · <?php echo count($data); ?> day<?php echo (count($data) != 1 ? 's' : ''); ?> of data</span>
         </div>
       </div>
 
