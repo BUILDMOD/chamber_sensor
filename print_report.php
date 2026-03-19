@@ -1,5 +1,5 @@
 <?php
-session_start();
+@session_start();
 include 'includes/db_connect.php';
 include 'includes/auth_check.php';
 
@@ -26,20 +26,20 @@ $r = $conn->query("SELECT DATE(timestamp) as day,
     GROUP BY DATE(timestamp) ORDER BY day ASC");
 if ($r) while ($row = $r->fetch_assoc()) $sensor_rows[] = $row;
 
-// ── 2. DEVICE ACTIVITY LOG ──
+// ── 2. DEVICE ACTIVITY LOG (limit 50 most recent) ──
 $device_rows = [];
 $r = $conn->query("SELECT device, action, trigger_type, logged_at
     FROM device_logs
     WHERE DATE(logged_at) BETWEEN '$df' AND '$dt'
-    ORDER BY logged_at DESC LIMIT 200");
+    ORDER BY logged_at DESC LIMIT 50");
 if ($r) while ($row = $r->fetch_assoc()) $device_rows[] = $row;
 
-// ── 3. ALERT HISTORY ──
+// ── 3. ALERT HISTORY (limit 50 most recent) ──
 $alert_rows = [];
 $r = $conn->query("SELECT alert_type, severity, message, resolved, logged_at
     FROM alert_logs
     WHERE DATE(logged_at) BETWEEN '$df' AND '$dt'
-    ORDER BY logged_at DESC LIMIT 200");
+    ORDER BY logged_at DESC LIMIT 50");
 if ($r) while ($row = $r->fetch_assoc()) $alert_rows[] = $row;
 
 // ── 4. MUSHROOM HARVEST RECORDS ──
@@ -54,16 +54,16 @@ $total_harvest = array_sum(array_column(
     'mushroom_count'
 ));
 
-// ── 5. CAMERA CAPTURES SUMMARY ──
+// ── 5. CAMERA CAPTURES SUMMARY (table: image_analysis) ──
 $camera_rows = [];
-$r = $conn->query("SELECT DATE(captured_at) as day,
+$r = $conn->query("SELECT DATE(analyzed_at) as day,
     COUNT(*) as total_captures,
     SUM(CASE WHEN harvest_status='Ready for Harvest' THEN 1 ELSE 0 END) as ready,
     SUM(CASE WHEN harvest_status='Overripe' THEN 1 ELSE 0 END) as overripe,
     ROUND(AVG(diameter_cm),1) as avg_diameter
-    FROM camera_captures
-    WHERE DATE(captured_at) BETWEEN '$df' AND '$dt'
-    GROUP BY DATE(captured_at) ORDER BY day ASC");
+    FROM image_analysis
+    WHERE DATE(analyzed_at) BETWEEN '$df' AND '$dt'
+    GROUP BY DATE(analyzed_at) ORDER BY day ASC");
 if ($r) while ($row = $r->fetch_assoc()) $camera_rows[] = $row;
 ?>
 <!DOCTYPE html>
@@ -119,12 +119,13 @@ if ($r) while ($row = $r->fetch_assoc()) $camera_rows[] = $row;
   }
 
   /* Sections */
-  .section { margin-bottom: 32px; page-break-inside: avoid; }
+  .section { margin-bottom: 32px; }
   .section-title {
     font-size: 13px; font-weight: 800; color: #1a2e1a;
     padding: 7px 12px; background: #e8f5e8;
     border-left: 4px solid #2d7a3a; margin-bottom: 10px;
     display: flex; align-items: center; gap: 8px;
+    page-break-after: avoid;
   }
   .section-title .ico { font-size: 14px; }
 
@@ -163,7 +164,7 @@ if ($r) while ($row = $r->fetch_assoc()) $camera_rows[] = $row;
   .badge-overripe { background: #fff3e0; color: #d97706; }
 
   /* Summary stats row */
-  .stats-row { display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .stats-row { display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; page-break-inside: avoid; }
   .stat-box {
     flex: 1; min-width: 120px; padding: 10px 14px;
     background: #f0f7f0; border-radius: 8px; border: 1px solid #d0e8d0;
@@ -177,13 +178,64 @@ if ($r) while ($row = $r->fetch_assoc()) $camera_rows[] = $row;
     text-align: center; font-size: 10px; color: #999;
   }
 
+  /* limit note */
+  .limit-note { font-size: 10px; color: #999; font-style: italic; margin-bottom: 6px; }
+
+  /* ── Mobile Responsive ── */
+  @media (max-width: 768px) {
+    .screen-only {
+      padding: 8px 12px;
+      flex-direction: column;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .screen-only .ctrl-title { font-size: 13px; }
+    .ctrl-right { flex-direction: column; gap: 8px; }
+    .ctrl-form { flex-wrap: wrap; gap: 6px; }
+    .ctrl-form label { font-size: 10px; }
+    .ctrl-form input[type=date] { font-size: 11px; flex: 1; min-width: 130px; }
+    .btn-print { padding: 7px 14px; font-size: 11px; justify-content: center; }
+    .btn-back { text-align: center; }
+
+    .report-wrap { padding: 200px 16px 24px; }
+    .report-logo-row { flex-direction: column; gap: 12px; }
+    .report-system-name { font-size: 15px; }
+    .report-meta { text-align: left; }
+    .report-period { font-size: 11px; }
+
+    .stats-row { flex-direction: column; gap: 8px; }
+    .stat-box { min-width: unset; }
+    .stat-box .stat-val { font-size: 18px; }
+
+    .section-title { font-size: 12px; }
+
+    table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; white-space: nowrap; }
+    th, td { padding: 6px 8px; font-size: 10px; }
+  }
+
+  @media (max-width: 480px) {
+    .report-wrap { padding: 220px 12px 20px; }
+    .report-system-name { font-size: 14px; }
+    .report-system-sub { font-size: 10px; }
+    .stat-box .stat-val { font-size: 16px; }
+    th, td { padding: 5px 6px; font-size: 10px; }
+  }
+
   /* ── Print styles ── */
   @media print {
     .screen-only { display: none !important; }
     .report-wrap { padding: 24px; }
-    .section { page-break-inside: avoid; }
+    .section { page-break-inside: auto; }
+    .section-title { page-break-after: avoid; }
+    .stats-row { page-break-inside: avoid; }
     body { font-size: 11px; }
     @page { margin: 1.5cm; size: A4; }
+    th { background: #2d7a3a !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    tr:nth-child(even) td { background: #f9fdf9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .badge { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .stat-box { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .section-title { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .report-period { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 </style>
 </head>
@@ -198,14 +250,10 @@ if ($r) while ($row = $r->fetch_assoc()) $camera_rows[] = $row;
       <input type="date" name="date_from" value="<?= htmlspecialchars($date_from) ?>">
       <label>To</label>
       <input type="date" name="date_to" value="<?= htmlspecialchars($date_to) ?>">
-      <button type="submit" class="btn-print" style="background:#3a5a3a;">
-        <i class="fas fa-filter"></i> Filter
-      </button>
+      <button type="submit" class="btn-print" style="background:#3a5a3a;">Filter</button>
     </form>
-    <button class="btn-print" onclick="window.print()">
-      🖨️ Print / Save PDF
-    </button>
-    <button class="btn-back" onclick="window.close(); if(!window.closed) history.back();">← Back</button>
+    <button class="btn-print" onclick="window.print()">🖨️ Print / Save PDF</button>
+    <a class="btn-back" onclick="window.close(); if(!window.closed) history.back();" href="#">← Back</a>
   </div>
 </div>
 
@@ -217,87 +265,70 @@ if ($r) while ($row = $r->fetch_assoc()) $camera_rows[] = $row;
     <div class="report-logo-row">
       <div>
         <div class="report-system-name">🍄 MushroomOS</div>
-        <div class="report-system-sub">J WHO? Mushroom Incubation — Cultivation Monitoring & Control System</div>
+        <div class="report-system-sub">J WHO? Mushroom Incubation — Cultivation Monitoring &amp; Control System</div>
         <div class="report-period">📅 Report Period: <?= $label_from ?> — <?= $label_to ?></div>
       </div>
       <div class="report-meta">
-        <div>Generated by: <strong><?= htmlspecialchars($_SESSION['fullname']) ?></strong></div>
-        <div>Role: <strong><?= ucfirst($_SESSION['role']) ?></strong></div>
+        <div>Generated by: <strong><?= htmlspecialchars($_SESSION['fullname'] ?? 'User') ?></strong></div>
+        <div>Role: <strong><?= ucfirst($_SESSION['role'] ?? 'Staff') ?></strong></div>
         <div>Date: <strong><?= $generated ?></strong></div>
       </div>
     </div>
   </div>
 
-  <!-- ══════════ 1. SENSOR DATA ══════════ -->
+  <!-- 1. SENSOR DATA -->
   <div class="section">
     <div class="section-title"><span class="ico">🌡️</span> Sensor Data Summary — Temperature &amp; Humidity</div>
-
-    <?php if (!empty($sensor_rows)): ?>
+    <?php if (!empty($sensor_rows)):
+      $all_temps = array_column($sensor_rows, 'avg_temp');
+      $all_hums  = array_column($sensor_rows, 'avg_hum');
+      $overall_temp = round(array_sum($all_temps) / count($all_temps), 1);
+      $overall_hum  = round(array_sum($all_hums)  / count($all_hums),  1);
+      $total_reads  = array_sum(array_column($sensor_rows, 'readings'));
+    ?>
     <div class="stats-row">
-      <?php
-        $all_temps = array_column($sensor_rows, 'avg_temp');
-        $all_hums  = array_column($sensor_rows, 'avg_hum');
-        $overall_temp = round(array_sum($all_temps) / count($all_temps), 1);
-        $overall_hum  = round(array_sum($all_hums)  / count($all_hums),  1);
-        $total_reads  = array_sum(array_column($sensor_rows, 'readings'));
-      ?>
       <div class="stat-box"><div class="stat-val"><?= $overall_temp ?>°C</div><div class="stat-lbl">Avg Temperature</div></div>
       <div class="stat-box"><div class="stat-val"><?= $overall_hum ?>%</div><div class="stat-lbl">Avg Humidity</div></div>
       <div class="stat-box"><div class="stat-val"><?= count($sensor_rows) ?></div><div class="stat-lbl">Days with Data</div></div>
       <div class="stat-box"><div class="stat-val"><?= number_format($total_reads) ?></div><div class="stat-lbl">Total Readings</div></div>
     </div>
     <table>
-      <tr>
-        <th>Date</th>
-        <th>Avg Temp</th><th>Min Temp</th><th>Max Temp</th>
-        <th>Avg Humidity</th><th>Min Hum</th><th>Max Hum</th>
-        <th>Readings</th>
-      </tr>
+      <tr><th>Date</th><th>Avg Temp</th><th>Min Temp</th><th>Max Temp</th><th>Avg Humidity</th><th>Min Hum</th><th>Max Hum</th><th>Readings</th></tr>
       <?php foreach ($sensor_rows as $row): ?>
       <tr>
         <td><?= date('M j, Y', strtotime($row['day'])) ?></td>
-        <td><?= $row['avg_temp'] ?>°C</td>
-        <td><?= $row['min_temp'] ?>°C</td>
-        <td><?= $row['max_temp'] ?>°C</td>
-        <td><?= $row['avg_hum'] ?>%</td>
-        <td><?= $row['min_hum'] ?>%</td>
-        <td><?= $row['max_hum'] ?>%</td>
+        <td><?= $row['avg_temp'] ?>°C</td><td><?= $row['min_temp'] ?>°C</td><td><?= $row['max_temp'] ?>°C</td>
+        <td><?= $row['avg_hum'] ?>%</td><td><?= $row['min_hum'] ?>%</td><td><?= $row['max_hum'] ?>%</td>
         <td><?= number_format($row['readings']) ?></td>
       </tr>
       <?php endforeach; ?>
     </table>
-    <?php else: ?>
-    <p class="no-data">No sensor data found for the selected period.</p>
-    <?php endif; ?>
+    <?php else: ?><p class="no-data">No sensor data found for the selected period.</p><?php endif; ?>
   </div>
 
-  <!-- ══════════ 2. DEVICE ACTIVITY LOG ══════════ -->
+  <!-- 2. DEVICE ACTIVITY LOG -->
   <div class="section">
     <div class="section-title"><span class="ico">⚙️</span> Device Activity Log</div>
     <?php if (!empty($device_rows)): ?>
+    <p class="limit-note">Showing latest 50 entries. Filter by date to narrow results.</p>
     <table>
-      <tr>
-        <th>Date &amp; Time</th><th>Device</th><th>Action</th><th>Trigger</th>
-      </tr>
+      <tr><th>Date &amp; Time</th><th>Device</th><th>Action</th><th>Trigger</th></tr>
       <?php foreach ($device_rows as $row):
-        $trig = $row['trigger_type'];
-        $trigClass = "badge-$trig";
+        $trigClass = "badge-" . $row['trigger_type'];
         $actClass  = $row['action'] === 'ON' ? 'badge-on' : 'badge-off';
       ?>
       <tr>
         <td><?= date('M j, Y h:i A', strtotime($row['logged_at'])) ?></td>
         <td><strong><?= ucfirst($row['device']) ?></strong></td>
         <td><span class="badge <?= $actClass ?>"><?= $row['action'] ?></span></td>
-        <td><span class="badge <?= $trigClass ?>"><?= ucfirst($trig) ?></span></td>
+        <td><span class="badge <?= $trigClass ?>"><?= ucfirst($row['trigger_type']) ?></span></td>
       </tr>
       <?php endforeach; ?>
     </table>
-    <?php else: ?>
-    <p class="no-data">No device activity found for the selected period.</p>
-    <?php endif; ?>
+    <?php else: ?><p class="no-data">No device activity found for the selected period.</p><?php endif; ?>
   </div>
 
-  <!-- ══════════ 3. ALERT HISTORY ══════════ -->
+  <!-- 3. ALERT HISTORY -->
   <div class="section">
     <div class="section-title"><span class="ico">🔔</span> Alert History</div>
     <?php if (!empty($alert_rows)):
@@ -305,10 +336,11 @@ if ($r) while ($row = $r->fetch_assoc()) $camera_rows[] = $row;
       $warnCount = count(array_filter($alert_rows, fn($r) => $r['severity'] === 'warning'));
     ?>
     <div class="stats-row">
-      <div class="stat-box"><div class="stat-val"><?= count($alert_rows) ?></div><div class="stat-lbl">Total Alerts</div></div>
+      <div class="stat-box"><div class="stat-val"><?= count($alert_rows) ?></div><div class="stat-lbl">Shown (max 50)</div></div>
       <div class="stat-box"><div class="stat-val" style="color:#dc2626"><?= $critCount ?></div><div class="stat-lbl">Critical</div></div>
       <div class="stat-box"><div class="stat-val" style="color:#d97706"><?= $warnCount ?></div><div class="stat-lbl">Warnings</div></div>
     </div>
+    <p class="limit-note">Showing latest 50 entries. Filter by date to narrow results.</p>
     <table>
       <tr><th>Date &amp; Time</th><th>Type</th><th>Severity</th><th>Message</th><th>Status</th></tr>
       <?php foreach ($alert_rows as $row): ?>
@@ -321,12 +353,10 @@ if ($r) while ($row = $r->fetch_assoc()) $camera_rows[] = $row;
       </tr>
       <?php endforeach; ?>
     </table>
-    <?php else: ?>
-    <p class="no-data">No alerts found for the selected period.</p>
-    <?php endif; ?>
+    <?php else: ?><p class="no-data">No alerts found for the selected period.</p><?php endif; ?>
   </div>
 
-  <!-- ══════════ 4. MUSHROOM HARVEST RECORDS ══════════ -->
+  <!-- 4. MUSHROOM HARVEST RECORDS -->
   <div class="section">
     <div class="section-title"><span class="ico">🍄</span> Mushroom Growth Records</div>
     <?php if (!empty($harvest_rows)): ?>
@@ -337,29 +367,23 @@ if ($r) while ($row = $r->fetch_assoc()) $camera_rows[] = $row;
     <table>
       <tr><th>Date</th><th>Count</th><th>Growth Stage</th><th>Notes</th></tr>
       <?php foreach ($harvest_rows as $row):
-        $stage = $row['growth_stage'];
-        $stageClass = match($stage) {
-          'Spawn Run' => 'badge-spawn',
-          'Pinning'   => 'badge-pin',
-          'Fruiting'  => 'badge-fruit',
-          'Harvest'   => 'badge-harvest',
-          default     => ''
+        $stageClass = match($row['growth_stage']) {
+          'Spawn Run' => 'badge-spawn', 'Pinning' => 'badge-pin',
+          'Fruiting' => 'badge-fruit', 'Harvest' => 'badge-harvest', default => ''
         };
       ?>
       <tr>
         <td><?= date('M j, Y', strtotime($row['record_date'])) ?></td>
         <td><strong><?= $row['mushroom_count'] ?> pcs</strong></td>
-        <td><span class="badge <?= $stageClass ?>"><?= $stage ?></span></td>
+        <td><span class="badge <?= $stageClass ?>"><?= $row['growth_stage'] ?></span></td>
         <td><?= htmlspecialchars($row['notes'] ?? '—') ?></td>
       </tr>
       <?php endforeach; ?>
     </table>
-    <?php else: ?>
-    <p class="no-data">No mushroom records found for the selected period.</p>
-    <?php endif; ?>
+    <?php else: ?><p class="no-data">No mushroom records found for the selected period.</p><?php endif; ?>
   </div>
 
-  <!-- ══════════ 5. CAMERA CAPTURES SUMMARY ══════════ -->
+  <!-- 5. CAMERA CAPTURES SUMMARY -->
   <div class="section">
     <div class="section-title"><span class="ico">📷</span> Camera Captures Summary</div>
     <?php if (!empty($camera_rows)):
@@ -384,9 +408,7 @@ if ($r) while ($row = $r->fetch_assoc()) $camera_rows[] = $row;
       </tr>
       <?php endforeach; ?>
     </table>
-    <?php else: ?>
-    <p class="no-data">No camera captures found for the selected period.</p>
-    <?php endif; ?>
+    <?php else: ?><p class="no-data">No camera captures found for the selected period.</p><?php endif; ?>
   </div>
 
   <!-- Footer -->
@@ -397,7 +419,6 @@ if ($r) while ($row = $r->fetch_assoc()) $camera_rows[] = $row;
   </div>
 
 </div>
-
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </body>
 </html>

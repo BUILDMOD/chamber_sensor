@@ -134,27 +134,7 @@ function navUrl($view, $year, $month, $day) {
   <title>Reports</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-  <style>
-.print-btn {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 12px; border-radius: 20px;
-      background: var(--green); color: #fff; border: 1px solid var(--green);
-      font-size: 12px; font-weight: 600; text-decoration: none; box-shadow: var(--shadow);
-      transition: all .15s; white-space: nowrap;
-    }
-    .print-btn:hover { 
-      background: #14804a; 
-      box-shadow: 0 2px 8px rgba(26,158,92,.3); 
-    }
-    @media (max-width: 768px) {
-      .print-btn { 
-        padding: 4px 10px; 
-        font-size: 11px; 
-        gap: 4px;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
@@ -305,6 +285,8 @@ function navUrl($view, $year, $month, $day) {
     .summary-row .s-val{font-size:16px;font-weight:700;font-family:'DM Mono',monospace;display:flex;align-items:center;gap:5px;}
     .summary-row .s-trend{font-size:11px;font-weight:600;margin-top:2px;}
 
+    .print-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;background:var(--green);color:#fff;border:1px solid var(--green);font-size:12px;font-weight:600;text-decoration:none;transition:all .15s;white-space:nowrap;}
+    .print-btn:hover{background:#14804a;border-color:#14804a;}
     .csv-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:7px;border:1px solid var(--border);background:var(--surface);font-size:12px;font-weight:600;color:var(--text);cursor:pointer;text-decoration:none;transition:all .15s;}
     .csv-btn:hover{background:var(--green);color:#fff;border-color:var(--green);}
     .csv-btn i{font-size:11px;}
@@ -521,9 +503,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
 <header class="topbar">
   <span class="topbar-title">Reports</span>
-<div class="topbar-right">
-    <a href="print_report.php?date_from=<?php echo urlencode($date_from); ?>&date_to=<?php echo urlencode($date_to); ?>" target="_blank" class="print-btn" title="Print Report">
-      <i class="fas fa-print" style="margin-right:4px;"></i> Print Report
+  <div class="topbar-right">
+    <a href="print_report.php?date_from=<?= urlencode($date_from) ?>&date_to=<?= urlencode($date_to) ?>" target="_blank" class="print-btn">
+      <i class="fas fa-print"></i> Print Report
     </a>
     <span class="topbar-time" id="phTime" data-server-ts="<?= $server_ts_ms ?>"><?= htmlspecialchars($server_time_formatted) ?></span>
   </div>
@@ -756,9 +738,7 @@ window.addEventListener('DOMContentLoaded', function() {
           <span class="icon icon-blue"><i class="fas fa-table"></i></span>
           Sensor Data Report
         </div>
-<div style="display:flex;align-items:center;gap:10px;">
-          <span class="card-sub"><?php echo htmlspecialchars($label); ?> · <?php echo count($data); ?> day<?php echo (count($data) != 1 ? 's' : ''); ?> of data</span>
-        </div>
+        <span class="card-sub"><?= htmlspecialchars($label) ?> · <?= count($data) ?> day<?= count($data)!=1?'s':'' ?> of data</span>
       </div>
 
       <?php if (count($data)): ?>

@@ -21,6 +21,13 @@ $r_ci = $conn->query("SELECT setting_value FROM system_settings WHERE setting_ke
 if ($r_ci && $row_ci = $r_ci->fetch_assoc()) {
     $camera_interval_ms = intval($row_ci['setting_value']) * 1000;
 }
+
+// Load ESP32-CAM IP from system_settings
+$esp32cam_ip = '';
+$r_ip = $conn->query("SELECT setting_value FROM system_settings WHERE setting_key='esp32cam_ip'");
+if ($r_ip && $row_ip = $r_ip->fetch_assoc()) {
+    $esp32cam_ip = $row_ip['setting_value'];
+}
 $server_ts_ms = round(microtime(true) * 1000);
 $server_time_formatted = date('M j, Y — h:i:s A');
 
@@ -112,6 +119,8 @@ $isOwner = $sessionRole === 'owner';
 
     /* GRID */
     .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px;padding:24px 28px;max-width:1280px;}
+    .col-6.card{display:flex;flex-direction:column;}
+    .col-6.card .card-body{flex:1;}
     .col-3{grid-column:span 3;} .col-4{grid-column:span 4;} .col-5{grid-column:span 5;}
     .col-6{grid-column:span 6;} .col-7{grid-column:span 7;} .col-12{grid-column:span 12;}
 
@@ -222,8 +231,7 @@ $isOwner = $sessionRole === 'owner';
     .detail-clear-btn:hover{background:var(--blue-lt);}
 
     /* IMAGE GRID */
-    .img-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;max-height:380px;overflow-y:auto;scrollbar-width:none;}
-    .img-grid::-webkit-scrollbar{display:none;}
+    .img-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;}
     .img-card{background:var(--surface);border-radius:10px;overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow);transition:transform .15s,box-shadow .15s;}
     .img-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg);}
     .img-card img{width:100%;height:130px;object-fit:cover;display:block;}
@@ -382,6 +390,32 @@ $isOwner = $sessionRole === 'owner';
       .stat-label{font-size:10px;}
     }
 
+    @keyframes blink{0%,100%{opacity:1;}50%{opacity:.3;}}
+
+    /* LIVE CAM MODAL */
+    .live-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:300;opacity:0;visibility:hidden;transition:opacity .2s,visibility .2s;backdrop-filter:blur(4px);}
+    .live-modal-backdrop.show{opacity:1;visibility:visible;}
+    .live-modal{background:#0d1117;border-radius:16px;width:90%;max-width:680px;box-shadow:0 8px 40px rgba(0,0,0,.5);overflow:hidden;position:relative;transform:scale(.96);transition:transform .2s;}
+    .live-modal-backdrop.show .live-modal{transform:scale(1);}
+    .live-modal-header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid rgba(255,255,255,.08);}
+    .live-modal-title{font-size:13px;font-weight:700;color:#fff;display:flex;align-items:center;gap:8px;}
+    .live-indicator{width:8px;height:8px;background:#ef4444;border-radius:50%;animation:blink 1s infinite;}
+    .live-modal-close{background:rgba(255,255,255,.1);border:none;color:#fff;width:28px;height:28px;border-radius:50%;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;}
+    .live-modal-close:hover{background:rgba(255,255,255,.2);}
+    .live-modal-body{padding:20px;display:flex;flex-direction:column;gap:14px;}
+    .live-stream-wrap{background:#000;border-radius:10px;overflow:hidden;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;position:relative;}
+    .live-stream-wrap img{width:100%;height:100%;object-fit:contain;}
+    .live-stream-placeholder{text-align:center;color:rgba(255,255,255,.4);padding:40px;}
+    .live-stream-placeholder i{font-size:40px;display:block;margin-bottom:10px;}
+    .live-stream-placeholder p{font-size:13px;}
+    .live-url-row{display:flex;gap:8px;align-items:center;}
+    .live-url-input{flex:1;padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.06);color:#fff;font-size:12px;font-family:'DM Mono',monospace;outline:none;}
+    .live-url-input::placeholder{color:rgba(255,255,255,.3);}
+    .live-url-input:focus{border-color:var(--green);}
+    .live-connect-btn{padding:8px 16px;border-radius:8px;background:var(--green);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
+    .live-connect-btn:hover{opacity:.88;}
+    .live-hint{font-size:11px;color:rgba(255,255,255,.35);text-align:center;}
+
     @media(max-width:480px){
       /* Single column stats on small phones */
       .stats-row{grid-template-columns:1fr!important;}
@@ -520,14 +554,14 @@ $isOwner = $sessionRole === 'owner';
     </div>
 
     <!-- Monthly Records -->
-    <div class="card col-6" style="min-height:520px;">
+    <div class="card col-6">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-green">🍄</span> Monthly Records</div>
         <div class="date-picker-wrap">
           <input type="date" id="recDatePicker" class="dash-datepicker" title="Pick a date to view records">
         </div>
       </div>
-      <div class="card-body" style="padding:14px 16px;">
+      <div class="card-body" style="padding:14px 16px;flex:1;">
 
         <!-- Monthly Summary Bar Chart -->
         <div id="monthlySummaryWrap" style="margin-bottom:16px;">
@@ -590,14 +624,15 @@ $isOwner = $sessionRole === 'owner';
     </div>
 
     <!-- Chamber Camera Analysis -->
-    <div class="card col-6" style="min-height:520px;">
+    <div class="card col-6">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-blue"><i class="fas fa-camera"></i></span> Chamber Camera Analysis</div>
         <div class="date-picker-wrap">
+          <button id="liveCamBtn" onclick="openLiveCam()" style="display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:20px;background:var(--red);color:#fff;border:none;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;"><span style="width:7px;height:7px;background:#fff;border-radius:50%;display:inline-block;animation:blink 1s infinite;"></span> Live</button>
           <input type="date" id="camDatePicker" class="dash-datepicker" title="Pick a date to view captures">
         </div>
       </div>
-      <div class="card-body" style="padding:14px 16px;">
+      <div class="card-body" style="padding:14px 16px;flex:1;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
           <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;" id="camDetailTitle">Latest captures</span>
           <div style="display:flex;align-items:center;gap:6px;">
@@ -615,6 +650,31 @@ $isOwner = $sessionRole === 'owner';
 
   </div><!-- end grid -->
 </main>
+
+<!-- LIVE CAM MODAL -->
+<div class="live-modal-backdrop" id="liveCamModal">
+  <div class="live-modal">
+    <div class="live-modal-header">
+      <div class="live-modal-title">
+        <span class="live-indicator"></span> Live Camera Feed
+      </div>
+      <button class="live-modal-close" onclick="closeLiveCam()">&times;</button>
+    </div>
+    <div class="live-modal-body">
+      <div class="live-stream-wrap" id="liveStreamWrap">
+        <div class="live-stream-placeholder" id="liveStreamPlaceholder">
+          <i class="fas fa-video-slash"></i>
+          <p>Enter the ESP32-CAM IP address below to connect</p>
+        </div>
+      </div>
+      <div class="live-url-row">
+        <input type="text" id="liveIpInput" class="live-url-input" placeholder="e.g. 192.168.1.50" />
+        <button class="live-connect-btn" onclick="connectLiveCam()"><i class="fas fa-plug"></i> Connect</button>
+      </div>
+      <div class="live-hint">Make sure you are on the same WiFi network as the ESP32-CAM</div>
+    </div>
+  </div>
+</div>
 
 <!-- MODALS -->
 <div class="modal-backdrop" id="statusInfoModal">
@@ -770,7 +830,7 @@ async function fetchDeviceStates(){
     const r=await fetch('get_device_status.php',{cache:'no-store'});
     if(!r.ok)throw 0;
     const j=await r.json();
-    ['mist','fan','heater','sprayer','exhaust'].forEach(d=>applyPill(d,j[d]));
+    ['mist','fan','heater','sprayer'].forEach(d=>applyPill(d,j[d]));
     const manual=j.manual_mode==1;
     // Only sync the switch from server if user isn't actively toggling it
     if(!modeSwitching){
@@ -871,7 +931,7 @@ function renderCamImages(images){
       <div class="img-info">
         <div class="img-size">⌀ ${img.diameter_cm??'—'} cm</div>
         <span class="status-pill ${cls}" style="font-size:11px;padding:2px 8px;">${label}</span>
-        <div class="img-ts">${img.analyzed_at||''}</div>
+        <div class="img-ts">${img.analyzed_at?(()=>{const d=new Date(img.analyzed_at.replace(' ','T')+'+08:00');return d.toLocaleString('en-PH',{timeZone:'Asia/Manila',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true});})():''}</div>
         <div class="img-conf">Confidence: ${img.confidence_score??'—'}%</div>
       </div>`;
     grid.appendChild(card);
@@ -1098,6 +1158,42 @@ function resetCamToLive(){
   if(el)el.textContent='Auto-refreshing…';
 }
 $$('camClearBtn').addEventListener('click',()=>{ resetCamToLive(); loadCameraImages(); });
+
+// Live Cam Modal
+const PHP_CAM_IP = '<?= htmlspecialchars($esp32cam_ip) ?>';
+function openLiveCam(){
+  $$('liveCamModal').classList.add('show');
+  // Use IP from DB first, fallback to localStorage
+  const ip = PHP_CAM_IP || localStorage.getItem('esp32cam_ip') || '';
+  if(ip){
+    $$('liveIpInput').value = ip;
+    connectLiveCam();
+  }
+}
+function closeLiveCam(){
+  $$('liveCamModal').classList.remove('show');
+  // Stop stream to save bandwidth
+  const wrap = $$('liveStreamWrap');
+  const img = wrap.querySelector('img');
+  if(img) img.src = '';
+}
+function connectLiveCam(){
+  const ip = $$('liveIpInput').value.trim();
+  if(!ip) return;
+  localStorage.setItem('esp32cam_ip', ip);
+  const wrap = $$('liveStreamWrap');
+  const streamUrl = `http://${ip}/stream`;
+  wrap.innerHTML = `<img src="${streamUrl}" alt="Live Stream" onerror="handleStreamError()" style="width:100%;height:100%;object-fit:contain;">`;
+}
+function handleStreamError(){
+  $$('liveStreamWrap').innerHTML = `
+    <div class="live-stream-placeholder">
+      <i class="fas fa-exclamation-triangle" style="color:#ef4444;"></i>
+      <p style="color:rgba(255,255,255,.6);">Could not connect to camera.<br>Check the IP address and WiFi connection.</p>
+    </div>`;
+}
+// Close modal on backdrop click
+$$('liveCamModal').addEventListener('click', function(e){ if(e.target===this) closeLiveCam(); });
 
 // Modals
 function bindModal(triggerIds,modalId){
