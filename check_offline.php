@@ -41,8 +41,14 @@ $conn->query("CREATE TABLE IF NOT EXISTS notification_settings (
 $nsr = $conn->query("SELECT setting_key, setting_value FROM notification_settings");
 if ($nsr) while ($r2 = $nsr->fetch_assoc()) $ns[$r2['setting_key']] = $r2['setting_value'];
 
-// ── 3. Check if offline notification is enabled ──
-if (($ns['notify_offline'] ?? '1') !== '1') {
+// ── 3. Read system_settings too (notify prefs saved there by settings.php) ──
+$ss = [];
+$ssr = $conn->query("SELECT setting_key, setting_value FROM system_settings");
+if ($ssr) while ($r3 = $ssr->fetch_assoc()) $ss[$r3['setting_key']] = $r3['setting_value'];
+
+// Check if offline notification is enabled (check both tables)
+$notify_offline = ($ss['notify_offline'] ?? $ns['notify_offline'] ?? '1');
+if ($notify_offline !== '1') {
     echo json_encode(['offline' => true, 'email_sent' => false, 'reason' => 'notify_offline disabled']);
     exit;
 }
@@ -75,7 +81,7 @@ if (empty($recipient)) {
 }
 
 // ── 5. Check throttle (cooldown) ──
-$cooldown_min = intval($ns['notify_cooldown_min'] ?? 60);
+$cooldown_min = intval($ss['notify_cooldown_min'] ?? $ns['notify_cooldown_min'] ?? 60);
 $throttle_key = 'offline_' . $recipient; // separate throttle key for offline alerts
 
 $conn->query("CREATE TABLE IF NOT EXISTS email_throttle (

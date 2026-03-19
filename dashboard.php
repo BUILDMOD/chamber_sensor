@@ -415,6 +415,20 @@ $isOwner = $sessionRole === 'owner';
     .live-connect-btn{padding:8px 16px;border-radius:8px;background:var(--green);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
     .live-connect-btn:hover{opacity:.88;}
     .live-hint{font-size:11px;color:rgba(255,255,255,.35);text-align:center;}
+    .cam-settings-panel{background:rgba(255,255,255,.05);border-radius:10px;padding:14px;border:1px solid rgba(255,255,255,.08);display:none;flex-direction:column;gap:10px;margin-top:2px;}
+    .cam-settings-panel.open{display:flex;}
+    .cam-settings-title{font-size:10px;font-weight:700;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:.5px;}
+    .cam-settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+    .cam-setting-group{display:flex;flex-direction:column;gap:3px;}
+    .cam-setting-group label{font-size:10px;color:rgba(255,255,255,.45);display:flex;align-items:center;justify-content:space-between;}
+    .cam-setting-group select{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#fff;font-size:11px;padding:4px 7px;width:100%;outline:none;}
+    .cam-setting-group input[type=range]{width:100%;padding:0;cursor:pointer;accent-color:var(--green);height:18px;}
+    .cam-val{font-size:10px;color:var(--green);font-weight:700;}
+    .cam-save-btn{padding:7px 16px;border-radius:7px;background:var(--green);color:#fff;border:none;font-size:12px;font-weight:700;cursor:pointer;width:100%;margin-top:2px;}
+    .cam-save-btn:hover{opacity:.88;}
+    .cam-save-status{font-size:11px;text-align:center;color:rgba(255,255,255,.4);min-height:16px;}
+    .settings-toggle-btn{background:rgba(255,255,255,.1);border:none;color:rgba(255,255,255,.6);padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer;display:flex;align-items:center;gap:5px;white-space:nowrap;}
+    .settings-toggle-btn:hover{background:rgba(255,255,255,.2);color:#fff;}
 
     @media(max-width:480px){
       /* Single column stats on small phones */
@@ -651,6 +665,103 @@ $isOwner = $sessionRole === 'owner';
   </div><!-- end grid -->
 </main>
 
+<!-- CAMERA SETTINGS MODAL -->
+<div class="modal-backdrop" id="camSettingsModal" style="z-index:400;">
+  <div class="modal" style="max-width:420px;">
+    <button class="modal-close" onclick="$$('camSettingsModal').classList.remove('show')">&times;</button>
+    <h3><i class="fas fa-camera" style="color:var(--blue);margin-right:8px;"></i>Camera Settings</h3>
+    <div style="display:flex;flex-direction:column;gap:14px;margin-top:4px;">
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="form-group" style="display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Flip Vertical</label>
+          <select id="cs_vflip" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);outline:none;">
+            <option value="0">Normal</option>
+            <option value="1">Flipped</option>
+          </select>
+        </div>
+        <div class="form-group" style="display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Mirror Horizontal</label>
+          <select id="cs_hmirror" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);outline:none;">
+            <option value="0">Normal</option>
+            <option value="1">Mirrored</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Brightness</label>
+          <span id="cs_brightness_val" style="font-size:12px;font-weight:700;color:var(--green);font-family:'DM Mono',monospace;">1</span>
+        </div>
+        <input type="range" id="cs_brightness" min="-2" max="2" step="1" value="1" oninput="$$('cs_brightness_val').textContent=this.value" style="width:100%;accent-color:var(--green);cursor:pointer;">
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Contrast</label>
+          <span id="cs_contrast_val" style="font-size:12px;font-weight:700;color:var(--green);font-family:'DM Mono',monospace;">1</span>
+        </div>
+        <input type="range" id="cs_contrast" min="-2" max="2" step="1" value="1" oninput="$$('cs_contrast_val').textContent=this.value" style="width:100%;accent-color:var(--green);cursor:pointer;">
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Saturation</label>
+          <span id="cs_saturation_val" style="font-size:12px;font-weight:700;color:var(--green);font-family:'DM Mono',monospace;">0</span>
+        </div>
+        <input type="range" id="cs_saturation" min="-2" max="2" step="1" value="0" oninput="$$('cs_saturation_val').textContent=this.value" style="width:100%;accent-color:var(--green);cursor:pointer;">
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">White Balance</label>
+          <select id="cs_wb_mode" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);outline:none;">
+            <option value="0">Auto</option>
+            <option value="1">Sunny</option>
+            <option value="2">Cloudy</option>
+            <option value="3">Office</option>
+            <option value="4">Home</option>
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Flash LED</label>
+          <select id="cs_flash" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);outline:none;">
+            <option value="1">ON during capture</option>
+            <option value="0">OFF</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">Resolution</label>
+          <select id="cs_resolution" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);outline:none;">
+            <option value="QQVGA">QQVGA (160x120)</option>
+            <option value="QVGA">QVGA (320x240)</option>
+            <option value="VGA" selected>VGA (640x480)</option>
+            <option value="SVGA">SVGA (800x600)</option>
+            <option value="XGA">XGA (1024x768)</option>
+            <option value="HD">HD (1280x720)</option>
+            <option value="SXGA">SXGA (1280x1024)</option>
+            <option value="UXGA">UXGA (1600x1200)</option>
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;">JPEG Quality <span style="color:var(--muted);font-weight:400;">(0=best)</span></label>
+          <input type="number" id="cs_quality" min="0" max="63" value="12" style="padding:7px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);outline:none;">
+        </div>
+      </div>
+
+      <button onclick="saveCamSettings()" style="padding:9px 16px;border-radius:7px;background:var(--green);color:#fff;border:none;font-size:13px;font-weight:700;cursor:pointer;width:100%;">
+        <i class="fas fa-floppy-disk"></i> Save Settings
+      </button>
+      <div id="camSaveStatus" style="font-size:12px;text-align:center;color:var(--muted);min-height:16px;"></div>
+      <p style="font-size:11px;color:var(--muted);text-align:center;">ESP32-CAM will apply settings within 30 seconds.</p>
+    </div>
+  </div>
+</div>
+
 <!-- LIVE CAM MODAL -->
 <div class="live-modal-backdrop" id="liveCamModal">
   <div class="live-modal">
@@ -658,7 +769,12 @@ $isOwner = $sessionRole === 'owner';
       <div class="live-modal-title">
         <span class="live-indicator"></span> Live Camera Feed
       </div>
-      <button class="live-modal-close" onclick="closeLiveCam()">&times;</button>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button class="settings-toggle-btn" onclick="openCamSettingsModal()" title="Camera Settings">
+          <i class="fas fa-gear"></i>
+        </button>
+        <button class="live-modal-close" onclick="closeLiveCam()">&times;</button>
+      </div>
     </div>
     <div class="live-modal-body">
       <div class="live-stream-wrap" id="liveStreamWrap">
@@ -762,6 +878,7 @@ function gaugeStatusClass(val,low,high){
 function setGaugeStatus(el,cls,text){el.className='gauge-status '+cls;el.textContent=text;}
 
 // Live data
+let offlineEmailSent = false; // throttle — only call once per offline session
 function goOffline(){
   ['tempValue','humValue'].forEach(id=>{const e=$$(id);if(e)e.textContent='—';});
   $$('time').textContent='Offline';
@@ -769,7 +886,14 @@ function goOffline(){
   setGaugeStatus($$('humNote'),'gs-offline','Offline');
   [tempGauge,humGauge].forEach(g=>{g.data.datasets[0].data=[0,100];g.data.datasets[0].backgroundColor=['#e5e7eb','#f0f2f5'];g.update();});
   renderAlerts(['Device offline']);
+  // Trigger offline email check — called once per offline session
+  if(!offlineEmailSent){
+    offlineEmailSent = true;
+    fetch('check_offline.php',{cache:'no-store'}).catch(()=>{});
+  }
 }
+// Reset flag when device comes back online
+function resetOfflineFlag(){ offlineEmailSent = false; }
 
 async function loadLive(){
   try{
@@ -787,6 +911,7 @@ async function loadLive(){
 
     const t=Math.max(1,Math.min(50,toNum(d.temperature)));
     const h=Math.max(1,Math.min(100,toNum(d.humidity)));
+    resetOfflineFlag(); // device back online — allow next offline email
     $$('tempValue').textContent=t.toFixed(1)+'°';
     $$('humValue').textContent=h.toFixed(1)+'%';
     $$('time').textContent=d.timestamp||'—';
@@ -1192,6 +1317,63 @@ function handleStreamError(){
       <p style="color:rgba(255,255,255,.6);">Could not connect to camera.<br>Check the IP address and WiFi connection.</p>
     </div>`;
 }
+
+function openCamSettingsModal(){
+  $$('camSettingsModal').classList.add('show');
+  loadCamSettingsIntoPanel();
+}
+
+async function loadCamSettingsIntoPanel(){
+  try {
+    const r = await fetch('get_cam_settings.php', {cache:'no-store'});
+    const d = await r.json();
+    if(!d.success) return;
+    $$('cs_brightness').value = d.brightness ?? 1;
+    $$('cs_brightness_val').textContent = d.brightness ?? 1;
+    $$('cs_contrast').value = d.contrast ?? 1;
+    $$('cs_contrast_val').textContent = d.contrast ?? 1;
+    $$('cs_saturation').value = d.saturation ?? 0;
+    $$('cs_saturation_val').textContent = d.saturation ?? 0;
+    $$('cs_vflip').value = d.vflip ?? 0;
+    $$('cs_hmirror').value = d.hmirror ?? 0;
+    $$('cs_wb_mode').value = d.wb_mode ?? 0;
+    $$('cs_flash').value = d.flash ?? 1;
+    $$('cs_resolution').value = d.resolution ?? 'VGA';
+    $$('cs_quality').value = d.quality ?? 12;
+  } catch(_){}
+}
+
+async function saveCamSettings(){
+  const status = $$('camSaveStatus');
+  status.textContent = 'Saving…';
+  try {
+    const body = new URLSearchParams({
+      save_camera: '1',
+      cam_brightness:  $$('cs_brightness').value,
+      cam_contrast:    $$('cs_contrast').value,
+      cam_saturation:  $$('cs_saturation').value,
+      cam_vflip:       $$('cs_vflip').value,
+      cam_hmirror:     $$('cs_hmirror').value,
+      cam_wb_mode:     $$('cs_wb_mode').value,
+      cam_flash:       $$('cs_flash').value,
+      cam_resolution:  $$('cs_resolution').value,
+      cam_quality:     $$('cs_quality').value,
+    });
+    const r = await fetch('save_cam_settings.php', {method:'POST', body});
+    const d = await r.json();
+    if(d.success){
+      status.style.color = 'var(--green)';
+      status.textContent = '✓ Saved!';
+      setTimeout(()=>{ $$('camSettingsModal').classList.remove('show'); status.textContent=''; }, 1500);
+    } else {
+      status.style.color = '#ef4444';
+      status.textContent = '✗ Failed to save.';
+    }
+  } catch(_){
+    status.style.color = '#ef4444';
+    status.textContent = '✗ Error saving settings.';
+  }
+}
 // Close modal on backdrop click
 $$('liveCamModal').addEventListener('click', function(e){ if(e.target===this) closeLiveCam(); });
 
@@ -1202,6 +1384,8 @@ function bindModal(triggerIds,modalId){
   modal.querySelectorAll('.modal-close').forEach(b=>b.addEventListener('click',()=>modal.classList.remove('show')));
   modal.addEventListener('click',e=>{if(e.target===modal)modal.classList.remove('show');});
 }
+// Camera settings modal close on backdrop
+$$('camSettingsModal').addEventListener('click',e=>{if(e.target===$$('camSettingsModal'))$$('camSettingsModal').classList.remove('show');});
 bindModal(['statusInfoIcon'],'statusInfoModal');
 bindModal(['deviceInfoIcon'],'deviceInfoModal');
 bindModal(['alertInfoIcon'],'alertInfoModal');

@@ -686,75 +686,15 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
               <input type="number" name="camera_interval_sec" min="10" max="3600" value="<?= ss($ss,'camera_interval_sec','1800') ?>" <?= !$isOwner?'disabled':'' ?>>
               <span style="font-size:11px;color:var(--muted);">How often the camera uploads a photo (default: 1800 = 30 min)</span>
             </div>
-            <div class="form-group">
-              <label>Flash LED During Capture</label>
-              <label class="toggle-switch" style="margin-top:8px;">
-                <input type="checkbox" name="cam_flash" value="1" <?= (ss($ss,'cam_flash','1')==='1')?'checked':'' ?> <?= !$isOwner?'disabled':'' ?>>
-                <span class="toggle-slider"></span>
-              </label>
-              <span style="font-size:11px;color:var(--muted);">Turn on flash LED when taking a photo</span>
-            </div>
+
           </div>
 
-          <p class="section-title" style="margin-top:8px;">Image Quality</p>
-          <div class="form-grid-2">
-            <div class="form-group">
-              <label>Resolution</label>
-              <select name="cam_resolution" <?= !$isOwner?'disabled':'' ?>>
-                <?php
-                $resolutions = ['QQVGA'=>'QQVGA (160x120)','QVGA'=>'QVGA (320x240)','VGA'=>'VGA (640x480)','SVGA'=>'SVGA (800x600)','XGA'=>'XGA (1024x768)','HD'=>'HD (1280x720)','SXGA'=>'SXGA (1280x1024)','UXGA'=>'UXGA (1600x1200)'];
-                $cur_res = ss($ss,'cam_resolution','VGA');
-                foreach ($resolutions as $val=>$lbl):
-                ?>
-                <option value="<?= $val ?>" <?= $cur_res===$val?'selected':'' ?>><?= $lbl ?></option>
-                <?php endforeach; ?>
-              </select>
-              <span style="font-size:11px;color:var(--muted);">Higher = sharper but slower upload</span>
-            </div>
-            <div class="form-group">
-              <label>JPEG Quality (0=best, 63=worst)</label>
-              <input type="number" name="cam_quality" min="0" max="63" value="<?= ss($ss,'cam_quality','12') ?>" <?= !$isOwner?'disabled':'' ?>>
-              <span style="font-size:11px;color:var(--muted);">Lower = better quality, larger file (default: 12)</span>
-            </div>
-          </div>
-
-          <p class="section-title" style="margin-top:8px;">Image Adjustments</p>
-          <div class="form-grid-3">
-            <div class="form-group">
-              <label>Brightness (-2 to +2)</label>
-              <input type="number" name="cam_brightness" min="-2" max="2" value="<?= ss($ss,'cam_brightness','1') ?>" <?= !$isOwner?'disabled':'' ?>>
-            </div>
-            <div class="form-group">
-              <label>Contrast (-2 to +2)</label>
-              <input type="number" name="cam_contrast" min="-2" max="2" value="<?= ss($ss,'cam_contrast','1') ?>" <?= !$isOwner?'disabled':'' ?>>
-            </div>
-            <div class="form-group">
-              <label>Saturation (-2 to +2)</label>
-              <input type="number" name="cam_saturation" min="-2" max="2" value="<?= ss($ss,'cam_saturation','0') ?>" <?= !$isOwner?'disabled':'' ?>>
-            </div>
-            <div class="form-group">
-              <label>Sharpness (-2 to +2)</label>
-              <input type="number" name="cam_sharpness" min="-2" max="2" value="<?= ss($ss,'cam_sharpness','0') ?>" <?= !$isOwner?'disabled':'' ?>>
-            </div>
-            <div class="form-group">
-              <label>White Balance Mode</label>
-              <select name="cam_wb_mode" <?= !$isOwner?'disabled':'' ?>>
-                <?php
-                $wb_modes = ['0'=>'Auto','1'=>'Sunny','2'=>'Cloudy','3'=>'Office','4'=>'Home'];
-                $cur_wb = ss($ss,'cam_wb_mode','0');
-                foreach ($wb_modes as $val=>$lbl):
-                ?>
-                <option value="<?= $val ?>" <?= $cur_wb===$val?'selected':'' ?>><?= $lbl ?></option>
-                <?php endforeach; ?>
-              </select>
-            </div>
+          <div class="info-box" style="margin-top:8px;">
+            <i class="fas fa-circle-info"></i>
+            Image quality settings (brightness, contrast, flip, mirror, etc.) can be adjusted from the <strong>Live Camera</strong> button on the Dashboard.
           </div>
 
           <?php if ($isOwner): ?>
-          <div class="info-box" style="margin-top:8px;">
-            <i class="fas fa-circle-info"></i>
-            Settings are saved to the database. The ESP32-CAM will apply them automatically on its next poll (every 30 seconds).
-          </div>
           <div class="form-footer" style="margin-top:14px;">
             <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> <span class="btn-label">Save Camera Settings</span></button>
           </div>
