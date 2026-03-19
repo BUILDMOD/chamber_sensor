@@ -24,6 +24,8 @@ echo json_encode([
     'sharpness'        => intval($ss['cam_sharpness']  ?? 0),
     'wb_mode'          => intval($ss['cam_wb_mode']    ?? 0),
     'flash'            => intval($ss['cam_flash']      ?? 1),
+    'vflip'            => intval($ss['cam_vflip']      ?? 0),
+    'hmirror'          => intval($ss['cam_hmirror']    ?? 0),
 ]);
 
 $conn->close();

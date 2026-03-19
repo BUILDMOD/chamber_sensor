@@ -1,32 +1,18 @@
 <?php
 // auto_engine.php
-// ══════════════════════════════════════════════════════════════
-// Called every time the ESP32 sends sensor data.
-// Handles:
-//   1. Emergency shutoff   — overrides everything, even manual mode
-//   2. Fault detection     — device ON but not doing its job → force OFF + buzzer
-//   3. Auto mode rules     — sensor-based device control
-//   4. Scheduled tasks     — time-based device control
-// ══════════════════════════════════════════════════════════════
-
 date_default_timezone_set('Asia/Manila');
 
-// Fault timing — read from DB if available, else safe defaults
-// These can be added to alert_thresholds table as 'fault_no_response_min' and 'fault_max_on_min'
-// Fault timers loaded from DB inside runAutoEngine()
-// Defaults used as fallback
 define('FAULT_NO_RESPONSE_MINUTES_DEFAULT', 5);
 define('FAULT_MAX_ON_MINUTES_DEFAULT', 60);
 
 $DEVICE_SENSOR_EXPECTATION = [
     'mist'    => ['sensor' => 'humidity',    'direction' => 'rising'],
-    'sprayer' => ['sensor' => 'humidity',    'direction' => 'rising'],
+    // sprayer is schedule-based only — not sensor-based
     'heater'  => ['sensor' => 'temperature', 'direction' => 'rising'],
     'fan'     => ['sensor' => 'temperature', 'direction' => 'falling'],
 ];
 
 function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
-    // Load configurable timers from system_settings
     $ss_r = $conn->query("SELECT setting_key,setting_value FROM system_settings");
     $ss = [];
     if ($ss_r) while ($row_ss = $ss_r->fetch_assoc()) $ss[$row_ss['setting_key']] = $row_ss['setting_value'];
@@ -35,9 +21,7 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
 
     global $DEVICE_SENSOR_EXPECTATION;
 
-    // Ensure buzzer column exists
     $conn->query("ALTER TABLE device_status ADD COLUMN IF NOT EXISTS buzzer TINYINT(1) NOT NULL DEFAULT 0");
-
     $conn->query("INSERT IGNORE INTO device_status (id,manual_mode,mist,fan,heater,sprayer,exhaust,buzzer) VALUES (1,0,0,0,0,0,0,0)");
 
     $conn->query("CREATE TABLE IF NOT EXISTS device_logs (
@@ -67,7 +51,6 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
     $manualMode = (int)($row['manual_mode'] ?? 0);
     $buzzerOn   = false;
 
-    // ── Load thresholds from DB (never hardcoded) ──
     $conn->query("INSERT IGNORE INTO alert_thresholds (metric,min_value,max_value) VALUES
         ('temperature',22,28),('humidity',85,95),
         ('emergency_temp',15,35),('emergency_hum',0,98)");
@@ -81,10 +64,7 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
         if ($r2['metric']==='emergency_hum') { $thr['emerg_hum_high']=$r2['max_value']; }
     }
 
-    // ══════════════════════════════════════════════════════
-    // STEP 1 — EMERGENCY SHUTOFF (overrides manual mode)
-    // All values from DB — nothing hardcoded
-    // ══════════════════════════════════════════════════════
+    // STEP 1 — EMERGENCY SHUTOFF
     $emergencies = [];
     if ($temperature > $thr['emerg_temp_high'])
         $emergencies['heater']  = "Emergency: Temp {$temperature}°C critically high (>{$thr['emerg_temp_high']}°C) — Heater forced OFF";
@@ -94,6 +74,12 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
     }
     if ($temperature < $thr['emerg_temp_low'])
         $emergencies['fan']     = "Emergency: Temp {$temperature}°C critically low (<{$thr['emerg_temp_low']}°C) — Fan forced OFF";
+    // Turn ON exhaust during high temp emergency to help ventilate
+    if ($temperature > $thr['emerg_temp_high'] && (int)($row['exhaust'] ?? 0) === 0) {
+        $conn->query("UPDATE device_status SET exhaust=1 WHERE id=1");
+        _logDevice($conn, 'exhaust', 'ON', 'emergency', "Emergency: Temp {$temperature}°C critically high — Exhaust forced ON");
+        $row['exhaust'] = 1;
+    }
 
     foreach ($emergencies as $device => $reason) {
         if ((int)($row[$device] ?? 0) === 1) {
@@ -105,11 +91,7 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
         }
     }
 
-    // ══════════════════════════════════════════════════════
-    // STEP 2 — FAULT DETECTION (overrides manual mode too)
-    // A) Device ON too long (stuck_on)
-    // B) Device ON but sensor not responding (no_response)
-    // ══════════════════════════════════════════════════════
+    // STEP 2 — FAULT DETECTION
     foreach ($DEVICE_SENSOR_EXPECTATION as $device => $expect) {
         if ((int)($row[$device] ?? 0) !== 1) continue;
 
@@ -127,13 +109,11 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
         $faultType   = null;
         $faultReason = null;
 
-        // Fault A: stuck ON too long
         if ($onMinutes >= $FAULT_MAX_ON_MINUTES) {
             $faultType   = 'stuck_on';
             $faultReason = "Fault: {$device} ON for " . round($onMinutes) . " min (max " . $FAULT_MAX_ON_MINUTES . " min) — forced OFF";
         }
 
-        // Fault B: no sensor response after threshold time
         if (!$faultType && $onMinutes >= $FAULT_NO_RESPONSE_MINUTES) {
             $valAtOn = $conn->query(
                 "SELECT " . $expect['sensor'] . " FROM sensor_data
@@ -166,9 +146,7 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
         }
     }
 
-    // ══════════════════════════════════════════════════════
-    // STEP 3 — AUTO MODE RULES (only when not in manual mode)
-    // ══════════════════════════════════════════════════════
+    // STEP 3 — AUTO MODE RULES
     if (!$manualMode) {
         $rules = [];
         $r = $conn->query("SELECT * FROM automation_rules WHERE enabled=1 ORDER BY id");
@@ -181,8 +159,7 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
             $threshold = floatval($rule['threshold']);
             $sensorVal = $sensor === 'temperature' ? $temperature : $humidity;
             $current   = (int)($row[$device] ?? 0);
-            // Use rule threshold — set by user in Automation page
-        $condMet   = ($operator === 'below' && $sensorVal < $threshold)
+            $condMet   = ($operator === 'below' && $sensorVal < $threshold)
                       || ($operator === 'above' && $sensorVal > $threshold);
 
             if ($condMet && $current === 0) {
@@ -197,9 +174,24 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
         }
     }
 
-    // ══════════════════════════════════════════════════════
-    // STEP 4 — SCHEDULED TASKS (only when not in manual mode)
-    // ══════════════════════════════════════════════════════
+    // ── EXHAUST: humidity-based auto control ──
+    if (!$manualMode) {
+        $currentExhaust = (int)($row['exhaust'] ?? 0);
+        if ($humidity > $thr['hum_max'] && $currentExhaust === 0) {
+            $conn->query("UPDATE device_status SET exhaust=1 WHERE id=1");
+            _logDevice($conn, 'exhaust', 'ON', 'auto', "Auto: humidity {$humidity}% above max {$thr['hum_max']}% — ventilating");
+            $row['exhaust'] = 1;
+        } elseif ($humidity <= $thr['hum_max'] && $currentExhaust === 1) {
+            $lastEx = $conn->query("SELECT trigger_type FROM device_logs WHERE device='exhaust' AND action='ON' ORDER BY logged_at DESC LIMIT 1");
+            if ($lastEx && ($lr = $lastEx->fetch_assoc()) && $lr['trigger_type'] === 'auto') {
+                $conn->query("UPDATE device_status SET exhaust=0 WHERE id=1");
+                _logDevice($conn, 'exhaust', 'OFF', 'auto', "Auto: humidity {$humidity}% back within range");
+                $row['exhaust'] = 0;
+            }
+        }
+    }
+
+    // STEP 4 — SCHEDULED TASKS
     if (!$manualMode) {
         $now       = new DateTime($timestamp);
         $isWeekend = in_array(strtolower($now->format('l')), ['saturday','sunday']);
@@ -234,11 +226,7 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
         }
     }
 
-    // ══════════════════════════════════════════════════════
-    // STEP 5 — SET BUZZER FLAG for ESP32
-    // ESP32 reads this on its next poll via get_device_status.php
-    // Auto-clears each cycle unless a new fault fires
-    // ══════════════════════════════════════════════════════
+    // STEP 5 — SET BUZZER FLAG
     $conn->query("UPDATE device_status SET buzzer=" . ($buzzerOn ? 1 : 0) . " WHERE id=1");
 }
 
@@ -259,17 +247,19 @@ function _logAlert($conn, $type, $severity, $message, $value) {
     $stmt = $conn->prepare("INSERT INTO alert_logs (alert_type,severity,message,value) VALUES (?,?,?,?)");
     if ($stmt) { $stmt->bind_param("sssd",$type,$severity,$message,$value); $stmt->execute(); $stmt->close(); }
 
-    // Send email for device faults and system alerts (buzzer handles physical alert)
-    // Only if notify_emergency or notify_offline is enabled in settings
+    // Read settings from both tables
     $ns = []; $ss = [];
     $r = $conn->query("SELECT setting_key,setting_value FROM notification_settings");
     if ($r) while ($row=$r->fetch_assoc()) $ns[$row['setting_key']] = $row['setting_value'];
     $r2 = $conn->query("SELECT setting_key,setting_value FROM system_settings");
     if ($r2) while ($row=$r2->fetch_assoc()) $ss[$row['setting_key']] = $row['setting_value'];
 
+    // Check notify prefs from system_settings (where settings.php saves them)
     $should_email = false;
-    if ($type === 'device' && ($ss['notify_emergency'] ?? '1') === '1') $should_email = true;
-    if ($type === 'system' && ($ss['notify_offline']   ?? '1') === '1') $should_email = true;
+    if ($type === 'device'      && ($ss['notify_emergency'] ?? '1') === '1') $should_email = true;
+    if ($type === 'system'      && ($ss['notify_offline']   ?? '1') === '1') $should_email = true;
+    if ($type === 'temperature' && ($ss['notify_temp']      ?? '1') === '1') $should_email = true;
+    if ($type === 'humidity'    && ($ss['notify_hum']       ?? '1') === '1') $should_email = true;
 
     if ($should_email) {
         $cooldown_min = intval($ss['notify_cooldown_min'] ?? $ns['notify_cooldown_min'] ?? 30);
@@ -278,10 +268,11 @@ function _logAlert($conn, $type, $severity, $message, $value) {
         if ($owner && $row = $owner->fetch_assoc()) $recipient = $row['email'];
         if (!$recipient) return;
 
-        // Throttle check
+        // Per-type throttle key — prevents one alert type from blocking another
+        $throttle_key = $type . '_' . $recipient;
         $tq = $conn->prepare("SELECT last_sent FROM email_throttle WHERE email=?");
         if ($tq) {
-            $tq->bind_param("s",$recipient); $tq->execute();
+            $tq->bind_param("s",$throttle_key); $tq->execute();
             $tr = $tq->get_result();
             if ($tr->num_rows > 0) {
                 $last = strtotime($tr->fetch_assoc()['last_sent']);
@@ -292,7 +283,8 @@ function _logAlert($conn, $type, $severity, $message, $value) {
 
         if (file_exists(__DIR__.'/send_email.php')) {
             require_once __DIR__.'/send_email.php';
-            $icon = $type === 'device' ? '🔧' : '📡';
+            $icons = ['device'=>'🔧','system'=>'📡','temperature'=>'🌡️','humidity'=>'💧'];
+            $icon = $icons[$type] ?? '⚠️';
             $subj = "$icon MushroomOS " . ucfirst($type) . " Alert";
             $body = "<b>$icon " . ucfirst($severity) . " Alert</b><br><br>" . nl2br(htmlspecialchars($message)) .
                     "<br><br><small>Triggered: " . date('M j, Y h:i:s A') . "</small>";
@@ -300,7 +292,7 @@ function _logAlert($conn, $type, $severity, $message, $value) {
 
             $now = date('Y-m-d H:i:s');
             $us = $conn->prepare("INSERT INTO email_throttle (email,last_sent) VALUES (?,?) ON DUPLICATE KEY UPDATE last_sent=?");
-            if ($us) { $us->bind_param("sss",$recipient,$now,$now); $us->execute(); $us->close(); }
+            if ($us) { $us->bind_param("sss",$throttle_key,$now,$now); $us->execute(); $us->close(); }
         }
     }
 }
