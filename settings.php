@@ -43,6 +43,15 @@ $defaults = [
     'notify_offline'      => '1',
     'notify_emergency'    => '1',
     'notify_cooldown_min' => '30',
+    // Camera quality defaults
+    'cam_resolution'      => 'VGA',
+    'cam_quality'         => '12',
+    'cam_brightness'      => '1',
+    'cam_contrast'        => '1',
+    'cam_saturation'      => '0',
+    'cam_sharpness'       => '0',
+    'cam_wb_mode'         => '0',
+    'cam_flash'           => '1',
 ];
 foreach ($defaults as $k => $v) {
     $conn->query("INSERT IGNORE INTO system_settings (setting_key,setting_value) VALUES ('$k','$v')");
@@ -176,9 +185,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_auto_engine'])) 
 // ── Save Camera Settings ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_camera'])) {
     if (!$isOwner) { $errors[] = 'Access denied.'; } else {
-        $keys = ['camera_interval_sec'];
-        foreach ($keys as $k) {
-            $val = (string)intval($_POST[$k] ?? 60);
+        $int_keys = ['camera_interval_sec','cam_quality','cam_brightness','cam_contrast','cam_saturation','cam_sharpness','cam_wb_mode','cam_flash'];
+        $str_keys = ['cam_resolution'];
+        foreach ($int_keys as $k) {
+            $val = (string)intval($_POST[$k] ?? 0);
+            $s = $conn->prepare("INSERT INTO system_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
+            if ($s) { $s->bind_param("ss", $k, $val); $s->execute(); $s->close(); }
+        }
+        foreach ($str_keys as $k) {
+            $val = trim($_POST[$k] ?? '');
             $s = $conn->prepare("INSERT INTO system_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
             if ($s) { $s->bind_param("ss", $k, $val); $s->execute(); $s->close(); }
         }
@@ -658,19 +673,88 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
     <div class="card">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-blue"><i class="fas fa-camera"></i></span> Camera Settings</div>
+        <span style="font-size:11px;color:var(--muted);">Settings are applied to ESP32-CAM automatically on next poll</span>
       </div>
       <div class="card-body">
         <form method="POST">
           <input type="hidden" name="save_camera" value="1">
-          <p class="section-title">Configure chamber camera capture behavior</p>
+
+          <p class="section-title">Capture Behavior</p>
           <div class="form-grid-2">
             <div class="form-group">
               <label>Capture Interval (seconds)</label>
               <input type="number" name="camera_interval_sec" min="10" max="3600" value="<?= ss($ss,'camera_interval_sec','1800') ?>" <?= !$isOwner?'disabled':'' ?>>
-              <span style="font-size:11px;color:var(--muted);">How often the camera takes a new photo (default: 1800 = every 30 min)</span>
+              <span style="font-size:11px;color:var(--muted);">How often the camera uploads a photo (default: 1800 = 30 min)</span>
+            </div>
+            <div class="form-group">
+              <label>Flash LED During Capture</label>
+              <label class="toggle-switch" style="margin-top:8px;">
+                <input type="checkbox" name="cam_flash" value="1" <?= (ss($ss,'cam_flash','1')==='1')?'checked':'' ?> <?= !$isOwner?'disabled':'' ?>>
+                <span class="toggle-slider"></span>
+              </label>
+              <span style="font-size:11px;color:var(--muted);">Turn on flash LED when taking a photo</span>
             </div>
           </div>
+
+          <p class="section-title" style="margin-top:8px;">Image Quality</p>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label>Resolution</label>
+              <select name="cam_resolution" <?= !$isOwner?'disabled':'' ?>>
+                <?php
+                $resolutions = ['QQVGA'=>'QQVGA (160x120)','QVGA'=>'QVGA (320x240)','VGA'=>'VGA (640x480)','SVGA'=>'SVGA (800x600)','XGA'=>'XGA (1024x768)','HD'=>'HD (1280x720)','SXGA'=>'SXGA (1280x1024)','UXGA'=>'UXGA (1600x1200)'];
+                $cur_res = ss($ss,'cam_resolution','VGA');
+                foreach ($resolutions as $val=>$lbl):
+                ?>
+                <option value="<?= $val ?>" <?= $cur_res===$val?'selected':'' ?>><?= $lbl ?></option>
+                <?php endforeach; ?>
+              </select>
+              <span style="font-size:11px;color:var(--muted);">Higher = sharper but slower upload</span>
+            </div>
+            <div class="form-group">
+              <label>JPEG Quality (0=best, 63=worst)</label>
+              <input type="number" name="cam_quality" min="0" max="63" value="<?= ss($ss,'cam_quality','12') ?>" <?= !$isOwner?'disabled':'' ?>>
+              <span style="font-size:11px;color:var(--muted);">Lower = better quality, larger file (default: 12)</span>
+            </div>
+          </div>
+
+          <p class="section-title" style="margin-top:8px;">Image Adjustments</p>
+          <div class="form-grid-3">
+            <div class="form-group">
+              <label>Brightness (-2 to +2)</label>
+              <input type="number" name="cam_brightness" min="-2" max="2" value="<?= ss($ss,'cam_brightness','1') ?>" <?= !$isOwner?'disabled':'' ?>>
+            </div>
+            <div class="form-group">
+              <label>Contrast (-2 to +2)</label>
+              <input type="number" name="cam_contrast" min="-2" max="2" value="<?= ss($ss,'cam_contrast','1') ?>" <?= !$isOwner?'disabled':'' ?>>
+            </div>
+            <div class="form-group">
+              <label>Saturation (-2 to +2)</label>
+              <input type="number" name="cam_saturation" min="-2" max="2" value="<?= ss($ss,'cam_saturation','0') ?>" <?= !$isOwner?'disabled':'' ?>>
+            </div>
+            <div class="form-group">
+              <label>Sharpness (-2 to +2)</label>
+              <input type="number" name="cam_sharpness" min="-2" max="2" value="<?= ss($ss,'cam_sharpness','0') ?>" <?= !$isOwner?'disabled':'' ?>>
+            </div>
+            <div class="form-group">
+              <label>White Balance Mode</label>
+              <select name="cam_wb_mode" <?= !$isOwner?'disabled':'' ?>>
+                <?php
+                $wb_modes = ['0'=>'Auto','1'=>'Sunny','2'=>'Cloudy','3'=>'Office','4'=>'Home'];
+                $cur_wb = ss($ss,'cam_wb_mode','0');
+                foreach ($wb_modes as $val=>$lbl):
+                ?>
+                <option value="<?= $val ?>" <?= $cur_wb===$val?'selected':'' ?>><?= $lbl ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+          </div>
+
           <?php if ($isOwner): ?>
+          <div class="info-box" style="margin-top:8px;">
+            <i class="fas fa-circle-info"></i>
+            Settings are saved to the database. The ESP32-CAM will apply them automatically on its next poll (every 30 seconds).
+          </div>
           <div class="form-footer" style="margin-top:14px;">
             <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> <span class="btn-label">Save Camera Settings</span></button>
           </div>
