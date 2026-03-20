@@ -1009,7 +1009,7 @@ async function fetchDeviceStates(){
     const r=await fetch('get_device_status.php',{cache:'no-store'});
     if(!r.ok)throw 0;
     const j=await r.json();
-    ['mist','fan','heater','sprayer'].forEach(d=>applyPill(d,j[d]));
+    ['mist','fan','heater','sprayer','exhaust'].forEach(d=>applyPill(d,j[d]));
     const manual=j.manual_mode==1;
     // Only sync the switch from server if user isn't actively toggling it
     if(!modeSwitching){
@@ -1062,12 +1062,7 @@ $$('modeSwitch').addEventListener('change',async function(){
   setMode(wantManual);
   try{
     await fetch(`update_device_status.php?mode=${wantManual?1:0}`,{cache:'no-store'});
-    if(wantManual){
-      // Switching to manual — set all devices ON in DB to match current auto state
-      await fetch('update_device_status.php?mist=1&fan=1&heater=1&sprayer=1&exhaust=1',{cache:'no-store'});
-      // Update pills immediately
-      ['mist','fan','heater','sprayer'].forEach(d=>applyPill(d,'1'));
-    }
+    // Device states stay as-is — ESP32 reads current DB states on next poll
   }catch(_){}
   setTimeout(()=>{ modeSwitching = false; }, 2000);
 });
