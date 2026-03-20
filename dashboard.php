@@ -243,6 +243,29 @@ $isOwner = $sessionRole === 'owner';
     .harvest-almost{background:var(--amber-lt);color:var(--amber);}
     .harvest-not{background:var(--blue-lt);color:var(--blue);}
     .harvest-over{background:var(--red-lt);color:var(--red);}
+    .img-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    .img-card{cursor:pointer;}
+    .img-all-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:350;opacity:0;visibility:hidden;transition:opacity .2s,visibility .2s;backdrop-filter:blur(4px);}
+    .img-all-modal-backdrop.show{opacity:1;visibility:visible;}
+    .img-all-modal{background:var(--surface);border-radius:16px;width:94%;max-width:960px;max-height:88vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg);overflow:hidden;}
+    .img-all-modal-header{display:flex;align-items:center;justify-content:space-between;padding:18px 24px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--surface);}
+    .img-all-modal-title{font-size:15px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px;}
+    .img-all-modal-close{background:var(--surface2);border:1px solid var(--border);color:var(--muted);width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .15s;}
+    .img-all-modal-close:hover{background:var(--red-lt);color:var(--red);border-color:var(--red);}
+    .img-all-filter-bar{display:flex;align-items:center;gap:10px;padding:14px 24px;border-bottom:1px solid var(--border);background:var(--surface2);flex-wrap:wrap;flex-shrink:0;}
+    .img-all-filter-bar label{font-size:12px;font-weight:600;color:var(--muted);}
+    .img-all-count-badge{background:var(--green-lt);color:var(--green);font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;margin-left:auto;}
+    .img-all-modal-body{padding:20px 24px;overflow-y:auto;flex:1;}
+    .img-all-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;}
+    .img-all-card{background:var(--surface);border-radius:12px;overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow);transition:transform .15s,box-shadow .15s;}
+    .img-all-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-lg);}
+    .img-all-card img{width:100%;height:150px;object-fit:cover;display:block;}
+    .img-all-card-info{padding:12px 14px;}
+    .img-all-card-size{font-size:15px;font-weight:700;margin-bottom:5px;}
+    .img-all-card-ts{font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;margin-top:4px;}
+    .img-all-card-conf{font-size:11px;color:var(--muted);margin-top:3px;}
+    .img-all-empty{grid-column:1/-1;text-align:center;padding:48px;color:var(--muted);}
+    .img-all-empty i{font-size:36px;display:block;margin-bottom:10px;opacity:.3;}
 
     /* MODAL */
     .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:200;opacity:0;visibility:hidden;transition:opacity .2s,visibility .2s;}
@@ -643,7 +666,7 @@ $isOwner = $sessionRole === 'owner';
         <div class="card-title"><span class="icon icon-blue"><i class="fas fa-camera"></i></span> Chamber Camera Analysis</div>
         <div class="date-picker-wrap">
           <button id="liveCamBtn" onclick="openLiveCam()" style="display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:20px;background:var(--red);color:#fff;border:none;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;"><span style="width:7px;height:7px;background:#fff;border-radius:50%;display:inline-block;animation:blink 1s infinite;"></span> Live</button>
-          <input type="date" id="camDatePicker" class="dash-datepicker" title="Pick a date to view captures">
+          <button onclick="openViewAll()" style="display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:20px;background:var(--surface2);color:var(--text);border:1px solid var(--border);font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;"><i class="fas fa-images"></i> View All</button>
         </div>
       </div>
       <div class="card-body" style="padding:14px 16px;flex:1;">
@@ -651,7 +674,6 @@ $isOwner = $sessionRole === 'owner';
           <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;" id="camDetailTitle">Latest captures</span>
           <div style="display:flex;align-items:center;gap:6px;">
             <span style="font-size:11px;color:var(--muted);" id="imgLastUpdate">Auto-refreshing…</span>
-            <button class="detail-clear-btn" id="camClearBtn" style="display:none;">✕ Back to live</button>
           </div>
         </div>
         <div class="img-grid" id="mushroomImageGrid">
@@ -788,6 +810,38 @@ $isOwner = $sessionRole === 'owner';
         <button class="live-connect-btn" onclick="connectLiveCam()"><i class="fas fa-plug"></i> Connect</button>
       </div>
       <div class="live-hint">Make sure you are on the same WiFi network as the ESP32-CAM</div>
+    </div>
+  </div>
+</div>
+
+<!-- VIEW ALL IMAGES MODAL -->
+<div class="img-all-modal-backdrop" id="viewAllModal">
+  <div class="img-all-modal">
+    <div class="img-all-modal-header">
+      <div class="img-all-modal-title">
+        <span class="icon icon-blue" style="width:32px;height:32px;border-radius:8px;"><i class="fas fa-images"></i></span>
+        All Camera Captures
+      </div>
+      <button class="img-all-modal-close" onclick="closeViewAll()">&times;</button>
+    </div>
+    <div class="img-all-filter-bar">
+      <label><i class="fas fa-calendar-days"></i> Date</label>
+      <input type="date" id="viewAllDatePicker" class="dash-datepicker" onchange="loadViewAllImages()" style="min-width:140px;">
+      <label style="margin-left:4px;"><i class="fas fa-filter"></i> Status</label>
+      <select id="viewAllStatus" class="dash-datepicker" style="min-width:150px;" onchange="renderViewAll()">
+        <option value="">All Status</option>
+        <option value="Ready for Harvest">🟢 Ready for Harvest</option>
+        <option value="Almost Ready">🟡 Almost Ready</option>
+        <option value="Not Ready">🔵 Not Ready</option>
+        <option value="Overripe">🔴 Overripe</option>
+      </select>
+      <button onclick="clearViewAllFilter()" style="padding:5px 12px;border-radius:7px;background:var(--surface);border:1px solid var(--border);font-size:12px;cursor:pointer;color:var(--muted);display:flex;align-items:center;gap:5px;"><i class="fas fa-xmark"></i> Clear</button>
+      <span class="img-all-count-badge" id="viewAllCount">0 images</span>
+    </div>
+    <div class="img-all-modal-body">
+      <div class="img-all-grid" id="viewAllGrid">
+        <div class="img-all-empty"><i class="fas fa-spinner fa-spin"></i><span>Loading…</span></div>
+      </div>
     </div>
   </div>
 </div>
@@ -964,9 +1018,10 @@ async function fetchDeviceStates(){
     }
 
     // ── Show fault/buzzer alert on dashboard ──
-    if(j.buzzer==1){
+    // Only show device fault alert when sensor is online (not stale)
+    const sensorOnline = $$('tempNote') && !$$('tempNote').classList.contains('gs-offline');
+    if(j.buzzer==1 && sensorOnline){
       const list=$$('alertList');
-      // Only add fault banner if not already shown
       if(!list.querySelector('.alert-fault')){
         const el=document.createElement('div');
         el.className='alert-item alert-err alert-fault';
@@ -974,8 +1029,7 @@ async function fetchDeviceStates(){
         list.prepend(el);
       }
     } else {
-      // Remove fault banner when buzzer clears
-      list.querySelector('.alert-fault')?.remove();
+      $$('alertList').querySelector('.alert-fault')?.remove();
     }
   }catch(_){}
 }
@@ -1048,7 +1102,7 @@ function renderCamImages(images){
   }
   const statusMap={'Ready for Harvest':['harvest-ready','Ready for Harvest'],'Almost Ready':['harvest-almost','Almost Ready'],'Not Ready':['harvest-not','Not Ready'],'Overripe':['harvest-over','Overripe']};
   grid.innerHTML='';
-  images.forEach(img=>{
+  images.slice(0,4).forEach(img=>{
     const[cls,label]=statusMap[img.harvest_status]||['harvest-not',img.harvest_status||'—'];
     const card=document.createElement('div');
     card.className='img-card';
@@ -1062,6 +1116,63 @@ function renderCamImages(images){
     grid.appendChild(card);
   });
 }
+
+// ── View All Modal ──
+let viewAllImages=[];
+async function openViewAll(){
+  $$('viewAllModal').classList.add('show');
+  await loadViewAllImages();
+}
+function closeViewAll(){ $$('viewAllModal').classList.remove('show'); }
+async function loadViewAllImages(){
+  const grid=$$('viewAllGrid');
+  grid.innerHTML='<div class="img-all-empty"><i class="fas fa-spinner fa-spin"></i><span>Loading…</span></div>';
+  try{
+    const date=$$('viewAllDatePicker').value;
+    const url=date
+      ?`get_calendar_data.php?type=camera&month=${date.slice(0,7)}&day=${date}`
+      :`process_image.php?limit=100`;
+    const r=await fetch(url,{cache:'no-store'});
+    const d=await r.json();
+    viewAllImages=date?(d.day_images||[]):(d.data||[]);
+    renderViewAll();
+  }catch(_){
+    grid.innerHTML='<div class="img-all-empty"><i class="fas fa-exclamation-circle"></i><span>Failed to load images.</span></div>';
+  }
+}
+function renderViewAll(){
+  const sf=$$('viewAllStatus').value;
+  const filtered=sf?viewAllImages.filter(i=>i.harvest_status===sf):viewAllImages;
+  const countEl=$$('viewAllCount');
+  if(countEl) countEl.textContent=`${filtered.length} image${filtered.length!==1?'s':''}`;
+  const grid=$$('viewAllGrid');
+  const statusMap={'Ready for Harvest':['harvest-ready','Ready for Harvest'],'Almost Ready':['harvest-almost','Almost Ready'],'Not Ready':['harvest-not','Not Ready'],'Overripe':['harvest-over','Overripe']};
+  if(!filtered.length){
+    grid.innerHTML='<div class="img-all-empty"><i class="fas fa-camera"></i><span>No captures found.</span></div>';return;
+  }
+  grid.innerHTML='';
+  filtered.forEach(img=>{
+    const[cls,label]=statusMap[img.harvest_status]||['harvest-not',img.harvest_status||'—'];
+    const ts=img.analyzed_at?(()=>{const d=new Date(img.analyzed_at.replace(' ','T')+'+08:00');return d.toLocaleString('en-PH',{timeZone:'Asia/Manila',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true});})():'';
+    const card=document.createElement('div');
+    card.className='img-all-card';
+    card.innerHTML=`
+      <img src="${img.image_path||'#'}" alt="Mushroom" onerror="this.src='assets/img/no-image.png'">
+      <div class="img-all-card-info">
+        <div class="img-all-card-size">⌀ ${img.diameter_cm??'—'} cm</div>
+        <span class="status-pill ${cls}" style="font-size:11px;padding:2px 10px;">${label}</span>
+        <div class="img-all-card-ts">${ts}</div>
+        <div class="img-all-card-conf">Confidence: ${img.confidence_score??'—'}%</div>
+      </div>`;
+    grid.appendChild(card);
+  });
+}
+function clearViewAllFilter(){
+  $$('viewAllDatePicker').value='';
+  $$('viewAllStatus').value='';
+  loadViewAllImages();
+}
+$$('viewAllModal').addEventListener('click',e=>{if(e.target===$$('viewAllModal'))closeViewAll();});
 
 let camViewingDay = null;
 
@@ -1258,25 +1369,9 @@ function shiftMonthRange(dir) {
 
 loadMonthlySummary();
 
-// ── Camera Date Picker ──
-const camPicker = $$('camDatePicker');
-camPicker.addEventListener('change', async function(){
-  const date = this.value;
-  if(!date){ resetCamToLive(); loadCameraImages(); return; }
-  camViewingDay = date;
-  const month = date.slice(0,7);
-  const d = new Date(date+'T00:00');
-  const label = d.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'});
-  $$('camDetailTitle').textContent = `Captures — ${label}`;
-  $$('camClearBtn').style.display = '';
-  $$('imgLastUpdate').textContent = '';
-  const res = await fetch(`get_calendar_data.php?type=camera&month=${month}&day=${date}`,{cache:'no-store'});
-  const json = await res.json();
-  renderCamImages(json.day_images||[]);
-});
+// ── Camera reset ──
 function resetCamToLive(){
   camViewingDay=null;
-  camPicker.value='';
   $$('camDetailTitle').textContent='Latest captures';
   $$('camClearBtn').style.display='none';
   const el=$$('imgLastUpdate');

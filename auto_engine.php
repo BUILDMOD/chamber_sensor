@@ -51,6 +51,19 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
     $manualMode = (int)($row['manual_mode'] ?? 0);
     $buzzerOn   = false;
 
+    // ── Skip fault detection if sensor data is stale (offline) ──
+    $lastTs = $conn->query("SELECT timestamp FROM sensor_data ORDER BY id DESC LIMIT 1");
+    $sensorOnline = false;
+    if ($lastTs && $row_ts = $lastTs->fetch_assoc()) {
+        $ageMin = (time() - strtotime($row_ts['timestamp'])) / 60;
+        $sensorOnline = ($ageMin < 5);
+    }
+    // If sensor is offline, clear buzzer and skip fault/auto logic
+    if (!$sensorOnline) {
+        $conn->query("UPDATE device_status SET buzzer=0 WHERE id=1");
+        return;
+    }
+
     $conn->query("INSERT IGNORE INTO alert_thresholds (metric,min_value,max_value) VALUES
         ('temperature',22,28),('humidity',85,95),
         ('emergency_temp',15,35),('emergency_hum',0,98)");
