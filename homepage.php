@@ -72,7 +72,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['modal_register'])) {
         if ($check->num_rows > 0) {
             $reg_error = "Username or Email already exists.";
         } else {
-            $conn->query("ALTER TABLE users ADD COLUMN IF NOT EXISTS suffix VARCHAR(20) NOT NULL DEFAULT '' AFTER last_name");
+            // ── FIXED: replaced "ADD COLUMN IF NOT EXISTS" (unsupported in some MySQL versions) ──
+            $checkCol = $conn->query("SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users' AND COLUMN_NAME='suffix'");
+            $colRow = $checkCol->fetch_assoc();
+            if ($colRow['cnt'] == 0) {
+                $conn->query("ALTER TABLE users ADD COLUMN suffix VARCHAR(20) NOT NULL DEFAULT '' AFTER last_name");
+            }
             $stmt = $conn->prepare("INSERT INTO users (first_name,middle_name,last_name,suffix,fullname,email,phone,username,password,role,verified) VALUES (?,?,?,?,?,?,?,?,?,?,0)");
             if ($stmt) {
                 $stmt->bind_param("ssssssssss",$first,$middle,$last,$suffix,$fullname,$email,$phone,$username,$password,$role);
