@@ -12,7 +12,20 @@ $username = "root";
 $password = "";
 $dbname = "mushroom_system";
 
-$conn = new mysqli($servername, $username, $password, $dbname);
+if (getenv('MYSQLHOST')) {
+    $servername = getenv('MYSQLHOST');
+    $username   = getenv('MYSQLUSER');
+    $password   = getenv('MYSQLPASSWORD');
+    $dbname     = getenv('MYSQLDATABASE');
+    $port       = getenv('MYSQLPORT') ?: 3306;
+} else {
+    $servername = "localhost";
+    $username   = "root";
+    $password   = "";
+    $dbname     = "mushroom_system";
+    $port       = 3306;
+}
+$conn = new mysqli($servername, $username, $password, $dbname, $port);
 
 if ($conn->connect_error) {
     die(json_encode([
