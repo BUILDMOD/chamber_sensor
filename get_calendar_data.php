@@ -47,11 +47,12 @@ try {
 
     } elseif ($type === 'camera') {
         $date = $day ?: date('Y-m-d');
-        $r = $conn->query("SELECT id, image_path, captured_at, analyzed_at,
+        // FIX: correct table = image_analysis, correct column = analyzed_at
+        $r = $conn->query("SELECT id, image_path, analyzed_at,
                            diameter_cm, harvest_status, confidence_score
-                           FROM camera_captures
-                           WHERE DATE(captured_at) = '$date'
-                           ORDER BY captured_at DESC");
+                           FROM image_analysis
+                           WHERE DATE(analyzed_at) = '$date'
+                           ORDER BY analyzed_at DESC");
         $day_images = [];
         if ($r) while ($row = $r->fetch_assoc()) $day_images[] = $row;
         echo json_encode(['success'=>true,'day_images'=>$day_images,'count'=>count($day_images)]);
