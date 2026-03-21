@@ -21,7 +21,6 @@ if (isset($_SESSION) && !empty($_SESSION['fullname'])) $displayName = $_SESSION[
 elseif (isset($_SESSION) && !empty($_SESSION['user'])) $displayName = $_SESSION['user'];
 
 // ── Calendar view mode ──
-// view: 'day' | 'month' | 'year'
 $view_mode = isset($_GET['view']) ? $_GET['view'] : 'month';
 $valid_views = ['day', 'month', 'year'];
 if (!in_array($view_mode, $valid_views)) $view_mode = 'month';
@@ -30,12 +29,10 @@ $sel_year  = isset($_GET['year'])  ? intval($_GET['year'])  : intval(date('Y'));
 $sel_month = isset($_GET['month']) ? intval($_GET['month']) : intval(date('n'));
 $sel_day   = isset($_GET['day'])   ? intval($_GET['day'])   : intval(date('j'));
 
-// Clamp values
 $sel_year  = max(2020, min(2099, $sel_year));
 $sel_month = max(1, min(12, $sel_month));
 $sel_day   = max(1, min(31, $sel_day));
 
-// ── Build SQL date range based on view mode ──
 if ($view_mode === 'day') {
     $date_from = sprintf('%04d-%02d-%02d', $sel_year, $sel_month, $sel_day);
     $date_to   = $date_from;
@@ -45,13 +42,13 @@ if ($view_mode === 'day') {
     $last_day  = date('t', mktime(0,0,0,$sel_month,1,$sel_year));
     $date_to   = sprintf('%04d-%02d-%02d', $sel_year, $sel_month, $last_day);
     $label     = date('F Y', mktime(0,0,0,$sel_month,1,$sel_year));
-} else { // year
+} else {
     $date_from = sprintf('%04d-01-01', $sel_year);
     $date_to   = sprintf('%04d-12-31', $sel_year);
     $label     = (string)$sel_year;
 }
 
-// ── Sensor data for selected period ──
+// ── Calendar sensor data (for calendar display only) ──
 $sql = "SELECT
           DATE(timestamp) as summary_date,
           AVG(temperature) as avg_temp, MIN(temperature) as min_temp, MAX(temperature) as max_temp,
@@ -66,31 +63,82 @@ $data = [];
 if ($result && $result->num_rows > 0)
     while ($row = $result->fetch_assoc()) $data[] = $row;
 
-// Save to sensor_summary
 foreach ($data as $row) {
     $ins = $conn->prepare("INSERT IGNORE INTO sensor_summary (summary_date,avg_temp,min_temp,max_temp,avg_hum,min_hum,max_hum,readings) VALUES (?,?,?,?,?,?,?,?)");
     if ($ins) { $ins->bind_param("sddddddi",$row['summary_date'],$row['avg_temp'],$row['min_temp'],$row['max_temp'],$row['avg_hum'],$row['min_hum'],$row['max_hum'],$row['readings']); $ins->execute(); $ins->close(); }
 }
 
-// ── CSV EXPORT — must be before any HTML output ──
-// ── Compute changes ──
+// ══════════════════════════════════════════════
+// REPORT DATE RANGE — independent from calendar
+// ══════════════════════════════════════════════
+$today      = date('Y-m-d');
+$preset     = $_GET['preset'] ?? '';
+
+// Preset shortcuts
+if ($preset === '7d') {
+    $rpt_from = date('Y-m-d', strtotime('-6 days'));
+    $rpt_to   = $today;
+} elseif ($preset === '30d') {
+    $rpt_from = date('Y-m-d', strtotime('-29 days'));
+    $rpt_to   = $today;
+} elseif ($preset === 'this_month') {
+    $rpt_from = date('Y-m-01');
+    $rpt_to   = $today;
+} elseif ($preset === 'last_month') {
+    $rpt_from = date('Y-m-01', strtotime('first day of last month'));
+    $rpt_to   = date('Y-m-t',  strtotime('last day of last month'));
+} elseif ($preset === 'this_year') {
+    $rpt_from = date('Y-01-01');
+    $rpt_to   = $today;
+} else {
+    // Manual date input or default (this month)
+    $rpt_from = $_GET['rpt_from'] ?? date('Y-m-01');
+    $rpt_to   = $_GET['rpt_to']   ?? $today;
+}
+
+// Sanitize
+$rpt_from = preg_match('/^\d{4}-\d{2}-\d{2}$/', $rpt_from) ? $rpt_from : date('Y-m-01');
+$rpt_to   = preg_match('/^\d{4}-\d{2}-\d{2}$/', $rpt_to)   ? $rpt_to   : $today;
+if ($rpt_to < $rpt_from) $rpt_to = $rpt_from;
+
+// Report label
+$rpt_label = ($rpt_from === $rpt_to)
+    ? date('F j, Y', strtotime($rpt_from))
+    : date('M j, Y', strtotime($rpt_from)) . ' – ' . date('M j, Y', strtotime($rpt_to));
+
+// ── Fetch REPORT data (independent range) ──
+$rpt_sql = "SELECT
+      DATE(timestamp) as summary_date,
+      AVG(temperature) as avg_temp, MIN(temperature) as min_temp, MAX(temperature) as max_temp,
+      AVG(humidity) as avg_hum, MIN(humidity) as min_hum, MAX(humidity) as max_hum,
+      COUNT(*) as readings,
+      SUM(CASE WHEN temperature BETWEEN 22 AND 28 AND humidity BETWEEN 85 AND 95 THEN 1 ELSE 0 END) as ideal_readings
+    FROM sensor_data
+    WHERE DATE(timestamp) BETWEEN '$rpt_from' AND '$rpt_to'
+    GROUP BY DATE(timestamp) ORDER BY summary_date ASC";
+$rpt_result = $conn->query($rpt_sql);
+$rpt_data = [];
+if ($rpt_result && $rpt_result->num_rows > 0)
+    while ($row = $rpt_result->fetch_assoc()) $rpt_data[] = $row;
+
+// ── Compute changes for report data ──
 $temp_changes = []; $hum_changes = []; $change_dates = [];
-for ($i = 1; $i < count($data); $i++) {
-    $temp_changes[] = $data[$i]['avg_temp'] - $data[$i-1]['avg_temp'];
-    $hum_changes[]  = $data[$i]['avg_hum']  - $data[$i-1]['avg_hum'];
-    $change_dates[]  = $data[$i]['summary_date'];
+for ($i = 1; $i < count($rpt_data); $i++) {
+    $temp_changes[] = $rpt_data[$i]['avg_temp'] - $rpt_data[$i-1]['avg_temp'];
+    $hum_changes[]  = $rpt_data[$i]['avg_hum']  - $rpt_data[$i-1]['avg_hum'];
+    $change_dates[] = $rpt_data[$i]['summary_date'];
 }
 $avg_tc = count($temp_changes) ? array_sum($temp_changes)/count($temp_changes) : 0;
 $avg_hc = count($hum_changes)  ? array_sum($hum_changes)/count($hum_changes)   : 0;
 
-// ── Sensor Health Score ──
-$total_readings_all = array_sum(array_column($data, 'readings'));
-$ideal_readings_all = array_sum(array_column($data, 'ideal_readings'));
+// ── Sensor Health Score (report range) ──
+$total_readings_all = array_sum(array_column($rpt_data, 'readings'));
+$ideal_readings_all = array_sum(array_column($rpt_data, 'ideal_readings'));
 $health_score = $total_readings_all > 0 ? round(($ideal_readings_all / $total_readings_all) * 100, 1) : null;
 $health_class = $health_score === null ? 'neu' : ($health_score >= 80 ? 'pos' : ($health_score >= 50 ? 'warn' : 'neg'));
 $health_label = $health_score === null ? 'No Data' : ($health_score >= 80 ? 'Healthy' : ($health_score >= 50 ? 'Fair' : 'Poor'));
 
-// ── Calendar heatmap data (for month view): daily avg temps ──
+// ── Calendar heatmap data ──
 $heatmap_data = [];
 foreach ($data as $row) {
     $d = intval(date('j', strtotime($row['summary_date'])));
@@ -102,7 +150,7 @@ foreach ($data as $row) {
     ];
 }
 
-// ── Month grid for year view: monthly averages ──
+// ── Monthly data for year view ──
 $monthly_data = [];
 if ($view_mode === 'year') {
     $mSql = "SELECT MONTH(timestamp) as m,
@@ -120,42 +168,20 @@ function trendWord($v) { return $v > 0 ? 'Increasing' : ($v < 0 ? 'Decreasing' :
 function trendClass($v){ return $v > 0 ? 'pos' : ($v < 0 ? 'neg' : 'neu'); }
 function trendIcon($v) { return $v > 0 ? 'arrow-up' : ($v < 0 ? 'arrow-down' : 'minus'); }
 
-// Helper: nav URLs
 function navUrl($view, $year, $month, $day) {
     return "?view=$view&year=$year&month=$month&day=$day";
 }
 ?>
-<!-- FIXED VERSION: hamburger z-index:9999 -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-<link rel="icon" type="image/png" href="assets/img/jwho-favicon.png">
+  <link rel="icon" type="image/png" href="assets/img/jwho-favicon.png">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Reports</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-  <style>
-.print-btn {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 12px; border-radius: 20px;
-      background: var(--green); color: #fff; border: 1px solid var(--green);
-      font-size: 12px; font-weight: 600; text-decoration: none; box-shadow: var(--shadow);
-      transition: all .15s; white-space: nowrap;
-    }
-    .print-btn:hover { 
-      background: #14804a; 
-      box-shadow: 0 2px 8px rgba(26,158,92,.3); 
-    }
-    @media (max-width: 768px) {
-      .print-btn { 
-        padding: 4px 10px; 
-        font-size: 11px; 
-        gap: 4px;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
@@ -171,9 +197,8 @@ function navUrl($view, $year, $month, $day) {
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
     body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;}
 
-    /* SIDEBAR */
     .sidebar{position:fixed;inset:0 auto 0 0;width:220px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:50;}
-    .sidebar-logo{padding:22px 20px 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);position:relative;}
+    .sidebar-logo{padding:22px 20px 18px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);}
     .sidebar-logo img{width:36px;height:36px;border-radius:8px;}
     .sidebar-logo-text{font-size:14px;font-weight:700;color:var(--text);line-height:1.2;}
     .sidebar-logo-sub{font-size:11px;color:var(--muted);}
@@ -182,18 +207,20 @@ function navUrl($view, $year, $month, $day) {
     .sidebar-nav a i{width:16px;text-align:center;font-size:13px;}
     .sidebar-nav a:hover{background:var(--surface2);color:var(--text);}
     .sidebar-nav a.active{background:var(--green-lt);color:var(--green);font-weight:600;}
-.sidebar-nav .nav-bottom{margin-top:auto;padding-top:8px;border-top:1px solid var(--border);}
+    .sidebar-nav .nav-bottom{margin-top:auto;padding-top:8px;border-top:1px solid var(--border);}
 
     .main{margin-left:220px;min-height:100vh;width:calc(100% - 220px);box-sizing:border-box;padding-top:56px;}
 
     .topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px 0 248px;height:56px;display:flex;align-items:center;justify-content:space-between;position:fixed;top:0;left:0;right:0;z-index:40;}
-    .topbar-title{font-size:15px;font-weight:700;color:var(--text);letter-spacing:-.2px;}
+    .topbar-title{font-size:15px;font-weight:700;color:var(--text);}
     .topbar-right{display:flex;align-items:center;gap:10px;}
     .topbar-time{font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);background:var(--surface2);padding:5px 12px;border-radius:20px;border:1px solid var(--border);}
+    .print-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;background:var(--green);color:#fff;border:1px solid var(--green);font-size:12px;font-weight:600;text-decoration:none;box-shadow:var(--shadow);transition:all .15s;white-space:nowrap;}
+    .print-btn:hover{background:#14804a;}
 
     .page{padding:24px 28px;max-width:1280px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:16px;}
 
-    /* ── CALENDAR NAV ── */
+    /* Calendar Nav */
     .cal-nav{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden;}
     .cal-nav-top{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);}
     .cal-nav-label{font-size:15px;font-weight:700;color:var(--text);}
@@ -205,7 +232,6 @@ function navUrl($view, $year, $month, $day) {
     .cal-arrow{width:30px;height:30px;border-radius:7px;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--muted);text-decoration:none;font-size:12px;transition:all .15s;}
     .cal-arrow:hover{background:var(--surface2);color:var(--text);}
 
-    /* Year View: 12 month tiles */
     .cal-year-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-top:1px solid var(--border);}
     .cal-month-tile{padding:14px 16px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);cursor:pointer;text-decoration:none;transition:background .15s;display:block;}
     .cal-month-tile:nth-child(4n){border-right:none;}
@@ -218,7 +244,6 @@ function navUrl($view, $year, $month, $day) {
     .cmt-name{font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px;}
     .cmt-stat{font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;}
 
-    /* Month View: calendar grid */
     .cal-month-grid-wrap{padding:16px 18px 20px;}
     .cal-dow-row{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:6px;}
     .cal-dow{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);text-align:center;padding:2px 0;}
@@ -235,7 +260,6 @@ function navUrl($view, $year, $month, $day) {
     .cd-temp{font-size:12px;font-weight:700;font-family:'DM Mono',monospace;color:var(--green);line-height:1;}
     .cd-hum{font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;margin-top:2px;}
 
-    /* Day view: single day summary */
     .day-view-wrap{padding:20px 24px;}
     .day-stat-row{display:flex;gap:12px;flex-wrap:wrap;}
     .day-stat{flex:1;min-width:120px;background:var(--surface2);border-radius:10px;padding:14px 16px;border:1px solid var(--border);}
@@ -251,7 +275,10 @@ function navUrl($view, $year, $month, $day) {
     .icon-blue{background:var(--blue-lt);color:var(--blue);}
     .icon-green{background:var(--green-lt);color:var(--green);}
     .card-sub{font-size:12px;color:var(--muted);}
-    .card-body{padding:0;}
+
+    /* ── REPORT DATE RANGE PICKER ── */
+    .rpt-go-btn{padding:6px 14px;border-radius:7px;background:var(--green);color:#fff;border:none;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-family:'DM Sans',sans-serif;}
+    .rpt-go-btn:hover{opacity:.88;}
 
     .stat-strip{display:flex;gap:0;border-bottom:1px solid var(--border);}
     .stat-item{flex:1;padding:14px 18px;border-right:1px solid var(--border);}
@@ -260,7 +287,6 @@ function navUrl($view, $year, $month, $day) {
     .stat-val{font-size:22px;font-weight:700;font-family:'DM Mono',monospace;color:var(--text);}
     .stat-val span{font-size:12px;font-weight:500;color:var(--muted);}
 
-    /* HEALTH */
     .health-wrap{display:flex;align-items:center;gap:24px;padding:20px 24px;}
     .health-circle{position:relative;width:110px;height:110px;flex-shrink:0;}
     .health-circle canvas{position:absolute;inset:0;width:100%!important;height:100%!important;}
@@ -274,7 +300,6 @@ function navUrl($view, $year, $month, $day) {
     .health-bar-wrap{width:100%;height:6px;background:var(--surface2);border-radius:99px;margin-top:3px;overflow:hidden;}
     .health-bar{height:6px;border-radius:99px;}
 
-    /* TABLE */
     .tbl-wrap{overflow-x:auto;}
     table{width:100%;border-collapse:collapse;font-size:13px;}
     thead th{text-align:left;padding:9px 14px;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;background:var(--surface2);border-bottom:1px solid var(--border);white-space:nowrap;}
@@ -306,201 +331,75 @@ function navUrl($view, $year, $month, $day) {
     .summary-row .s-val{font-size:16px;font-weight:700;font-family:'DM Mono',monospace;display:flex;align-items:center;gap:5px;}
     .summary-row .s-trend{font-size:11px;font-weight:600;margin-top:2px;}
 
-    .csv-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:7px;border:1px solid var(--border);background:var(--surface);font-size:12px;font-weight:600;color:var(--text);cursor:pointer;text-decoration:none;transition:all .15s;}
-    .csv-btn:hover{background:var(--green);color:#fff;border-color:var(--green);}
-    .csv-btn i{font-size:11px;}
-
     .empty-state{text-align:center;padding:40px;color:var(--muted);}
     .empty-state i{font-size:28px;display:block;margin-bottom:8px;opacity:.35;}
     .empty-state span{font-size:13px;}
 
-    /* Legend */
     .cal-legend{display:flex;align-items:center;gap:16px;padding:10px 18px;border-top:1px solid var(--border);background:var(--surface2);}
     .cal-legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);}
     .cal-legend-dot{width:10px;height:10px;border-radius:3px;}
-  
-    /* ============================================================
-       RESPONSIVE / MOBILE
-       ============================================================ */
 
-    /* Hamburger button */
-    .hamburger{
-      display:none;position:fixed;top:4px;left:10px;z-index:500;
-      width:38px;height:38px;border-radius:9px;
-      background:var(--surface);border:1px solid var(--border);
-      box-shadow:var(--shadow);
-      align-items:center;justify-content:center;
-      cursor:pointer;flex-direction:column;gap:4px;padding:9px;
-      touch-action:manipulation;
-      pointer-events:auto;
-    }
+    /* ── RESPONSIVE ── */
+    .hamburger{display:none;position:fixed;top:4px;left:10px;z-index:500;width:38px;height:38px;border-radius:9px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow);align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;padding:9px;touch-action:manipulation;}
     .hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
-
-    /* Overlay behind sidebar */
-    .sidebar-overlay{
-      display:none;position:fixed;inset:0;
-      background:rgba(0,0,0,.4);z-index:99;
-      backdrop-filter:blur(3px);
-      -webkit-backdrop-filter:blur(3px);
-    }
+    .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99;backdrop-filter:blur(3px);}
     .sidebar-overlay.open{display:block;}
 
     @media(max-width:768px){
-      /* Hamburger visible */
       .hamburger{display:flex;}
-      .sidebar.open ~ * .hamburger, .hamburger.open{display:none!important;}
-
-      /* Sidebar slides in */
-      .sidebar{
-        transform:translateX(-100%);
-        transition:transform .28s cubic-bezier(.4,0,.2,1);
-        z-index:500;
-        box-shadow:4px 0 24px rgba(0,0,0,.12);
-      }
+      .sidebar{transform:translateX(-100%);transition:transform .28s cubic-bezier(.4,0,.2,1);z-index:500;box-shadow:4px 0 24px rgba(0,0,0,.12);}
       .sidebar.open{transform:translateX(0);}
-
-      /* Main fills full width */
       .main{margin-left:0!important;width:100%!important;padding-top:0!important;}
-      .main > *{pointer-events:auto;}
-
-      /* Topbar */
-      .topbar{padding:0 10px 0 58px;height:52px;position:fixed;top:0;left:0;right:0;z-index:40;}
+      .topbar{padding:0 10px 0 58px;height:52px;}
       .topbar-title{font-size:14px;}
       .topbar-time{font-size:11px;padding:4px 10px;}
-
-      /* Page — push down so hamburger isn't covered by cal-nav */
-      .page{padding:8px!important;padding-top:64px!important;gap:8px!important;overflow-x:hidden;}
-
-      /* ── Calendar Nav ── */
+      .page{padding:8px!important;padding-top:64px!important;gap:8px!important;}
       .cal-nav-top{padding:8px 12px;flex-wrap:wrap;gap:6px;}
       .cal-nav-label{font-size:13px;}
-      .cal-nav-controls{gap:4px;}
       .cal-view-tab{padding:4px 10px;font-size:11px;}
-      .cal-arrow{width:28px;height:28px;font-size:11px;}
-
-      /* Year view: 3 columns on tablet */
+      .cal-arrow{width:28px;height:28px;}
       .cal-year-grid{grid-template-columns:repeat(3,1fr);}
-      .cal-month-tile{padding:10px 12px;}
-      .cmt-name{font-size:11px;}
-      .cmt-stat{font-size:10px;}
-
-      /* Month view: days compact */
       .cal-month-grid-wrap{padding:6px 10px 10px;}
       .cal-day{min-height:40px;padding:3px 4px;}
       .cd-num{font-size:10px;}
       .cd-temp{font-size:11px;}
       .cd-hum{font-size:9px;}
-      .cal-dow{font-size:9px;}
-
-      /* Day view */
       .day-view-wrap{padding:10px 12px;}
       .day-stat-row{gap:8px;}
       .day-stat{padding:10px 12px;min-width:0;}
-      .day-stat-label{font-size:10px;}
       .day-stat-val{font-size:18px;}
-
-      /* Stat strip — stack vertically */
       .stat-strip{flex-direction:column;}
       .stat-item{padding:10px 14px;border-right:none;border-bottom:1px solid var(--border);}
       .stat-item:last-child{border-bottom:none;}
-      .stat-val{font-size:18px;}
-      .stat-label{font-size:10px;}
-
-      /* Health section */
       .health-wrap{flex-direction:column;align-items:flex-start;padding:10px 12px;gap:10px;}
       .health-circle{width:90px;height:90px;}
-      .health-score-num{font-size:18px;}
-      .health-details{width:100%;}
-
-      /* Chart */
       .chart-wrap{padding:10px;}
       .chart-wrap canvas{max-height:180px;}
-
-      /* Summary box */
       .summary-box{padding:10px 12px;}
-      .summary-rows{gap:14px;}
-      .summary-row .s-val{font-size:14px;}
-
-      /* Card headers */
       .card-header{flex-wrap:wrap;gap:6px;padding:10px 12px 8px;}
-      .card-title{font-size:12px;}
-      .card-sub{font-size:11px;}
-
-      /* CSV button */
-      .csv-btn{padding:5px 10px;font-size:11px;}
-
-      /* Tables */
       .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
       table{min-width:460px;font-size:12px;}
-      thead th{padding:8px 10px;font-size:10px;}
-      tbody td{padding:8px 10px;font-size:11px;}
-
-      /* Legend */
-      .cal-legend{flex-wrap:wrap;gap:8px;padding:8px 12px;}
-      .cal-legend-item{font-size:10px;}
+      .print-btn{padding:4px 10px;font-size:11px;}
     }
 
     @media(max-width:480px){
-      .topbar{height:48px;position:fixed!important;top:0;left:0;right:0;z-index:40;}
+      .topbar{height:48px;}
       .topbar-title{font-size:13px;}
       .topbar-time{display:none;}
-
-      .page{padding:6px!important;padding-top:58px!important;gap:6px!important;overflow-x:hidden;}
-
-      /* Year view: 2 columns on small phone */
+      .page{padding:6px!important;padding-top:58px!important;gap:6px!important;}
       .cal-year-grid{grid-template-columns:repeat(2,1fr);}
-      .cal-month-tile{padding:6px 8px;}
-
-      /* Month view: ultra compact */
-      .cal-day{min-height:38px;padding:3px 4px;}
-      .cd-temp{font-size:10px;}
+      .cal-day{min-height:38px;}
       .cd-hum{display:none;}
-
-      /* Day stats: 2 col grid */
       .day-stat-row{display:grid;grid-template-columns:1fr 1fr;}
-      .day-stat-val{font-size:16px;}
-
-      /* Health */
       .health-circle{width:80px;height:80px;}
-      .health-score-num{font-size:16px;}
-
-      /* Chart smaller */
-      .chart-wrap canvas{max-height:150px;}
-
-      /* Summary rows: 2 col grid */
       .summary-rows{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
     }
-
-</style>
+  </style>
 </head>
 <body>
-<script>
-// ── Sidebar toggle — runs immediately ──
-window.addEventListener('DOMContentLoaded', function() {
-  var h = document.getElementById('hamburger');
-  var s = document.getElementById('sidebar');
-  var o = document.getElementById('sidebarOverlay');
-  if (!h || !s || !o) { console.log('MISSING:', !h, !s, !o); return; }
-  h.onclick = function() {
-    var isOpen = s.classList.contains('open');
-    s.classList[isOpen ? 'remove' : 'add']('open');
-    o.classList[isOpen ? 'remove' : 'add']('open');
-    h.classList[isOpen ? 'remove' : 'add']('open');
-  };
-  o.onclick = function() {
-    s.classList.remove('open');
-    o.classList.remove('open');
-    h.classList.remove('open');
-  };
-});
-</script>
-<button class="hamburger" id="hamburger" aria-label="Menu">
-  <span></span><span></span><span></span>
-</button>
+<button class="hamburger" id="hamburger" aria-label="Menu"><span></span><span></span><span></span></button>
 <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
-
-<!-- SIDEBAR -->
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <img src="assets/img/logo.png" alt="logo">
@@ -522,9 +421,9 @@ window.addEventListener('DOMContentLoaded', function() {
 
 <header class="topbar">
   <span class="topbar-title">Reports</span>
-<div class="topbar-right">
-    <a href="print_report.php?date_from=<?php echo urlencode($date_from); ?>&date_to=<?php echo urlencode($date_to); ?>" target="_blank" class="print-btn" title="Print Report">
-      <i class="fas fa-print" style="margin-right:4px;"></i> Print Report
+  <div class="topbar-right">
+    <a href="print_report.php?date_from=<?= urlencode($rpt_from) ?>&date_to=<?= urlencode($rpt_to) ?>" target="_blank" class="print-btn">
+      <i class="fas fa-print"></i> Print Report
     </a>
     <span class="topbar-time" id="phTime" data-server-ts="<?= $server_ts_ms ?>"><?= htmlspecialchars($server_time_formatted) ?></span>
   </div>
@@ -534,7 +433,6 @@ window.addEventListener('DOMContentLoaded', function() {
   <div class="page">
 
     <?php
-    // ── Prev / Next navigation ──
     if ($view_mode === 'year') {
         $prev_url = navUrl('year', $sel_year-1, $sel_month, $sel_day);
         $next_url = navUrl('year', $sel_year+1, $sel_month, $sel_day);
@@ -545,15 +443,19 @@ window.addEventListener('DOMContentLoaded', function() {
         if ($nm > 12) { $nm = 1; $ny++; }
         $prev_url = navUrl('month', $py, $pm, $sel_day);
         $next_url = navUrl('month', $ny, $nm, $sel_day);
-    } else { // day
+    } else {
         $prev_ts  = mktime(0,0,0,$sel_month,$sel_day-1,$sel_year);
         $next_ts  = mktime(0,0,0,$sel_month,$sel_day+1,$sel_year);
         $prev_url = navUrl('day', date('Y',$prev_ts), date('n',$prev_ts), date('j',$prev_ts));
         $next_url = navUrl('day', date('Y',$next_ts), date('n',$next_ts), date('j',$next_ts));
     }
+    // Preserve report range params in calendar nav URLs
+    $rpt_qs = '&rpt_from='.urlencode($rpt_from).'&rpt_to='.urlencode($rpt_to).($preset?'&preset='.urlencode($preset):'');
+    $prev_url .= $rpt_qs;
+    $next_url .= $rpt_qs;
     ?>
 
-    <!-- ── CALENDAR NAVIGATOR ── -->
+    <!-- CALENDAR NAVIGATOR -->
     <div class="cal-nav">
       <div class="cal-nav-top">
         <span class="cal-nav-label">
@@ -564,22 +466,21 @@ window.addEventListener('DOMContentLoaded', function() {
           <a href="<?= $prev_url ?>" class="cal-arrow"><i class="fas fa-chevron-left"></i></a>
           <a href="<?= $next_url ?>" class="cal-arrow"><i class="fas fa-chevron-right"></i></a>
           <div class="cal-view-tabs" style="margin-left:6px;">
-            <a href="<?= navUrl('day',  $sel_year, $sel_month, $sel_day) ?>" class="cal-view-tab <?= $view_mode==='day'   ? 'active' : '' ?>">Day</a>
-            <a href="<?= navUrl('month',$sel_year, $sel_month, $sel_day) ?>" class="cal-view-tab <?= $view_mode==='month' ? 'active' : '' ?>">Month</a>
-            <a href="<?= navUrl('year', $sel_year, $sel_month, $sel_day) ?>" class="cal-view-tab <?= $view_mode==='year'  ? 'active' : '' ?>">Year</a>
+            <a href="<?= navUrl('day',  $sel_year, $sel_month, $sel_day) . $rpt_qs ?>" class="cal-view-tab <?= $view_mode==='day'   ? 'active' : '' ?>">Day</a>
+            <a href="<?= navUrl('month',$sel_year, $sel_month, $sel_day) . $rpt_qs ?>" class="cal-view-tab <?= $view_mode==='month' ? 'active' : '' ?>">Month</a>
+            <a href="<?= navUrl('year', $sel_year, $sel_month, $sel_day) . $rpt_qs ?>" class="cal-view-tab <?= $view_mode==='year'  ? 'active' : '' ?>">Year</a>
           </div>
         </div>
       </div>
 
       <?php if ($view_mode === 'year'): ?>
-      <!-- YEAR VIEW: 12 month tiles -->
       <div class="cal-year-grid">
         <?php
         $month_names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         for ($m = 1; $m <= 12; $m++):
           $has = isset($monthly_data[$m]);
           $is_active = ($m === $sel_month);
-          $tile_url = navUrl('month', $sel_year, $m, $sel_day);
+          $tile_url = navUrl('month', $sel_year, $m, $sel_day) . $rpt_qs;
           $tile_class = 'cal-month-tile' . ($has ? ' has-data' : '') . ($is_active ? ' active-month' : '');
         ?>
         <a href="<?= $tile_url ?>" class="<?= $tile_class ?>">
@@ -594,9 +495,8 @@ window.addEventListener('DOMContentLoaded', function() {
       </div>
 
       <?php elseif ($view_mode === 'month'): ?>
-      <!-- MONTH VIEW: day calendar grid -->
       <?php
-        $first_dow = date('w', mktime(0,0,0,$sel_month,1,$sel_year)); // 0=Sun
+        $first_dow = date('w', mktime(0,0,0,$sel_month,1,$sel_year));
         $days_in_month = date('t', mktime(0,0,0,$sel_month,1,$sel_year));
         $today_d = (intval(date('Y')) === $sel_year && intval(date('n')) === $sel_month) ? intval(date('j')) : -1;
       ?>
@@ -608,15 +508,13 @@ window.addEventListener('DOMContentLoaded', function() {
         </div>
         <div class="cal-days-grid">
           <?php
-          // Empty cells before first day
           for ($e = 0; $e < $first_dow; $e++) echo '<div class="cal-day empty"></div>';
-          // Day cells
           for ($d = 1; $d <= $days_in_month; $d++):
-            $has  = isset($heatmap_data[$d]);
+            $has = isset($heatmap_data[$d]);
             $is_today = ($d === $today_d);
             $is_sel   = ($d === $sel_day && $view_mode === 'month');
             $dc = 'cal-day' . ($has ? ' has-data' : ' no-data') . ($is_today ? ' today' : '') . ($is_sel ? ' selected' : '');
-            $day_url = navUrl('day', $sel_year, $sel_month, $d);
+            $day_url = navUrl('day', $sel_year, $sel_month, $d) . $rpt_qs;
           ?>
           <a href="<?= $day_url ?>" class="<?= $dc ?>">
             <div class="cd-num"><?= $d ?></div>
@@ -636,7 +534,6 @@ window.addEventListener('DOMContentLoaded', function() {
       </div>
 
       <?php else: ?>
-      <!-- DAY VIEW: single day highlight -->
       <?php
         $day_row = null;
         foreach ($data as $row) {
@@ -650,52 +547,40 @@ window.addEventListener('DOMContentLoaded', function() {
           <span class="badge badge-green"><?= number_format($day_row['readings']) ?> readings</span>
         </div>
         <div class="day-stat-row">
-          <div class="day-stat">
-            <div class="day-stat-label">Avg Temp</div>
-            <div class="day-stat-val"><?= number_format($day_row['avg_temp'],1) ?><span>°C</span></div>
-          </div>
-          <div class="day-stat">
-            <div class="day-stat-label">Min / Max Temp</div>
-            <div class="day-stat-val"><?= number_format($day_row['min_temp'],1) ?><span>° – </span><?= number_format($day_row['max_temp'],1) ?><span>°C</span></div>
-          </div>
-          <div class="day-stat">
-            <div class="day-stat-label">Avg Humidity</div>
-            <div class="day-stat-val"><?= number_format($day_row['avg_hum'],1) ?><span>%</span></div>
-          </div>
-          <div class="day-stat">
-            <div class="day-stat-label">Min / Max Hum</div>
-            <div class="day-stat-val"><?= number_format($day_row['min_hum'],1) ?><span>% – </span><?= number_format($day_row['max_hum'],1) ?><span>%</span></div>
-          </div>
+          <div class="day-stat"><div class="day-stat-label">Avg Temp</div><div class="day-stat-val"><?= number_format($day_row['avg_temp'],1) ?><span>°C</span></div></div>
+          <div class="day-stat"><div class="day-stat-label">Min / Max Temp</div><div class="day-stat-val"><?= number_format($day_row['min_temp'],1) ?><span>° – </span><?= number_format($day_row['max_temp'],1) ?><span>°C</span></div></div>
+          <div class="day-stat"><div class="day-stat-label">Avg Humidity</div><div class="day-stat-val"><?= number_format($day_row['avg_hum'],1) ?><span>%</span></div></div>
+          <div class="day-stat"><div class="day-stat-label">Min / Max Hum</div><div class="day-stat-val"><?= number_format($day_row['min_hum'],1) ?><span>% – </span><?= number_format($day_row['max_hum'],1) ?><span>%</span></div></div>
         </div>
         <?php else: ?>
         <div class="empty-state"><i class="fas fa-calendar-xmark"></i><span>No sensor data for <?= date('F j, Y', mktime(0,0,0,$sel_month,$sel_day,$sel_year)) ?>.</span></div>
         <?php endif; ?>
       </div>
       <div class="cal-legend">
-        <a href="<?= navUrl('month',$sel_year,$sel_month,$sel_day) ?>" style="font-size:11px;color:var(--green);text-decoration:none;font-weight:600;"><i class="fas fa-arrow-left" style="font-size:10px;margin-right:4px;"></i> Back to <?= date('F Y',mktime(0,0,0,$sel_month,1,$sel_year)) ?></a>
+        <a href="<?= navUrl('month',$sel_year,$sel_month,$sel_day) . $rpt_qs ?>" style="font-size:11px;color:var(--green);text-decoration:none;font-weight:600;"><i class="fas fa-arrow-left" style="font-size:10px;margin-right:4px;"></i> Back to <?= date('F Y',mktime(0,0,0,$sel_month,1,$sel_year)) ?></a>
       </div>
       <?php endif; ?>
     </div>
 
     <?php
-    $all_temps = array_column($data,'avg_temp');
-    $all_hums  = array_column($data,'avg_hum');
-    $all_reads = array_column($data,'readings');
+    $all_temps = array_column($rpt_data,'avg_temp');
+    $all_hums  = array_column($rpt_data,'avg_hum');
+    $all_reads = array_column($rpt_data,'readings');
     $overall_avg_t = count($all_temps) ? array_sum($all_temps)/count($all_temps) : null;
     $overall_avg_h = count($all_hums)  ? array_sum($all_hums)/count($all_hums)   : null;
     $total_reads   = array_sum($all_reads);
-    $overall_min_t = count($data) ? min(array_column($data,'min_temp')) : null;
-    $overall_max_t = count($data) ? max(array_column($data,'max_temp')) : null;
+    $overall_min_t = count($rpt_data) ? min(array_column($rpt_data,'min_temp')) : null;
+    $overall_max_t = count($rpt_data) ? max(array_column($rpt_data,'max_temp')) : null;
     ?>
 
-    <!-- ── SENSOR HEALTH SCORE ── -->
+    <!-- SENSOR HEALTH SCORE -->
     <div class="card">
       <div class="card-header">
         <div class="card-title">
           <span class="icon icon-green"><i class="fas fa-heart-pulse"></i></span>
           Chamber Health Score
         </div>
-        <span class="card-sub">% of readings within ideal ranges (22–28°C · 85–95% RH) — <?= htmlspecialchars($label) ?></span>
+        <span class="card-sub">% of readings within ideal ranges (22–28°C · 85–95% RH) — <?= htmlspecialchars($rpt_label) ?></span>
       </div>
       <?php if ($health_score === null): ?>
         <div class="empty-state"><i class="fas fa-database"></i><span>No sensor data for this period.</span></div>
@@ -703,11 +588,11 @@ window.addEventListener('DOMContentLoaded', function() {
         $scoreColor = $health_score >= 80 ? '#1a9e5c' : ($health_score >= 50 ? '#b45309' : '#d93025');
         $scoreBg    = $health_score >= 80 ? '#e6f7ef' : ($health_score >= 50 ? '#fef3c7' : '#fdecea');
         $temp_ideal = 0; $hum_ideal = 0;
-        foreach ($data as $row) {
+        foreach ($rpt_data as $row) {
             if ($row['avg_temp'] >= 22 && $row['avg_temp'] <= 28) $temp_ideal++;
             if ($row['avg_hum']  >= 85 && $row['avg_hum']  <= 95) $hum_ideal++;
         }
-        $n = count($data);
+        $n = count($rpt_data);
         $temp_pct = $n ? round($temp_ideal/$n*100) : 0;
         $hum_pct  = $n ? round($hum_ideal/$n*100)  : 0;
       ?>
@@ -721,82 +606,71 @@ window.addEventListener('DOMContentLoaded', function() {
         </div>
         <div class="health-details">
           <div>
-            <div class="health-detail-row">
-              <span class="health-detail-label">Temperature in range</span>
-              <span class="health-detail-val"><?= $temp_pct ?>%</span>
-            </div>
+            <div class="health-detail-row"><span class="health-detail-label">Temperature in range</span><span class="health-detail-val"><?= $temp_pct ?>%</span></div>
             <div class="health-bar-wrap"><div class="health-bar" style="width:<?= $temp_pct ?>%;background:#fb7185;"></div></div>
           </div>
           <div>
-            <div class="health-detail-row">
-              <span class="health-detail-label">Humidity in range</span>
-              <span class="health-detail-val"><?= $hum_pct ?>%</span>
-            </div>
+            <div class="health-detail-row"><span class="health-detail-label">Humidity in range</span><span class="health-detail-val"><?= $hum_pct ?>%</span></div>
             <div class="health-bar-wrap"><div class="health-bar" style="width:<?= $hum_pct ?>%;background:#34d399;"></div></div>
           </div>
           <div>
-            <div class="health-detail-row">
-              <span class="health-detail-label">Overall ideal readings</span>
-              <span class="health-detail-val"><?= number_format($ideal_readings_all) ?> / <?= number_format($total_readings_all) ?></span>
-            </div>
+            <div class="health-detail-row"><span class="health-detail-label">Overall ideal readings</span><span class="health-detail-val"><?= number_format($ideal_readings_all) ?> / <?= number_format($total_readings_all) ?></span></div>
             <div class="health-bar-wrap"><div class="health-bar" style="width:<?= $health_score ?>%;background:<?= $scoreColor ?>;"></div></div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
             <span style="background:<?= $scoreBg ?>;color:<?= $scoreColor ?>;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;"><?= $health_label ?></span>
-            <span style="font-size:11px;color:var(--muted);">Based on <?= htmlspecialchars($label) ?></span>
+            <span style="font-size:11px;color:var(--muted);">Based on <?= htmlspecialchars($rpt_label) ?></span>
           </div>
         </div>
       </div>
       <?php endif; ?>
     </div>
 
-    <!-- ── SENSOR DATA REPORT ── -->
-    <div class="card">
+    <!-- SENSOR DATA REPORT -->
+    <div class="card" id="sensorReport">
       <div class="card-header">
         <div class="card-title">
           <span class="icon icon-blue"><i class="fas fa-table"></i></span>
           Sensor Data Report
         </div>
-<div style="display:flex;align-items:center;gap:10px;">
-          <span class="card-sub"><?php echo htmlspecialchars($label); ?> · <?php echo count($data); ?> day<?php echo (count($data) != 1 ? 's' : ''); ?> of data</span>
-        </div>
+        <?php
+        $cal_qs = "view={$view_mode}&year={$sel_year}&month={$sel_month}&day={$sel_day}";
+        ?>
+        <form method="GET" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;" id="rptRangeForm">
+          <input type="hidden" name="view"  value="<?= $view_mode ?>">
+          <input type="hidden" name="year"  value="<?= $sel_year ?>">
+          <input type="hidden" name="month" value="<?= $sel_month ?>">
+          <input type="hidden" name="day"   value="<?= $sel_day ?>">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;">From</label>
+          <input type="date" name="rpt_from" value="<?= htmlspecialchars($rpt_from) ?>" max="<?= $today ?>"
+                 style="padding:5px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);font-size:12px;color:var(--text);font-family:'DM Mono',monospace;cursor:pointer;outline:none;">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;">To</label>
+          <input type="date" name="rpt_to"   value="<?= htmlspecialchars($rpt_to) ?>"   max="<?= $today ?>"
+                 style="padding:5px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);font-size:12px;color:var(--text);font-family:'DM Mono',monospace;cursor:pointer;outline:none;">
+          <button type="submit" class="rpt-go-btn" formaction="?#sensorReport"><i class="fas fa-arrow-right"></i> Apply</button>
+        </form>
       </div>
 
-      <?php if (count($data)): ?>
+      <?php if (count($rpt_data)): ?>
       <div class="stat-strip">
-        <div class="stat-item">
-          <div class="stat-label">Avg Temp</div>
-          <div class="stat-val"><?= number_format($overall_avg_t,1) ?><span> °C</span></div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-label">Temp Range</div>
-          <div class="stat-val"><?= number_format($overall_min_t,1) ?>–<?= number_format($overall_max_t,1) ?><span> °C</span></div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-label">Avg Humidity</div>
-          <div class="stat-val"><?= number_format($overall_avg_h,1) ?><span> %</span></div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-label">Total Readings</div>
-          <div class="stat-val"><?= number_format($total_reads) ?></div>
-        </div>
+        <div class="stat-item"><div class="stat-label">Avg Temp</div><div class="stat-val"><?= number_format($overall_avg_t,1) ?><span> °C</span></div></div>
+        <div class="stat-item"><div class="stat-label">Temp Range</div><div class="stat-val"><?= number_format($overall_min_t,1) ?>–<?= number_format($overall_max_t,1) ?><span> °C</span></div></div>
+        <div class="stat-item"><div class="stat-label">Avg Humidity</div><div class="stat-val"><?= number_format($overall_avg_h,1) ?><span> %</span></div></div>
+        <div class="stat-item"><div class="stat-label">Total Readings</div><div class="stat-val"><?= number_format($total_reads) ?></div></div>
       </div>
       <?php endif; ?>
 
-      <div class="card-body">
-        <?php if (empty($data)): ?>
-          <div class="empty-state"><i class="fas fa-database"></i><span>No sensor data for this period.</span></div>
+      <div>
+        <?php if (empty($rpt_data)): ?>
+          <div class="empty-state"><i class="fas fa-database"></i><span>No sensor data for this date range.</span></div>
         <?php else: ?>
         <div class="tbl-wrap">
           <table id="sensorTable">
             <thead>
-              <tr>
-                <th>Date</th><th>Avg Temp</th><th>Min Temp</th><th>Max Temp</th>
-                <th>Avg Hum</th><th>Min Hum</th><th>Max Hum</th><th>Readings</th>
-              </tr>
+              <tr><th>Date</th><th>Avg Temp</th><th>Min Temp</th><th>Max Temp</th><th>Avg Hum</th><th>Min Hum</th><th>Max Hum</th><th>Readings</th></tr>
             </thead>
             <tbody>
-              <?php foreach ($data as $row):
+              <?php foreach ($rpt_data as $row):
                 $tc = ($row['avg_temp']>=22&&$row['avg_temp']<=28)?'badge-green':(($row['avg_temp']<22)?'badge-blue':'badge-amber');
                 $hc = ($row['avg_hum'] >=85&&$row['avg_hum'] <=95)?'badge-green':(($row['avg_hum'] <85)?'badge-blue':'badge-red');
               ?>
@@ -818,16 +692,16 @@ window.addEventListener('DOMContentLoaded', function() {
       </div>
     </div>
 
-    <!-- ── SENSOR DATA CHANGES ── -->
+    <!-- SENSOR DATA CHANGES -->
     <div class="card">
       <div class="card-header">
         <div class="card-title">
           <span class="icon icon-green"><i class="fas fa-chart-line"></i></span>
           Sensor Data Changes
         </div>
-        <span class="card-sub">Day-over-day deltas</span>
+        <span class="card-sub">Day-over-day deltas · <?= htmlspecialchars($rpt_label) ?></span>
       </div>
-      <?php if (count($data) < 2): ?>
+      <?php if (count($rpt_data) < 2): ?>
         <div class="empty-state" style="padding:40px;"><i class="fas fa-chart-line"></i><span>Not enough data to compute changes.</span></div>
       <?php else: ?>
         <div class="chart-wrap"><canvas id="changesChart"></canvas></div>
@@ -835,12 +709,12 @@ window.addEventListener('DOMContentLoaded', function() {
           <table>
             <thead><tr><th>Date</th><th>Temp Change (°C)</th><th>Humidity Change (%)</th></tr></thead>
             <tbody>
-              <?php for ($i=1;$i<count($data);$i++):
-                $row_tc=$data[$i]['avg_temp']-$data[$i-1]['avg_temp'];
-                $row_hc=$data[$i]['avg_hum'] -$data[$i-1]['avg_hum'];
+              <?php for ($i=1;$i<count($rpt_data);$i++):
+                $row_tc=$rpt_data[$i]['avg_temp']-$rpt_data[$i-1]['avg_temp'];
+                $row_hc=$rpt_data[$i]['avg_hum'] -$rpt_data[$i-1]['avg_hum'];
               ?>
               <tr>
-                <td class="date-col"><?= date('M j, Y',strtotime($data[$i]['summary_date'])) ?></td>
+                <td class="date-col"><?= date('M j, Y',strtotime($rpt_data[$i]['summary_date'])) ?></td>
                 <td class="<?= trendClass($row_tc) ?>"><i class="fas fa-<?= trendIcon($row_tc) ?>"></i> <?= ($row_tc>=0?'+':'').number_format($row_tc,2) ?></td>
                 <td class="<?= trendClass($row_hc) ?>"><i class="fas fa-<?= trendIcon($row_hc) ?>"></i> <?= ($row_hc>=0?'+':'').number_format($row_hc,2) ?></td>
               </tr>
@@ -879,12 +753,10 @@ window.addEventListener('DOMContentLoaded', function() {
       <?php endif; ?>
     </div>
 
-  </div><!-- end page -->
+  </div>
 </main>
 
-
 <script>
-// PH Time
 (function(){
   const el = document.getElementById('phTime'); if(!el)return;
   let t = parseInt(el.dataset.serverTs,10)||Date.now();
@@ -922,31 +794,29 @@ window.addEventListener('DOMContentLoaded', function() {
   });
 })();
 
-// ── Mobile sidebar toggle ──
-document.getElementById('hamburger').onclick = function() {
-  var s = document.querySelector('.sidebar');
-  var o = document.getElementById('sidebarOverlay');
-  var h = document.getElementById('hamburger');
-  var open = s.classList.contains('open');
-  s.classList[open?'remove':'add']('open');
-  o.classList[open?'remove':'add']('open');
-  h.classList[open?'remove':'add']('open');
-};
-document.getElementById('sidebarOverlay').onclick = function() {
-  document.querySelector('.sidebar').classList.remove('open');
-  document.getElementById('sidebarOverlay').classList.remove('open');
-  document.getElementById('hamburger').classList.remove('open');
-};
-document.querySelectorAll('.sidebar-nav a').forEach(function(a){
-  a.addEventListener('click', function(){ 
-    if(window.innerWidth<=768){
-      document.querySelector('.sidebar').classList.remove('open');
-      document.getElementById('sidebarOverlay').classList.remove('open');
-      document.getElementById('hamburger').classList.remove('open');
-    }
+// Date range clamp client-side: rpt_from <= rpt_to
+(function(){
+  const fromEl = document.querySelector('input[name="rpt_from"]');
+  const toEl   = document.querySelector('input[name="rpt_to"]');
+  if (!fromEl || !toEl) return;
+  fromEl.addEventListener('change', function(){
+    if (toEl.value && toEl.value < this.value) toEl.value = this.value;
   });
-});
+  toEl.addEventListener('change', function(){
+    if (fromEl.value && this.value < fromEl.value) this.value = fromEl.value;
+  });
+})();
 
+// Sidebar toggle
+(function(){
+  var h=document.getElementById('hamburger'),s=document.getElementById('sidebar'),o=document.getElementById('sidebarOverlay');
+  if(!h||!s||!o)return;
+  function open(){s.classList.add('open');o.classList.add('open');h.classList.add('open');}
+  function close(){s.classList.remove('open');o.classList.remove('open');h.classList.remove('open');}
+  h.onclick=function(){s.classList.contains('open')?close():open();};
+  o.onclick=close;
+  s.querySelectorAll('.sidebar-nav a').forEach(function(a){a.addEventListener('click',function(){if(window.innerWidth<=768)close();});});
+})();
 </script>
 </body>
 </html>

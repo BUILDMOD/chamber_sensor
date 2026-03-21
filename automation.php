@@ -36,7 +36,6 @@ $conn->query("CREATE TABLE IF NOT EXISTS device_logs (
     action ENUM('ON','OFF') NOT NULL,
     trigger_type ENUM('auto','manual','schedule','emergency','fault') NOT NULL DEFAULT 'manual',
     trigger_detail TEXT DEFAULT NULL,
-    trigger_detail VARCHAR(100),
     duration_seconds INT DEFAULT NULL,
     logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )");
@@ -131,6 +130,18 @@ $conn->query("CREATE TABLE IF NOT EXISTS device_faults (
     logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )");
 
+// ── Log date filter ──
+$log_date_from = $_GET['log_from'] ?? date('Y-m-d');
+$log_date_to   = $_GET['log_to']   ?? date('Y-m-d');
+// Clamp: max 7-day range
+$dt_from = new DateTime($log_date_from);
+$dt_to   = new DateTime($log_date_to);
+if ($dt_to < $dt_from) $dt_to = clone $dt_from;
+$diff = $dt_from->diff($dt_to)->days;
+if ($diff > 6) $dt_to = (clone $dt_from)->modify('+6 days');
+$log_date_from = $dt_from->format('Y-m-d');
+$log_date_to   = $dt_to->format('Y-m-d');
+
 // ── Fetch data ──
 $rules = [];
 $r=$conn->query("SELECT * FROM automation_rules ORDER BY device, id");
@@ -145,15 +156,17 @@ $schedules = [];
 $r=$conn->query("SELECT * FROM scheduled_tasks ORDER BY run_time");
 if($r) while($row=$r->fetch_assoc()) $schedules[]=$row;
 
+// Filtered logs
 $device_logs = [];
-$r=$conn->query("SELECT * FROM device_logs ORDER BY logged_at DESC LIMIT 100");
-if($r) while($row=$r->fetch_assoc()) $device_logs[]=$row;
-
-// Device stats (last 24h)
-$device_stats = [];
-foreach(['mist','fan','heater','sprayer'] as $d){
-    $rs=$conn->query("SELECT COUNT(*) as toggles FROM device_logs WHERE device='$d' AND logged_at >= NOW() - INTERVAL 24 HOUR");
-    $device_stats[$d] = $rs ? $rs->fetch_assoc()['toggles'] : 0;
+$log_from_sql = $log_date_from . ' 00:00:00';
+$log_to_sql   = $log_date_to   . ' 23:59:59';
+$stmt = $conn->prepare("SELECT * FROM device_logs WHERE logged_at BETWEEN ? AND ? ORDER BY logged_at DESC LIMIT 200");
+if ($stmt) {
+    $stmt->bind_param("ss", $log_from_sql, $log_to_sql);
+    $stmt->execute();
+    $res = $stmt->get_result();
+    while ($row = $res->fetch_assoc()) $device_logs[] = $row;
+    $stmt->close();
 }
 
 $devices = ['mist'=>'Mist','fan'=>'Fan','heater'=>'Heater','sprayer'=>'Sprayer'];
@@ -193,11 +206,6 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 .flash{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:8px;font-size:13px;font-weight:600;margin-bottom:16px;}
 .flash-ok{background:var(--green-lt);color:var(--green);}
 .flash-err{background:var(--red-lt);color:var(--red);}
-.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px;}
-.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 20px;box-shadow:var(--shadow);display:flex;align-items:center;gap:14px;}
-.stat-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;}
-.stat-label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
-.stat-val{font-size:20px;font-weight:700;font-family:'DM Mono',monospace;color:var(--text);}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;}
 .card{background:var(--surface);border-radius:var(--r);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden;margin-bottom:16px;}
 .card:last-child{margin-bottom:0;}
@@ -208,8 +216,10 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 .icon-blue{background:var(--blue-lt);color:var(--blue);}
 .icon-amber{background:var(--amber-lt);color:var(--amber);}
 .icon-red{background:var(--red-lt);color:var(--red);}
-.card-body{padding:20px;}
 .card-sub{font-size:11px;color:var(--muted);}
+
+/* Card header right — count + button together */
+.card-header-right{display:flex;align-items:center;gap:10px;}
 
 /* Rules list */
 .rule-list{display:flex;flex-direction:column;gap:0;}
@@ -266,6 +276,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
 .btn-danger{background:var(--red-lt);color:var(--red);border:1px solid rgba(217,48,37,.15);}
 .btn-danger:hover{background:var(--red);color:#fff;}
 .btn-sm{padding:5px 10px;font-size:12px;}
+.btn-amber{background:var(--amber);color:#fff;}
+.btn-amber:hover{opacity:.88;}
 .empty-state{text-align:center;padding:32px 20px;color:var(--muted);}
 .empty-state i{font-size:28px;display:block;margin-bottom:8px;opacity:.35;}
 .empty-state span{font-size:13px;}
@@ -275,141 +287,55 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
 .modal-close{position:absolute;top:14px;right:16px;background:none;border:none;font-size:18px;color:var(--muted);cursor:pointer;}
 .modal h3{font-size:15px;font-weight:700;margin-bottom:18px;}
 .modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;}
-@media(max-width:900px){.grid-2,.stats-row{grid-template-columns:1fr;}.form-grid-2,.form-grid-3{grid-template-columns:1fr;}}
 
-    /* ============================================================
-       RESPONSIVE / MOBILE
-       ============================================================ */
+/* Date filter bar */
+.log-filter{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.log-filter label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;}
+.log-filter input[type=date]{padding:6px 10px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);font-size:12px;color:var(--text);font-family:'DM Mono',monospace;cursor:pointer;}
+.log-filter input[type=date]:focus{outline:none;border-color:var(--green);}
+.log-filter .filter-note{font-size:11px;color:var(--muted);}
+.log-count-badge{font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);padding:3px 8px;border-radius:20px;font-family:'DM Mono',monospace;}
 
-    /* Hamburger button */
-    .hamburger{
-      display:none;position:fixed;top:4px;left:10px;z-index:200;
-      width:38px;height:38px;border-radius:9px;
-      background:var(--surface);border:1px solid var(--border);
-      box-shadow:var(--shadow);
-      align-items:center;justify-content:center;
-      cursor:pointer;flex-direction:column;gap:4px;padding:9px;
-      touch-action:manipulation;
-      pointer-events:auto;
-    }
-    .hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
+@media(max-width:900px){.grid-2{grid-template-columns:1fr;}.form-grid-2,.form-grid-3{grid-template-columns:1fr;}}
 
-    /* Overlay behind sidebar */
-    .sidebar-overlay{
-      display:none;position:fixed;inset:0;
-      background:rgba(0,0,0,.4);z-index:99;
-      backdrop-filter:blur(3px);
-      -webkit-backdrop-filter:blur(3px);
-    }
-    .sidebar-overlay.open{display:block;}
+/* ============================================================
+   RESPONSIVE / MOBILE
+   ============================================================ */
+.hamburger{display:none;position:fixed;top:4px;left:10px;z-index:200;width:38px;height:38px;border-radius:9px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow);align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;padding:9px;touch-action:manipulation;pointer-events:auto;}
+.hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);}
+.sidebar-overlay.open{display:block;}
 
-    @media(max-width:768px){
-      /* Show hamburger */
-      .hamburger{display:flex;}
-      .sidebar.open ~ * .hamburger, .hamburger.open{display:none!important;}
+@media(max-width:768px){
+  .hamburger{display:flex;}
+  .sidebar{transform:translateX(-100%);transition:transform .28s cubic-bezier(.4,0,.2,1);z-index:100;box-shadow:4px 0 24px rgba(0,0,0,.12);}
+  .sidebar.open{transform:translateX(0);}
+  .main{margin-left:0!important;width:100%!important;overflow-x:hidden;}
+  .topbar{padding:0 10px 0 58px;height:52px;gap:6px;position:fixed!important;top:0;left:0;right:0;z-index:50;}
+  .topbar-title{font-size:14px;}
+  .topbar-time{font-size:11px;padding:4px 10px;}
+  .btn-label{display:none;}
+  .btn{padding:7px 10px;gap:0;}
+  .topbar .btn{min-width:34px;justify-content:center;}
+  .page{padding:14px!important;}
+  .grid-2{grid-template-columns:1fr!important;gap:10px;}
+  .card-header{flex-wrap:wrap;gap:8px;padding:12px 16px 10px;}
+  .card-body{padding:12px 16px!important;}
+  .card-title{font-size:12px;}
+  .log-filter{gap:6px;}
+  .log-filter input[type=date]{font-size:11px;padding:5px 8px;}
+  div[style*="overflow-x"]{overflow-x:auto!important;-webkit-overflow-scrolling:touch;}
+  table.tbl{font-size:12px;min-width:480px;}
+  .tbl thead th,.tbl tbody td{padding:8px 10px;}
+}
 
-      /* Sidebar slides in */
-      .sidebar{
-        transform:translateX(-100%);
-        transition:transform .28s cubic-bezier(.4,0,.2,1);
-        z-index:100;
-        box-shadow:4px 0 24px rgba(0,0,0,.12);
-      }
-      .sidebar.open{transform:translateX(0);}
-
-      /* Main fills full width */
-      .main{margin-left:0!important;width:100%!important;overflow-x:hidden;}
-
-      /* Topbar — room for hamburger on left */
-      .topbar{padding:0 10px 0 58px;height:52px;gap:6px;position:fixed!important;top:0;left:0;right:0;z-index:50;}
-      .topbar-title{font-size:14px;}
-      .topbar-right{gap:6px;}
-      .topbar-time{font-size:11px;padding:4px 10px;}
-      .user-badge{padding:4px 10px;font-size:11px;}
-      .user-badge .role-pill{display:none;}
-      /* Hide button text labels on mobile, show icon only */
-      .btn-label{display:none;}
-      .btn{padding:7px 10px;gap:0;}
-      .topbar .btn{min-width:34px;justify-content:center;}
-
-      /* Page & grid padding */
-      .page{padding:14px!important;}
-      .grid{padding:14px!important;gap:10px!important;}
-
-      /* All columns go full width */
-      .col-3,.col-4,.col-5,.col-6,.col-7,.col-8,.col-9,.col-12{grid-column:span 12!important;}
-
-      /* Stats row — 2 columns on tablet, handled below for phone */
-      .stats-row{grid-template-columns:1fr 1fr!important;gap:10px;}
-
-      /* Gauges — side by side and compact */
-      .gauges-row{flex-direction:row;gap:8px;}
-      .gauge-item{flex:1;padding:10px 6px;}
-      .gauge-wrap{width:100px;height:62px;}
-      .gauge-val{font-size:15px;}
-      .gauge-label{font-size:10px;}
-      .gauge-status{font-size:10px;}
-
-      /* Cards */
-      .card-header{flex-wrap:wrap;gap:8px;padding:12px 16px 10px;}
-      .card-body{padding:12px 16px!important;}
-      .card-title{font-size:12px;}
-
-      /* Filters */
-      .filter-bar{flex-direction:column;align-items:stretch!important;gap:8px;}
-      .filter-bar select,.filter-bar input[type=date]{width:100%;font-size:12px;}
-
-      /* Profile layout */
-      .profile-layout{grid-template-columns:1fr!important;}
-      .form-grid-2,.form-grid-3{grid-template-columns:1fr!important;}
-
-      /* Tabs */
-      .tab-bar{overflow-x:auto;width:100%;-webkit-overflow-scrolling:touch;}
-      .tab{padding:6px 14px;font-size:12px;}
-
-      /* Tables — horizontal scroll */
-      div[style*="overflow-x"]{overflow-x:auto!important;-webkit-overflow-scrolling:touch;}
-      table.tbl{font-size:12px;min-width:480px;}
-      .tbl thead th,.tbl tbody td{padding:8px 10px;}
-
-      /* Devices */
-      .device-row{padding:8px 10px;}
-      .device-name{font-size:12px;}
-      .mode-row{padding:8px 12px;}
-
-      /* Sensor status bar */
-      .sensor-status-bar{flex-wrap:wrap;gap:6px;padding:10px 14px;}
-      .sensor-reading{font-size:12px;}
-
-      /* Stat cards */
-      .stat-card{padding:12px 14px;gap:10px;}
-      .stat-icon{width:36px;height:36px;font-size:14px;}
-      .stat-val{font-size:18px;}
-      .stat-label{font-size:10px;}
-    }
-
-    @media(max-width:480px){
-      /* Single column stats on small phones */
-      .stats-row{grid-template-columns:1fr!important;}
-
-      /* Topbar compact */
-      .topbar{height:48px;position:fixed!important;top:0;left:0;right:0;}
-      .topbar-title{font-size:13px;}
-      .topbar-time{display:none;}
-
-      /* Gauges still side by side but smaller */
-      .gauge-wrap{width:88px;height:55px;}
-      .gauge-val{font-size:13px;}
-
-      /* Page */
-      .page{padding:10px!important;padding-top:58px!important;}
-      .grid{padding:10px!important;gap:8px!important;}
-
-      /* Buttons */
-      .btn{padding:7px 12px;font-size:12px;}
-      .btn-sm{padding:4px 8px;font-size:11px;}
-    }
-
+@media(max-width:480px){
+  .topbar{height:48px;position:fixed!important;top:0;left:0;right:0;}
+  .topbar-title{font-size:13px;}
+  .topbar-time{display:none;}
+  .page{padding:10px!important;padding-top:58px!important;}
+  .log-filter{flex-direction:column;align-items:flex-start;}
+}
 </style>
 </head>
 <body>
@@ -417,7 +343,6 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
   <span></span><span></span><span></span>
 </button>
 <div class="sidebar-overlay" id="sidebarOverlay"></div>
-
 
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
@@ -438,33 +363,12 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
 <main class="main">
   <header class="topbar">
     <span class="topbar-title">Automation</span>
-    <div style="display:flex;align-items:center;gap:12px;">
-      <?php if($isOwner): ?>
-      <button class="btn btn-primary" id="openAddRule"><i class="fas fa-plus"></i><span class="btn-label"> Add Rule</span></button>
-      <button class="btn btn-ghost" id="openAddSchedule"><i class="fas fa-clock"></i><span class="btn-label"> Add Schedule</span></button>
-      <?php endif; ?>
-      <span class="topbar-time" id="phTime" data-server-ts="<?= $server_ts_ms ?>"><?= htmlspecialchars($server_time_formatted) ?></span>
-    </div>
+    <span class="topbar-time" id="phTime" data-server-ts="<?= $server_ts_ms ?>"><?= htmlspecialchars($server_time_formatted) ?></span>
   </header>
 
   <div class="page">
     <?php if($success): ?><div class="flash flash-ok"><i class="fas fa-check-circle"></i> <?= htmlspecialchars($success) ?></div><?php endif; ?>
     <?php foreach($errors as $e): ?><div class="flash flash-err"><i class="fas fa-triangle-exclamation"></i> <?= htmlspecialchars($e) ?></div><?php endforeach; ?>
-
-    <!-- Device Stats 24h -->
-    <div class="stats-row">
-      <?php foreach($devices as $key=>$name):
-        $col = $device_colors[$key]; $icon = $device_icons[$key];
-      ?>
-      <div class="stat-card">
-        <div class="stat-icon" style="background:var(--<?=$col?>-lt);color:var(--<?=$col?>);"><i class="fas <?=$icon?>"></i></div>
-        <div>
-          <div class="stat-label"><?=$name?> Toggles</div>
-          <div class="stat-val"><?=$device_stats[$key]?><span style="font-size:11px;"> /24h</span></div>
-        </div>
-      </div>
-      <?php endforeach; ?>
-    </div>
 
     <!-- Active Faults (only shown when faults exist) -->
     <?php if(!empty($active_faults)): ?>
@@ -497,7 +401,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
     </div>
     <?php endif; ?>
 
-    <!-- Built-in Protections (always active, no setup needed) -->
+    <!-- Built-in Protections -->
     <div class="card" style="margin-bottom:16px;">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-red"><i class="fas fa-shield-halved"></i></span> Built-in Protections</div>
@@ -537,7 +441,12 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
       <div class="card" style="margin-bottom:0;">
         <div class="card-header">
           <div class="card-title"><span class="icon icon-blue"><i class="fas fa-bolt"></i></span> Automation Rules</div>
-          <span class="card-sub"><?=count($rules)?> rules</span>
+          <div class="card-header-right">
+            <span class="card-sub"><?=count($rules)?> rules</span>
+            <?php if($isOwner): ?>
+            <button class="btn btn-primary btn-sm" id="openAddRule"><i class="fas fa-plus"></i> Add Rule</button>
+            <?php endif; ?>
+          </div>
         </div>
         <?php if(empty($rules)): ?>
           <div class="empty-state"><i class="fas fa-bolt"></i><span>No rules yet. Add one to automate devices.</span></div>
@@ -576,7 +485,12 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
       <div class="card" style="margin-bottom:0;">
         <div class="card-header">
           <div class="card-title"><span class="icon icon-amber"><i class="fas fa-clock"></i></span> Scheduled Tasks</div>
-          <span class="card-sub"><?=count($schedules)?> schedules</span>
+          <div class="card-header-right">
+            <span class="card-sub"><?=count($schedules)?> schedules</span>
+            <?php if($isOwner): ?>
+            <button class="btn btn-amber btn-sm" id="openAddSchedule"><i class="fas fa-clock"></i> Add Schedule</button>
+            <?php endif; ?>
+          </div>
         </div>
         <?php if(empty($schedules)): ?>
           <div class="empty-state"><i class="fas fa-clock"></i><span>No schedules yet.</span></div>
@@ -613,13 +527,25 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
     </div>
 
     <!-- Device Activity Log -->
-    <div class="card">
+    <div class="card" id="activityLog">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-green"><i class="fas fa-list-check"></i></span> Device Activity Log</div>
-        <span class="card-sub">Last 100 events</span>
+        <span class="log-count-badge"><?=count($device_logs)?> events</span>
+      </div>
+      <!-- Date Filter -->
+      <div style="padding:12px 20px;border-bottom:1px solid var(--border);background:var(--surface2);">
+        <form method="GET" class="log-filter" id="logFilterForm" action="automation.php#activityLog">
+          <label><i class="fas fa-calendar" style="margin-right:4px;"></i> From</label>
+          <input type="date" name="log_from" value="<?= htmlspecialchars($log_date_from) ?>"
+                 max="<?= date('Y-m-d') ?>" onchange="this.form.submit()">
+          <label>To</label>
+          <input type="date" name="log_to" value="<?= htmlspecialchars($log_date_to) ?>"
+                 max="<?= date('Y-m-d') ?>" onchange="this.form.submit()">
+          <span class="filter-note"><i class="fas fa-info-circle" style="margin-right:3px;"></i>Max 7-day range · up to 200 records</span>
+        </form>
       </div>
       <?php if(empty($device_logs)): ?>
-        <div class="empty-state"><i class="fas fa-list-check"></i><span>No device activity yet.</span></div>
+        <div class="empty-state"><i class="fas fa-list-check"></i><span>No device activity for this date range.</span></div>
       <?php else: ?>
       <div style="overflow-x:auto;">
         <table class="tbl">
@@ -711,7 +637,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-ghost" data-close="addScheduleModal">Cancel</button>
-        <button type="submit" class="btn btn-primary" style="background:var(--amber);"><i class="fas fa-clock"></i> Add Schedule</button>
+        <button type="submit" class="btn btn-amber"><i class="fas fa-clock"></i> Add Schedule</button>
       </div>
     </form>
   </div>
@@ -724,14 +650,35 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
   const fmt=ms=>new Date(ms).toLocaleString('en-PH',{timeZone:'Asia/Manila',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true}).replace(',',' —');
   el.textContent=fmt(t);setInterval(()=>{t+=1000;el.textContent=fmt(t);},1000);
 })();
+
+// Date range clamp
+(function(){
+  const fromEl = document.querySelector('input[name="log_from"]');
+  const toEl   = document.querySelector('input[name="log_to"]');
+  if (!fromEl || !toEl) return;
+
+  function clamp() {
+    if (!fromEl.value || !toEl.value) return;
+    const from = new Date(fromEl.value);
+    const to   = new Date(toEl.value);
+    if (to < from) { toEl.value = fromEl.value; }
+    const diff = (new Date(toEl.value) - from) / 86400000;
+    if (diff > 6) {
+      const maxTo = new Date(from); maxTo.setDate(maxTo.getDate() + 6);
+      toEl.value = maxTo.toISOString().slice(0,10);
+    }
+  }
+
+  fromEl.addEventListener('change', function(){ clamp(); this.form.submit(); });
+  toEl.addEventListener('change', function(){ clamp(); this.form.submit(); });
+})();
+
 function openModal(id){document.getElementById(id)?.classList.add('open');}
 function closeModal(id){document.getElementById(id)?.classList.remove('open');}
 document.querySelectorAll('[data-close]').forEach(el=>el.addEventListener('click',()=>closeModal(el.dataset.close)));
 document.querySelectorAll('.modal-backdrop').forEach(bd=>bd.addEventListener('click',e=>{if(e.target===bd)bd.classList.remove('open');}));
 document.getElementById('openAddRule')?.addEventListener('click',()=>openModal('addRuleModal'));
 document.getElementById('openAddSchedule')?.addEventListener('click',()=>openModal('addScheduleModal'));
-
-
 </script>
 <script>
 (function() {
