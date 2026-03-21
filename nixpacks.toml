@@ -3,3 +3,6 @@ cmds = []
 
 [start]
 cmd = "php -S 0.0.0.0:$PORT"
+
+[phases.setup]
+nixPkgs = ["php", "php83Extensions.gd"]

@@ -7,3 +7,6 @@ COPY . .
 
 EXPOSE 8080
 CMD ["php", "-S", "0.0.0.0:8080"]
+
+RUN apt-get install -y libgd-dev \
+    && docker-php-ext-install gd
