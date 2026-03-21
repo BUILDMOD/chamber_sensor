@@ -144,6 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['modal_register'])) {
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" type="image/png" href="assets/img/jwho-favicon.png">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>J WHO? — Mushroom Incubation System</title>
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400;1,600&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">

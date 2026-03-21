@@ -130,6 +130,7 @@ function navUrl($view, $year, $month, $day) {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+<link rel="icon" type="image/png" href="assets/img/jwho-favicon.png">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Reports</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
