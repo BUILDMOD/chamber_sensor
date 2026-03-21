@@ -27,6 +27,111 @@ $conn->query("CREATE TABLE IF NOT EXISTS system_logs (
     logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )");
 
+// ══════════════════════════════════════════════════════
+// AUTO-RESOLVE LOGIC (runs on every page load)
+// ══════════════════════════════════════════════════════
+
+// Load thresholds
+$thr = ['temp_min'=>22,'temp_max'=>28,'hum_min'=>85,'hum_max'=>95,
+        'emerg_temp_high'=>35,'emerg_temp_low'=>15,'emerg_hum_high'=>98];
+$conn->query("CREATE TABLE IF NOT EXISTS alert_thresholds (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    metric VARCHAR(30) NOT NULL UNIQUE,
+    min_value FLOAT NOT NULL,
+    max_value FLOAT NOT NULL,
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+)");
+$conn->query("INSERT IGNORE INTO alert_thresholds (metric,min_value,max_value) VALUES
+    ('temperature',22,28),('humidity',85,95),
+    ('emergency_temp',15,35),('emergency_hum',0,98)");
+$tr = $conn->query("SELECT metric,min_value,max_value FROM alert_thresholds");
+if ($tr) while ($row = $tr->fetch_assoc()) {
+    if ($row['metric']==='temperature')    { $thr['temp_min']=$row['min_value']; $thr['temp_max']=$row['max_value']; }
+    if ($row['metric']==='humidity')       { $thr['hum_min']=$row['min_value'];  $thr['hum_max']=$row['max_value']; }
+    if ($row['metric']==='emergency_temp') { $thr['emerg_temp_low']=$row['min_value']; $thr['emerg_temp_high']=$row['max_value']; }
+    if ($row['metric']==='emergency_hum')  { $thr['emerg_hum_high']=$row['max_value']; }
+}
+
+// Get latest sensor reading
+$latest_sensor = null;
+$sensor_online = false;
+$rs = $conn->query("SELECT temperature, humidity, timestamp FROM sensor_data ORDER BY id DESC LIMIT 1");
+if ($rs && $rs->num_rows > 0) {
+    $sr = $rs->fetch_assoc();
+    $age_minutes = round((time() - strtotime($sr['timestamp'])) / 60);
+    $sensor_online = ($age_minutes < 5);
+    $latest_sensor = $sr;
+    $latest_sensor['age_minutes'] = $age_minutes;
+}
+
+// ── Auto-resolve temperature alerts ──
+if ($sensor_online && $latest_sensor) {
+    $temp = floatval($latest_sensor['temperature']);
+    $hum  = floatval($latest_sensor['humidity']);
+
+    // Temp back in range → resolve open temp alerts
+    if ($temp >= $thr['temp_min'] && $temp <= $thr['temp_max']) {
+        $conn->query("UPDATE alert_logs
+            SET resolved=1
+            WHERE alert_type='temperature'
+              AND resolved=0");
+    }
+
+    // Humidity back in range → resolve open humidity alerts
+    if ($hum >= $thr['hum_min'] && $hum <= $thr['hum_max']) {
+        $conn->query("UPDATE alert_logs
+            SET resolved=1
+            WHERE alert_type='humidity'
+              AND resolved=0");
+    }
+}
+
+// ── Auto-resolve sensor offline / system alerts ──
+if ($sensor_online) {
+    // Resolve "offline" system alerts
+    $conn->query("UPDATE alert_logs
+        SET resolved=1
+        WHERE alert_type='system'
+          AND resolved=0
+          AND (message LIKE '%offline%' OR message LIKE '%Sensor offline%')");
+}
+
+// ── Auto-resolve device fault alerts ──
+// If a fault has been resolved in device_faults table, resolve its alert too
+$conn->query("CREATE TABLE IF NOT EXISTS device_faults (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    device VARCHAR(30) NOT NULL,
+    fault_type ENUM('no_response','stuck_on') NOT NULL,
+    detail VARCHAR(200),
+    sensor_val FLOAT,
+    resolved TINYINT(1) NOT NULL DEFAULT 0,
+    logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)");
+// Resolve device alerts where the associated fault has been resolved
+$conn->query("UPDATE alert_logs al
+    SET al.resolved=1
+    WHERE al.alert_type='device'
+      AND al.resolved=0
+      AND NOT EXISTS (
+          SELECT 1 FROM device_faults df
+          WHERE df.resolved=0
+            AND al.message LIKE CONCAT('%', df.device, '%')
+      )");
+
+// ── Auto-resolve: if NO active faults at all, resolve all device alerts ──
+$active_fault_count = 0;
+$rfc = $conn->query("SELECT COUNT(*) as cnt FROM device_faults WHERE resolved=0");
+if ($rfc) $active_fault_count = intval($rfc->fetch_assoc()['cnt']);
+if ($active_fault_count === 0) {
+    $conn->query("UPDATE alert_logs SET resolved=1
+        WHERE alert_type='device' AND resolved=0");
+}
+
+// ══════════════════════════════════════════════════════
+// END AUTO-RESOLVE
+// ══════════════════════════════════════════════════════
+
 // ── Filters ──
 $alert_type   = $_GET['alert_type']   ?? '';
 $alert_sev    = $_GET['severity']     ?? '';
@@ -34,7 +139,7 @@ $log_type     = $_GET['log_type']     ?? '';
 $date_from    = $_GET['date_from']    ?? date('Y-m-d', strtotime('-7 days'));
 $date_to      = $_GET['date_to']      ?? date('Y-m-d');
 
-// ── Mark all resolved ──
+// ── Mark all resolved (manual) ──
 if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['resolve_all'])) {
     $conn->query("UPDATE alert_logs SET resolved=1 WHERE resolved=0");
     header('Location: logs.php'); exit;
@@ -66,15 +171,8 @@ if ($rs) while ($row=$rs->fetch_assoc()) {
     if ($row['severity']==='warning')  $warning_count  = $row['cnt'];
 }
 
-// ── Sensor status ──
-$sensor_status = ['online'=>false,'last_reading'=>null,'minutes_ago'=>null];
-$rs = $conn->query("SELECT temperature, humidity, timestamp FROM sensor_data ORDER BY id DESC LIMIT 1");
-if ($rs && $rs->num_rows > 0) {
-    $sr = $rs->fetch_assoc();
-    $last_ts = strtotime($sr['timestamp']);
-    $mins_ago = round((time() - $last_ts) / 60);
-    $sensor_status = ['online'=>$mins_ago < 5,'last_reading'=>$sr,'minutes_ago'=>$mins_ago];
-}
+// ── Sensor status (use already-fetched data) ──
+$sensor_status = ['online'=>$sensor_online,'last_reading'=>$latest_sensor,'minutes_ago'=>$latest_sensor['age_minutes']??null];
 
 // ── Alert type counts for last 7 days ──
 $alert_type_counts = [];
@@ -164,155 +262,61 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
 .tab{padding:7px 18px;border-radius:7px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;transition:all .15s;border:none;background:none;font-family:'DM Sans',sans-serif;}
 .tab.active{background:var(--surface);color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,0.08);}
 
+/* Auto-resolve notice banner */
+.autoresolve-notice{display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:8px;background:var(--green-lt);border:1px solid rgba(26,158,92,.2);margin-bottom:16px;font-size:12.5px;font-weight:600;color:var(--green);}
+.autoresolve-notice i{font-size:13px;flex-shrink:0;}
 
-    /* ============================================================
-       RESPONSIVE / MOBILE
-       ============================================================ */
+/* ============================================================
+   RESPONSIVE / MOBILE
+   ============================================================ */
+.hamburger{display:none;position:fixed;top:4px;left:10px;z-index:200;width:38px;height:38px;border-radius:9px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow);align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;padding:9px;touch-action:manipulation;pointer-events:auto;}
+.hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);}
+.sidebar-overlay.open{display:block;}
 
-    /* Hamburger button */
-    .hamburger{
-      display:none;position:fixed;top:4px;left:10px;z-index:200;
-      width:38px;height:38px;border-radius:9px;
-      background:var(--surface);border:1px solid var(--border);
-      box-shadow:var(--shadow);
-      align-items:center;justify-content:center;
-      cursor:pointer;flex-direction:column;gap:4px;padding:9px;
-      touch-action:manipulation;
-      pointer-events:auto;
-    }
-    .hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
+@media(max-width:768px){
+  .hamburger{display:flex;}
+  .sidebar{transform:translateX(-100%);transition:transform .28s cubic-bezier(.4,0,.2,1);z-index:100;box-shadow:4px 0 24px rgba(0,0,0,.12);}
+  .sidebar.open{transform:translateX(0);}
+  .main{margin-left:0!important;width:100%!important;overflow-x:hidden;}
+  .topbar{padding:0 10px 0 58px;height:52px;gap:6px;position:fixed!important;top:0;left:0;right:0;z-index:50;}
+  .topbar-title{font-size:14px;}
+  .topbar-time{font-size:11px;padding:4px 10px;}
+  .btn-label{display:none;}
+  .btn{padding:7px 10px;gap:0;}
+  .topbar .btn{min-width:34px;justify-content:center;}
+  .page{padding:14px!important;padding-top:66px!important;}
+  .stats-row{grid-template-columns:1fr 1fr!important;gap:8px;}
+  .stat-card{padding:10px 12px!important;gap:8px!important;}
+  .stat-icon{width:32px!important;height:32px!important;font-size:13px!important;flex-shrink:0;}
+  .stat-label{font-size:10px!important;}
+  .stat-val{font-size:20px!important;}
+  .card-header{flex-direction:column!important;align-items:stretch!important;padding:12px!important;}
+  .card-header .card-title{margin-bottom:8px;}
+  .filter-bar{display:grid!important;grid-template-columns:1fr 1fr!important;gap:6px!important;width:100%;}
+  .filter-bar input[type=date]{grid-column:span 1;}
+  .filter-bar select{grid-column:span 1;}
+  .filter-bar span{display:none!important;}
+  .filter-bar .btn{grid-column:span 1;}
+  .filter-bar a.btn{grid-column:span 1;}
+  .tab-bar{overflow-x:auto;width:100%;-webkit-overflow-scrolling:touch;}
+  .tab{padding:6px 14px;font-size:12px;}
+  div[style*="overflow-x"]{overflow-x:auto!important;-webkit-overflow-scrolling:touch;}
+  table.tbl{font-size:12px;min-width:480px;}
+  .tbl thead th,.tbl tbody td{padding:8px 10px;}
+  .sensor-status-bar{flex-wrap:wrap;gap:6px;padding:10px 14px;}
+  .sensor-reading{font-size:12px;}
+}
 
-    /* Overlay behind sidebar */
-    .sidebar-overlay{
-      display:none;position:fixed;inset:0;
-      background:rgba(0,0,0,.4);z-index:99;
-      backdrop-filter:blur(3px);
-      -webkit-backdrop-filter:blur(3px);
-    }
-    .sidebar-overlay.open{display:block;}
-
-    @media(max-width:768px){
-      /* Show hamburger */
-      .hamburger{display:flex;}
-      .sidebar.open ~ * .hamburger, .hamburger.open{display:none!important;}
-
-      /* Sidebar slides in */
-      .sidebar{
-        transform:translateX(-100%);
-        transition:transform .28s cubic-bezier(.4,0,.2,1);
-        z-index:100;
-        box-shadow:4px 0 24px rgba(0,0,0,.12);
-      }
-      .sidebar.open{transform:translateX(0);}
-
-      /* Main fills full width */
-      .main{margin-left:0!important;width:100%!important;overflow-x:hidden;}
-
-      /* Topbar — room for hamburger on left */
-      .topbar{padding:0 10px 0 58px;height:52px;gap:6px;position:fixed!important;top:0;left:0;right:0;z-index:50;}
-      .topbar-title{font-size:14px;}
-      .topbar-right{gap:6px;}
-      .topbar-time{font-size:11px;padding:4px 10px;}
-      .user-badge{padding:4px 10px;font-size:11px;}
-      .user-badge .role-pill{display:none;}
-      /* Hide button text labels on mobile, show icon only */
-      .btn-label{display:none;}
-      .btn{padding:7px 10px;gap:0;}
-      .topbar .btn{min-width:34px;justify-content:center;}
-
-      /* Page & grid padding */
-      .page{padding:14px!important;}
-      .grid{padding:14px!important;gap:10px!important;}
-
-      /* All columns go full width */
-      .col-3,.col-4,.col-5,.col-6,.col-7,.col-8,.col-9,.col-12{grid-column:span 12!important;}
-
-      /* Stats row — 2 columns on tablet, handled below for phone */
-      /* Logs: always 2x2 grid for 4 stat cards */
-      .stats-row{grid-template-columns:1fr 1fr!important;gap:8px;}
-      /* Compact stat cards */
-      .stat-card{padding:10px 12px!important;gap:8px!important;}
-      .stat-icon{width:32px!important;height:32px!important;font-size:13px!important;flex-shrink:0;}
-      .stat-label{font-size:10px!important;}
-      .stat-val{font-size:20px!important;}
-      /* Filter bar inside card-header: stack neatly */
-      .card-header{flex-direction:column!important;align-items:stretch!important;padding:12px!important;}
-      .card-header .card-title{margin-bottom:8px;}
-      .filter-bar{display:grid!important;grid-template-columns:1fr 1fr!important;gap:6px!important;width:100%;}
-      .filter-bar input[type=date]{grid-column:span 1;}
-      .filter-bar select{grid-column:span 1;}
-      .filter-bar span{display:none!important;}
-      .filter-bar .btn{grid-column:span 1;}
-      .filter-bar a.btn{grid-column:span 1;}
-
-      /* Gauges — side by side and compact */
-      .gauges-row{flex-direction:row;gap:8px;}
-      .gauge-item{flex:1;padding:10px 6px;}
-      .gauge-wrap{width:100px;height:62px;}
-      .gauge-val{font-size:15px;}
-      .gauge-label{font-size:10px;}
-      .gauge-status{font-size:10px;}
-
-      /* Cards */
-      .card-header{flex-wrap:wrap;gap:8px;padding:12px 16px 10px;}
-      .card-body{padding:12px 16px!important;}
-      .card-title{font-size:12px;}
-
-      /* Filters */
-      .filter-bar{flex-direction:column;align-items:stretch!important;gap:8px;}
-      .filter-bar select,.filter-bar input[type=date]{width:100%;font-size:12px;}
-
-      /* Profile layout */
-      .profile-layout{grid-template-columns:1fr!important;}
-      .form-grid-2,.form-grid-3{grid-template-columns:1fr!important;}
-
-      /* Tabs */
-      .tab-bar{overflow-x:auto;width:100%;-webkit-overflow-scrolling:touch;}
-      .tab{padding:6px 14px;font-size:12px;}
-
-      /* Tables — horizontal scroll */
-      div[style*="overflow-x"]{overflow-x:auto!important;-webkit-overflow-scrolling:touch;}
-      table.tbl{font-size:12px;min-width:480px;}
-      .tbl thead th,.tbl tbody td{padding:8px 10px;}
-
-      /* Devices */
-      .device-row{padding:8px 10px;}
-      .device-name{font-size:12px;}
-      .mode-row{padding:8px 12px;}
-
-      /* Sensor status bar */
-      .sensor-status-bar{flex-wrap:wrap;gap:6px;padding:10px 14px;}
-      .sensor-reading{font-size:12px;}
-
-      /* Stat cards */
-      .stat-card{padding:12px 14px;gap:10px;}
-      .stat-icon{width:36px;height:36px;font-size:14px;}
-      .stat-val{font-size:18px;}
-      .stat-label{font-size:10px;}
-    }
-
-    @media(max-width:480px){
-      /* Single column stats on small phones */
-      .stats-row{grid-template-columns:1fr!important;}
-
-      /* Topbar compact */
-      .topbar{height:48px;position:fixed!important;top:0;left:0;right:0;}
-      .topbar-title{font-size:13px;}
-      .topbar-time{display:none;}
-
-      /* Gauges still side by side but smaller */
-      .gauge-wrap{width:88px;height:55px;}
-      .gauge-val{font-size:13px;}
-
-      /* Page */
-      .page{padding:10px!important;padding-top:58px!important;}
-      .grid{padding:10px!important;gap:8px!important;}
-
-      /* Buttons */
-      .btn{padding:7px 12px;font-size:12px;}
-      .btn-sm{padding:4px 8px;font-size:11px;}
-    }
-
+@media(max-width:480px){
+  .stats-row{grid-template-columns:1fr!important;}
+  .topbar{height:48px;position:fixed!important;top:0;left:0;right:0;}
+  .topbar-title{font-size:13px;}
+  .topbar-time{display:none;}
+  .page{padding:10px!important;padding-top:58px!important;}
+  .btn{padding:7px 12px;font-size:12px;}
+  .btn-sm{padding:4px 8px;font-size:11px;}
+}
 </style>
 </head>
 <body>
@@ -320,7 +324,6 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
   <span></span><span></span><span></span>
 </button>
 <div class="sidebar-overlay" id="sidebarOverlay"></div>
-
 
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
@@ -391,6 +394,12 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
       </div>
     </div>
 
+    <!-- Auto-resolve info notice -->
+    <div class="autoresolve-notice">
+      <i class="fas fa-rotate"></i>
+      Alerts auto-resolve when conditions return to normal: temperature (<?= $thr['temp_min'] ?>–<?= $thr['temp_max'] ?>°C), humidity (<?= $thr['hum_min'] ?>–<?= $thr['hum_max'] ?>%), sensor online, and no active device faults.
+    </div>
+
     <!-- Tabs -->
     <div class="tab-bar">
       <button class="tab active" data-tab="alerts">Alert Log</button>
@@ -439,7 +448,15 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
                 <td><span style="font-size:12px;font-weight:600;"><?= ucfirst($al['alert_type']) ?></span></td>
                 <td class="msg-col"><?= htmlspecialchars($al['message']) ?></td>
                 <td class="mono"><?= $al['value'] !== null ? number_format($al['value'],1) : '—' ?></td>
-                <td><span class="pill <?= $al['resolved'] ? 'pill-resolved' : 'pill-unresolved' ?>"><?= $al['resolved'] ? 'Resolved' : 'Open' ?></span></td>
+                <td>
+                  <span class="pill <?= $al['resolved'] ? 'pill-resolved' : 'pill-unresolved' ?>">
+                    <?php if ($al['resolved']): ?>
+                      <i class="fas fa-check" style="font-size:9px;margin-right:3px;"></i>Auto-resolved
+                    <?php else: ?>
+                      Open
+                    <?php endif; ?>
+                  </span>
+                </td>
                 <td class="mono"><?= date('M j, Y — g:i:s A', strtotime($al['logged_at'])) ?></td>
               </tr>
               <?php endforeach; ?>
@@ -522,8 +539,6 @@ tabs.forEach(tab=>{
 if(urlTab==='system'){
   document.querySelector('[data-tab="system"]').click();
 }
-
-
 </script>
 <script>
 (function() {
