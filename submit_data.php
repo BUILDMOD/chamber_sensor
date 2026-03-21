@@ -2,16 +2,7 @@
 date_default_timezone_set('Asia/Manila');
 
 // Database connection
-$servername = "localhost";
-$username = "root";
-$password = "";
-$dbname = "mushroom_system";
-
-$conn = new mysqli($servername, $username, $password, $dbname);
-
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
-}
+include 'includes/db_connect.php';
 
 $conn->query("CREATE TABLE IF NOT EXISTS sensor_data (
     id INT AUTO_INCREMENT PRIMARY KEY,
