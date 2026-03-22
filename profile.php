@@ -112,11 +112,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_user'])) {
     $sessionRole=$_SESSION['role']??''; if ($sessionRole!=='owner') { $errors[]="Access denied."; } else {
         $del_id=intval($_POST['delete_user_id']??0);
         if ($del_id<=0) { $errors[]="Invalid ID."; } else {
-            $du=null; $s=$conn->prepare("SELECT id,username,role FROM users WHERE id=? LIMIT 1");
+            $du=null; $s=$conn->prepare("SELECT id,username,fullname,email,role FROM users WHERE id=? LIMIT 1");
             if ($s) { $s->bind_param("i",$del_id); $s->execute(); $r=$s->get_result(); if ($r&&$r->num_rows>0) $du=$r->fetch_assoc(); $s->close(); }
             if (!$du) { $errors[]="User not found."; } elseif ($du['id']===$user['id']) { $errors[]="Cannot delete own account."; } else {
                 $d=$conn->prepare("DELETE FROM users WHERE id=?");
-                if ($d) { $d->bind_param("i",$del_id); if ($d->execute()) { $success="User deleted."; logActivity($conn,$user['id'],"Deleted: {$du['username']}"); } else $errors[]="DB error."; $d->close(); }
+                if ($d) { $d->bind_param("i",$del_id);
+                    if ($d->execute()) {
+                        $success="User deleted.";
+                        logActivity($conn,$user['id'],"Deleted: {$du['username']}");
+                        if (!empty($du['email'])) {
+                            $deletedBy = $user['fullname'] ?? 'the Owner';
+                            $subject = "MushroomOS — Your Account Has Been Removed";
+                            $body = "<div style='font-family:sans-serif;max-width:480px;margin:0 auto;'>"
+                                  . "<div style='background:#2b4d30;padding:24px;border-radius:12px 12px 0 0;text-align:center;'>"
+                                  . "<h2 style='color:#c8e8b8;margin:0;font-size:20px;'>&#127812; MushroomOS</h2>"
+                                  . "<p style='color:rgba(200,232,184,0.6);font-size:12px;margin:6px 0 0;'>J.WHO Mushroom Farm</p>"
+                                  . "</div>"
+                                  . "<div style='background:#ffffff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #e0e0e0;'>"
+                                  . "<p style='font-size:15px;margin:0 0 8px;'>Hello <strong>" . htmlspecialchars($du['fullname']) . "</strong>,</p>"
+                                  . "<p style='color:#555;font-size:13px;line-height:1.6;margin:0 0 16px;'>Your MushroomOS account has been <strong>removed</strong> by <strong>" . htmlspecialchars($deletedBy) . "</strong>. You will no longer be able to log in to the system.</p>"
+                                  . "<p style='background:#fff0f0;border-left:4px solid #e53935;padding:10px 14px;border-radius:4px;color:#b71c1c;margin:0 0 16px;'>&#10007; Your account (<strong>" . htmlspecialchars($du['username']) . "</strong>) has been <strong>deleted</strong>.</p>"
+                                  . "<p style='color:#555;font-size:13px;'>If you believe this is a mistake, please contact the farm owner directly.</p>"
+                                  . "<hr style='border:none;border-top:1px solid #eee;margin:16px 0;'>"
+                                  . "<p style='font-size:12px;color:#aaa;text-align:center;margin:0;'>MushroomOS &middot; J.WHO Mushroom Farm</p>"
+                                  . "</div></div>";
+                            sendEmail($du['email'], $subject, $body);
+                        }
+                    } else $errors[]="DB error.";
+                    $d->close();
+                }
             }
         }
     }

@@ -197,9 +197,44 @@ if ($stmt->execute()) {
 
             if ($should_send) {
                 include 'send_email.php';
-                $subject = "⚠️ MushroomOS Alert";
-                $body = "<b>Alert triggered at {$timestamp}</b><br><br>" . nl2br(htmlspecialchars($alert_message)) .
-                        "<br><br><small>Thresholds: Temperature {$temp_min}–{$temp_max}°C · Humidity {$hum_min}–{$hum_max}%</small>";
+
+                // Build alert rows for each triggered alert
+                $alert_rows = '';
+                foreach ($alerts_triggered as $al) {
+                    $alIcon  = $al['type'] === 'temperature' ? '🌡️' : '💧';
+                    $alLabel = ucfirst($al['type']);
+                    $alVal   = $al['type'] === 'temperature' ? $al['value'].'°C' : $al['value'].'%';
+                    $alSev   = ucfirst($al['severity']);
+                    $alColor = $al['severity'] === 'critical' ? '#d93025' : '#b45309';
+                    $alert_rows .= "
+                        <tr><td style='padding:8px 12px;background:#f7f8fa;color:#6e7681;width:40%;'>Type</td><td style='padding:8px 12px;font-weight:600;'>{$alIcon} {$alLabel}</td></tr>
+                        <tr><td style='padding:8px 12px;color:#6e7681;'>Value</td><td style='padding:8px 12px;font-weight:600;color:{$alColor};'>{$alVal}</td></tr>
+                        <tr><td style='padding:8px 12px;background:#f7f8fa;color:#6e7681;'>Severity</td><td style='padding:8px 12px;font-weight:600;color:{$alColor};'>{$alSev}</td></tr>
+                    ";
+                }
+
+                $detectedAt = date('M j, Y h:i:s A', strtotime($timestamp));
+                $subject = "⚠️ MushroomOS — Sensor Alert";
+                $body = "
+                    <div style='font-family:sans-serif;max-width:480px;margin:0 auto;'>
+                        <div style='background:#2b4d30;padding:24px;border-radius:12px 12px 0 0;text-align:center;'>
+                            <h2 style='color:#c8e8b8;margin:0;font-size:20px;'>&#127812; MushroomOS — Sensor Alert</h2>
+                            <p style='color:rgba(200,232,184,0.6);font-size:12px;margin:6px 0 0;'>J.WHO Mushroom Farm</p>
+                        </div>
+                        <div style='background:#ffffff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #e0e0e0;'>
+                            <p style='background:#fef3c7;border-left:4px solid #f9a825;padding:12px 16px;border-radius:4px;color:#b45309;font-weight:600;margin:0 0 16px;'>
+                                &#9888; One or more sensor readings are out of range.
+                            </p>
+                            <table style='width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;'>
+                                {$alert_rows}
+                                <tr><td style='padding:8px 12px;color:#6e7681;'>Detected At</td><td style='padding:8px 12px;font-weight:600;'>{$detectedAt}</td></tr>
+                                <tr><td style='padding:8px 12px;background:#f7f8fa;color:#6e7681;'>Thresholds</td><td style='padding:8px 12px;'>Temp {$temp_min}–{$temp_max}°C &middot; Humidity {$hum_min}–{$hum_max}%</td></tr>
+                            </table>
+                            <p style='color:#555;font-size:13px;'>Please check your chamber conditions immediately.</p>
+                            <hr style='border:none;border-top:1px solid #eee;margin:16px 0;'>
+                            <p style='font-size:12px;color:#aaa;text-align:center;margin:0;'>MushroomOS &middot; J.WHO Mushroom Farm</p>
+                        </div>
+                    </div>";
                 sendEmail($recipient, $subject, $body);
                 $update_stmt = $conn->prepare("INSERT INTO email_throttle (email, last_sent) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_sent = ?");
                 $update_stmt->bind_param("sss", $throttle_key, $timestamp, $timestamp);

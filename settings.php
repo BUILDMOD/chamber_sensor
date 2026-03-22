@@ -43,7 +43,6 @@ $defaults = [
     'notify_offline'      => '1',
     'notify_emergency'    => '1',
     'notify_cooldown_min' => '30',
-    // Camera quality defaults
     'cam_resolution'      => 'VGA',
     'cam_quality'         => '12',
     'cam_brightness'      => '1',
@@ -83,11 +82,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_thresholds'])) {
     }
 }
 
-// ── Save SMTP Settings ──
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['save_smtp']) || ($_POST['form_action'] ?? '') === 'save')) {
+// ── Save SMTP + Notification Settings (combined) ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_smtp'])) {
     if (!$isOwner) { $errors[] = 'Access denied.'; } else {
-        $keys = ['smtp_host','smtp_port','smtp_user','smtp_from_name','notify_temp','notify_hum','notify_offline','notify_emergency','notify_cooldown_min'];
-        foreach ($keys as $k) {
+        // SMTP keys → notification_settings table
+        $smtp_keys = ['smtp_host','smtp_port','smtp_user','smtp_from_name'];
+        foreach ($smtp_keys as $k) {
             $val = trim($_POST[$k] ?? '');
             $s = $conn->prepare("INSERT INTO notification_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
             if ($s) { $s->bind_param("ss", $k, $val); $s->execute(); $s->close(); }
@@ -98,74 +98,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['save_smtp']) || ($_P
             $s = $conn->prepare("INSERT INTO notification_settings (setting_key,setting_value) VALUES ('smtp_pass',?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
             if ($s) { $s->bind_param("s", $pass); $s->execute(); $s->close(); }
         }
-        if (empty($errors)) $success = 'Notification settings saved.';
-    }
-}
-
-// ── Send Test Email ──
-$test_result = '';
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && (isset($_POST['send_test']) || ($_POST['form_action'] ?? '') === 'test')) {
-    if (!$isOwner) { $errors[] = 'Access denied.'; } else {
-
-        // Re-fetch latest saved settings from DB
-        $ns_test = [];
-        $r = $conn->query("SELECT setting_key,setting_value FROM notification_settings");
-        if ($r) while ($row = $r->fetch_assoc()) $ns_test[$row['setting_key']] = $row['setting_value'];
-
-        $host      = $ns_test['smtp_host']      ?? '';
-        $port      = intval($ns_test['smtp_port'] ?? 587);
-        $user      = $ns_test['smtp_user']      ?? '';
-        $pass      = $ns_test['smtp_pass']      ?? '';
-        $to        = $ns_test['smtp_to_email']  ?? '';
-        $from_name = $ns_test['smtp_from_name'] ?? 'MushroomOS';
-
-        if (!$host || !$user || !$pass || !$to) {
-            $test_result = 'error:SMTP settings incomplete. Please save your configuration first.';
-        } else {
-            require_once 'PHPMailer-master/src/PHPMailer.php';
-            require_once 'PHPMailer-master/src/SMTP.php';
-            require_once 'PHPMailer-master/src/Exception.php';
-
-            try {
-                $mail = new PHPMailer\PHPMailer\PHPMailer(true);
-                $mail->isSMTP();
-                $mail->Host       = $host;
-                $mail->SMTPAuth   = true;
-                $mail->Username   = $user;
-                $mail->Password   = $pass;
-                $mail->SMTPSecure = PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS; // ✅ fixed constant
-                $mail->Port       = $port;
-                $mail->setFrom($user, $from_name);
-                $mail->addAddress($to);
-                $mail->isHTML(true); // ✅ enable HTML
-                $mail->Subject = 'MushroomOS — Test Notification';
-                $mail->Body    = "
-                    <b>MushroomOS Test Email</b><br><br>
-                    If you received this, your email notification settings are working correctly.<br><br>
-                    <b>Sent:</b> " . date('M j, Y h:i:s A T') . "
-                ";
-                $mail->AltBody = "MushroomOS Test Email\n\nIf you received this, your email notification settings are working correctly.\n\nSent: " . date('M j, Y h:i:s A T'); // ✅ plain text fallback
-                $mail->send();
-                $test_result = 'ok:Test email sent to ' . htmlspecialchars($to) . '. Check your inbox.';
-            } catch (Exception $e) {
-                error_log("Test email error: " . $mail->ErrorInfo);
-                $test_result = 'error:' . $mail->ErrorInfo;
-            }
+        // Notification trigger checkboxes → notification_settings table
+        $notif_ns_keys = ['notify_temp','notify_hum','notify_offline'];
+        foreach ($notif_ns_keys as $k) {
+            $val = isset($_POST[$k]) ? '1' : '0';
+            $s = $conn->prepare("INSERT INTO notification_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
+            if ($s) { $s->bind_param("ss", $k, $val); $s->execute(); $s->close(); }
         }
-    }
-}
-
-// ── Save Notification Preferences ──
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_notif_prefs'])) {
-    if (!$isOwner) { $errors[] = 'Access denied.'; } else {
-        $keys = ['notify_temp','notify_hum','notify_offline','notify_emergency','notify_cooldown_min'];
-        foreach ($keys as $k) {
-            $val = ($k === 'notify_cooldown_min') ? intval($_POST[$k] ?? 30) : (isset($_POST[$k]) ? '1' : '0');
-            $val = (string)$val;
+        // Notification trigger toggles → system_settings table
+        $notif_ss_keys = ['notify_temp','notify_hum','notify_offline','notify_emergency'];
+        foreach ($notif_ss_keys as $k) {
+            $val = isset($_POST[$k]) ? '1' : '0';
             $s = $conn->prepare("INSERT INTO system_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
             if ($s) { $s->bind_param("ss", $k, $val); $s->execute(); $s->close(); }
         }
-        if (empty($errors)) $success = 'Notification preferences saved.';
+        // Cooldown
+        $cooldown = (string)intval($_POST['notify_cooldown_min'] ?? 30);
+        foreach (['notification_settings','system_settings'] as $tbl) {
+            $s = $conn->prepare("INSERT INTO $tbl (setting_key,setting_value) VALUES ('notify_cooldown_min',?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
+            if ($s) { $s->bind_param("s", $cooldown); $s->execute(); $s->close(); }
+        }
+        if (empty($errors)) $success = 'Notification settings saved.';
     }
 }
 
@@ -200,7 +153,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_camera'])) {
         if (empty($errors)) $success = 'Camera settings saved.';
     }
 }
-
 
 // ── Fetch current settings for display ──
 $thresholds = [];
@@ -283,8 +235,6 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
 .btn-primary:hover{opacity:.88;}
 .btn-ghost{background:var(--surface2);color:var(--text);border:1px solid var(--border);}
 .btn-ghost:hover{background:var(--border);}
-.btn-blue{background:var(--blue);color:#fff;}
-.btn-blue:hover{opacity:.88;}
 .form-footer{display:flex;align-items:center;justify-content:space-between;margin-top:20px;padding-top:16px;border-top:1px solid var(--border);}
 .info-box{background:var(--blue-lt);border:1px solid rgba(26,107,186,.15);border-radius:8px;padding:12px 16px;font-size:12.5px;color:var(--blue);margin-bottom:16px;line-height:1.6;}
 .info-box i{margin-right:6px;}
@@ -297,147 +247,37 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
 .access-notice{background:var(--amber-lt);border:1px solid rgba(180,83,9,.15);border-radius:8px;padding:14px 16px;font-size:13px;color:var(--amber);display:flex;align-items:center;gap:10px;}
 @media(max-width:700px){.threshold-row{grid-template-columns:1fr;}.form-grid-2,.form-grid-3{grid-template-columns:1fr;}}
 
-    /* ============================================================
-       RESPONSIVE / MOBILE
-       ============================================================ */
-
-    /* Hamburger button */
-    .hamburger{
-      display:none;position:fixed;top:4px;left:10px;z-index:200;
-      width:38px;height:38px;border-radius:9px;
-      background:var(--surface);border:1px solid var(--border);
-      box-shadow:var(--shadow);
-      align-items:center;justify-content:center;
-      cursor:pointer;flex-direction:column;gap:4px;padding:9px;
-      touch-action:manipulation;
-      pointer-events:auto;
-    }
-    .hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
-
-    /* Overlay behind sidebar */
-    .sidebar-overlay{
-      display:none;position:fixed;inset:0;
-      background:rgba(0,0,0,.4);z-index:99;
-      backdrop-filter:blur(3px);
-      -webkit-backdrop-filter:blur(3px);
-    }
-    .sidebar-overlay.open{display:block;}
-
-    @media(max-width:768px){
-      /* Show hamburger */
-      .hamburger{display:flex;}
-      .sidebar.open ~ * .hamburger, .hamburger.open{display:none!important;}
-
-      /* Sidebar slides in */
-      .sidebar{
-        transform:translateX(-100%);
-        transition:transform .28s cubic-bezier(.4,0,.2,1);
-        z-index:100;
-        box-shadow:4px 0 24px rgba(0,0,0,.12);
-      }
-      .sidebar.open{transform:translateX(0);}
-
-      /* Main fills full width */
-      .main{margin-left:0!important;width:100%!important;overflow-x:hidden;}
-
-      /* Topbar — room for hamburger on left */
-      .topbar{padding:0 10px 0 58px;height:52px;gap:6px;position:fixed!important;top:0;left:0;right:0;z-index:50;}
-      .topbar-title{font-size:14px;}
-      .topbar-right{gap:6px;}
-      .topbar-time{font-size:11px;padding:4px 10px;}
-      .user-badge{padding:4px 10px;font-size:11px;}
-      .user-badge .role-pill{display:none;}
-      /* Hide button text labels on mobile, show icon only */
-      .btn-label{display:none;}
-      .btn{padding:7px 10px;gap:0;}
-      .topbar .btn{min-width:34px;justify-content:center;}
-
-      /* Page & grid padding */
-      .page{padding:14px!important;}
-      .grid{padding:14px!important;gap:10px!important;}
-
-      /* All columns go full width */
-      .col-3,.col-4,.col-5,.col-6,.col-7,.col-8,.col-9,.col-12{grid-column:span 12!important;}
-
-      /* Stats row — 2 columns on tablet, handled below for phone */
-      .stats-row{grid-template-columns:1fr 1fr!important;gap:10px;}
-
-      /* Gauges — side by side and compact */
-      .gauges-row{flex-direction:row;gap:8px;}
-      .gauge-item{flex:1;padding:10px 6px;}
-      .gauge-wrap{width:100px;height:62px;}
-      .gauge-val{font-size:15px;}
-      .gauge-label{font-size:10px;}
-      .gauge-status{font-size:10px;}
-
-      /* Cards */
-      .card-header{flex-wrap:wrap;gap:8px;padding:12px 16px 10px;}
-      .card-body{padding:12px 16px!important;}
-      .card-title{font-size:12px;}
-
-      /* Filters */
-      .filter-bar{flex-direction:column;align-items:stretch!important;gap:8px;}
-      .filter-bar select,.filter-bar input[type=date]{width:100%;font-size:12px;}
-
-      /* Profile layout */
-      .profile-layout{grid-template-columns:1fr!important;}
-      .form-grid-2,.form-grid-3{grid-template-columns:1fr!important;}
-      /* Settings: full-width buttons on mobile */
-      .form-footer{flex-direction:column!important;align-items:flex-start!important;}
-      .form-footer-btns{flex-direction:row!important;width:auto;}
-      .form-footer-btns .btn{flex:0 0 auto;justify-content:center;}
-      .form-footer span{text-align:left;font-size:11px;}
-      /* Threshold row single column */
-      .threshold-row{grid-template-columns:1fr 1fr!important;gap:8px!important;}
-      .threshold-row>*:first-child{grid-column:span 2;}
-
-      /* Tabs */
-      .tab-bar{overflow-x:auto;width:100%;-webkit-overflow-scrolling:touch;}
-      .tab{padding:6px 14px;font-size:12px;}
-
-      /* Tables — horizontal scroll */
-      div[style*="overflow-x"]{overflow-x:auto!important;-webkit-overflow-scrolling:touch;}
-      table.tbl{font-size:12px;min-width:480px;}
-      .tbl thead th,.tbl tbody td{padding:8px 10px;}
-
-      /* Devices */
-      .device-row{padding:8px 10px;}
-      .device-name{font-size:12px;}
-      .mode-row{padding:8px 12px;}
-
-      /* Sensor status bar */
-      .sensor-status-bar{flex-wrap:wrap;gap:6px;padding:10px 14px;}
-      .sensor-reading{font-size:12px;}
-
-      /* Stat cards */
-      .stat-card{padding:12px 14px;gap:10px;}
-      .stat-icon{width:36px;height:36px;font-size:14px;}
-      .stat-val{font-size:18px;}
-      .stat-label{font-size:10px;}
-    }
-
-    @media(max-width:480px){
-      /* Single column stats on small phones */
-      .stats-row{grid-template-columns:1fr!important;}
-
-      /* Topbar compact */
-      .topbar{height:48px;position:fixed!important;top:0;left:0;right:0;}
-      .topbar-title{font-size:13px;}
-      .topbar-time{display:none;}
-
-      /* Gauges still side by side but smaller */
-      .gauge-wrap{width:88px;height:55px;}
-      .gauge-val{font-size:13px;}
-
-      /* Page */
-      .page{padding:10px!important;padding-top:58px!important;}
-      .grid{padding:10px!important;gap:8px!important;}
-
-      /* Buttons */
-      .btn{padding:7px 12px;font-size:12px;}
-      .btn-sm{padding:4px 8px;font-size:11px;}
-    }
-
+.hamburger{display:none;position:fixed;top:4px;left:10px;z-index:200;width:38px;height:38px;border-radius:9px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow);align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;padding:9px;touch-action:manipulation;pointer-events:auto;}
+.hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);}
+.sidebar-overlay.open{display:block;}
+@media(max-width:768px){
+  .hamburger{display:flex;}
+  .sidebar{transform:translateX(-100%);transition:transform .28s cubic-bezier(.4,0,.2,1);z-index:100;box-shadow:4px 0 24px rgba(0,0,0,.12);}
+  .sidebar.open{transform:translateX(0);}
+  .main{margin-left:0!important;width:100%!important;overflow-x:hidden;}
+  .topbar{padding:0 10px 0 58px;height:52px;gap:6px;position:fixed!important;top:0;left:0;right:0;z-index:50;}
+  .topbar-title{font-size:14px;}
+  .topbar-time{font-size:11px;padding:4px 10px;}
+  .btn-label{display:none;}
+  .btn{padding:7px 10px;gap:0;}
+  .topbar .btn{min-width:34px;justify-content:center;}
+  .page{padding:14px!important;}
+  .form-grid-2,.form-grid-3{grid-template-columns:1fr!important;}
+  .form-footer{flex-direction:column!important;align-items:flex-start!important;}
+  .form-footer-btns{flex-direction:row!important;width:auto;}
+  .threshold-row{grid-template-columns:1fr 1fr!important;gap:8px!important;}
+  .threshold-row>*:first-child{grid-column:span 2;}
+  .card-header{flex-wrap:wrap;gap:8px;padding:12px 16px 10px;}
+  .card-body{padding:12px 16px!important;}
+}
+@media(max-width:480px){
+  .topbar{height:48px;position:fixed!important;top:0;left:0;right:0;}
+  .topbar-title{font-size:13px;}
+  .topbar-time{display:none;}
+  .page{padding:10px!important;padding-top:58px!important;}
+  .btn{padding:7px 12px;font-size:12px;}
+}
 </style>
 </head>
 <body>
@@ -445,7 +285,6 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
   <span></span><span></span><span></span>
 </button>
 <div class="sidebar-overlay" id="sidebarOverlay"></div>
-
 
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
@@ -472,11 +311,6 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
   <div class="page">
     <?php if ($success): ?><div class="flash flash-ok"><i class="fas fa-check-circle"></i> <?= htmlspecialchars($success) ?></div><?php endif; ?>
     <?php foreach ($errors as $e): ?><div class="flash flash-err"><i class="fas fa-triangle-exclamation"></i> <?= htmlspecialchars($e) ?></div><?php endforeach; ?>
-    <?php if (!empty($test_result)):
-      $tr = explode(':', $test_result, 2);
-      $trclass = $tr[0] === 'ok' ? 'flash-ok' : 'flash-err';
-      $tricon  = $tr[0] === 'ok' ? 'fa-envelope-circle-check' : 'fa-triangle-exclamation';
-    ?><div class="flash <?= $trclass ?>"><i class="fas <?= $tricon ?>"></i> <?= htmlspecialchars($tr[1] ?? $test_result) ?></div><?php endif; ?>
 
     <?php if (!$isOwner): ?>
       <div class="access-notice"><i class="fas fa-lock"></i> Only the Owner can modify settings. You can view the current configuration below.</div>
@@ -524,17 +358,17 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
       </div>
     </div>
 
-    <!-- Email Notifications -->
+    <!-- Email Notifications (merged with Notification Preferences) -->
     <div class="card">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-blue"><i class="fas fa-envelope"></i></span> Email Notifications</div>
-        <span style="font-size:11px;color:var(--muted);">SMTP configuration</span>
+        <span style="font-size:11px;color:var(--muted);">SMTP configuration & alert triggers</span>
       </div>
       <div class="card-body">
         <div class="info-box"><i class="fas fa-circle-info"></i>Use Gmail with an App Password (not your real password). Enable 2-Step Verification on your Google account first, then generate an App Password at <b>myaccount.google.com/apppasswords</b>.</div>
 
-        <!-- ✅ Single unified form for Save + Test -->
-        <form method="POST" id="smtpForm">
+        <form method="POST">
+          <input type="hidden" name="save_smtp" value="1">
 
           <p class="section-title">SMTP Server</p>
           <div class="form-grid-3">
@@ -550,40 +384,37 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
             </div>
           </div>
 
-          <p class="section-title" style="margin-top:4px;">Recipients & Triggers</p>
-
+          <p class="section-title" style="margin-top:4px;">Alert Triggers</p>
           <div style="background:var(--surface2);border-radius:10px;padding:14px 16px;border:1px solid var(--border);margin-bottom:14px;">
             <p style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Send email when…</p>
+            <?php
+            $trigger_items = [
+              ['notify_temp',      'Temperature out of range',   'Alert when temp goes above or below thresholds',   $ns],
+              ['notify_hum',       'Humidity out of range',      'Alert when humidity goes above or below thresholds',$ns],
+              ['notify_offline',   'Sensor offline',             'Alert when no reading received for 5+ minutes',    $ns],
+              ['notify_emergency', 'Emergency / Fault Alerts',   'Alert on device faults and emergency events',       $ss],
+            ];
+            foreach ($trigger_items as [$key, $label, $sub, $src]):
+              $checked = ($src[$key] ?? '1') === '1' ? 'checked' : '';
+            ?>
             <div class="checkbox-row">
-              <input type="checkbox" id="nt" name="notify_temp" value="1" <?= ($ns['notify_temp'] ?? '1') === '1' ? 'checked' : '' ?> <?= !$isOwner ? 'disabled' : '' ?>>
-              <div><label for="nt">Temperature out of range</label><div class="sub">Alert when temp goes above or below thresholds</div></div>
+              <input type="checkbox" id="<?= $key ?>" name="<?= $key ?>" value="1" <?= $checked ?> <?= !$isOwner ? 'disabled' : '' ?>>
+              <div><label for="<?= $key ?>"><?= $label ?></label><div class="sub"><?= $sub ?></div></div>
             </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="nh" name="notify_hum" value="1" <?= ($ns['notify_hum'] ?? '1') === '1' ? 'checked' : '' ?> <?= !$isOwner ? 'disabled' : '' ?>>
-              <div><label for="nh">Humidity out of range</label><div class="sub">Alert when humidity goes above or below thresholds</div></div>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="no" name="notify_offline" value="1" <?= ($ns['notify_offline'] ?? '1') === '1' ? 'checked' : '' ?> <?= !$isOwner ? 'disabled' : '' ?>>
-              <div><label for="no">Sensor offline</label><div class="sub">Alert when no reading received for 5+ minutes</div></div>
-            </div>
+            <?php endforeach; ?>
           </div>
 
           <div class="form-group" style="max-width:200px;margin-bottom:0;">
             <label>Cooldown Between Emails (min)</label>
-            <input type="number" name="notify_cooldown_min" min="1" max="1440" value="<?= ns($ns,'notify_cooldown_min','30') ?>" <?= !$isOwner ? 'disabled' : '' ?>>
+            <input type="number" name="notify_cooldown_min" min="1" max="1440" value="<?= ns($ns,'notify_cooldown_min', ss($ss,'notify_cooldown_min','30')) ?>" <?= !$isOwner ? 'disabled' : '' ?>>
+            <span style="font-size:11px;color:var(--muted);">Minimum gap between repeated alert emails</span>
           </div>
-
-          <!-- ✅ Hidden field — set by JS to distinguish Save vs Test -->
-          <input type="hidden" name="form_action" id="formAction" value="">
 
           <?php if ($isOwner): ?>
           <div class="form-footer">
             <div class="form-footer-btns">
-              <button type="button" class="btn btn-primary" onclick="submitSmtp('save')">
+              <button type="submit" class="btn btn-primary">
                 <i class="fas fa-floppy-disk"></i><span class="btn-label"> Save Settings</span>
-              </button>
-              <button type="button" class="btn btn-blue" onclick="submitSmtp('test')">
-                <i class="fas fa-paper-plane"></i><span class="btn-label"> Send Test Email</span>
               </button>
             </div>
             <span style="font-size:12px;color:var(--muted);">Powered by PHPMailer.</span>
@@ -593,54 +424,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
       </div>
     </div>
 
-
-    <!-- ── Notification Preferences ── -->
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon icon-amber"><i class="fas fa-bell"></i></span> Notification Preferences</div>
-      </div>
-      <div class="card-body">
-        <form method="POST">
-          <input type="hidden" name="save_notif_prefs" value="1">
-          <p class="section-title">Choose which events trigger email alerts</p>
-          <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px;">
-            <?php
-            $notif_items = [
-              ['notify_temp',      '🌡️', 'Temperature Alerts'],
-              ['notify_hum',       '💧', 'Humidity Alerts'],
-              ['notify_offline',   '📡', 'Device Offline Alerts'],
-              ['notify_emergency', '🚨', 'Emergency / Fault Alerts'],
-            ];
-            foreach ($notif_items as [$key, $emoji, $label]):
-              $checked = ($ss[$key]??'1')==='1' ? 'checked' : '';
-              $disabled = !$isOwner ? 'disabled' : '';
-            ?>
-            <label style="display:flex;align-items:center;gap:12px;cursor:pointer;padding:10px 14px;border:1px solid var(--border);border-radius:9px;background:var(--surface2);">
-              <div style="position:relative;flex-shrink:0;width:40px;height:22px;">
-                <input type="checkbox" name="<?=$key?>" value="1" <?=$checked?> <?=$disabled?> style="opacity:0;width:0;height:0;position:absolute;">
-                <span onclick="if(!this.previousElementSibling.disabled){this.previousElementSibling.checked=!this.previousElementSibling.checked;this.style.background=this.previousElementSibling.checked?'var(--green)':'#ddd';this.querySelector('span').style.left=this.previousElementSibling.checked?'20px':'3px';}" style="position:absolute;inset:0;border-radius:20px;background:<?= ($ss[$key]??'1')==='1'?'var(--green)':'#ddd' ?>;transition:.2s;cursor:pointer;"><span style="position:absolute;width:16px;height:16px;background:white;border-radius:50%;top:3px;left:<?= ($ss[$key]??'1')==='1'?'20px':'3px' ?>;transition:.2s;"></span></span>
-              </div>
-              <span style="font-size:13px;font-weight:600;"><?=$emoji?> <?=$label?></span>
-            </label>
-            <?php endforeach; ?>
-          </div>
-          <div class="form-grid-2">
-            <div class="form-group">
-              <label>Email Cooldown (minutes)</label>
-              <input type="number" name="notify_cooldown_min" min="1" max="1440" value="<?= ss($ss,'notify_cooldown_min','30') ?>" <?= !$isOwner?'disabled':'' ?>>
-              <span style="font-size:11px;color:var(--muted);">Minimum gap between repeated alert emails (default: 30 min)</span>
-            </div>
-          </div>
-          <?php if ($isOwner): ?>
-          <div class="form-footer" style="margin-top:14px;">
-            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> <span class="btn-label">Save Preferences</span></button>
-          </div>
-          <?php endif; ?>
-        </form>
-      </div>
-    </div>
-
-    <!-- ── Auto Engine Settings ── -->
+    <!-- Auto Engine Settings -->
     <div class="card">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-green"><i class="fas fa-robot"></i></span> Auto Engine Settings</div>
@@ -670,7 +454,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
       </div>
     </div>
 
-    <!-- ── Camera Settings ── -->
+    <!-- Camera Settings -->
     <div class="card">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-blue"><i class="fas fa-camera"></i></span> Camera Settings</div>
@@ -679,7 +463,6 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
       <div class="card-body">
         <form method="POST">
           <input type="hidden" name="save_camera" value="1">
-
           <p class="section-title">Capture Behavior</p>
           <div class="form-grid-2">
             <div class="form-group">
@@ -687,14 +470,11 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
               <input type="number" name="camera_interval_sec" min="10" max="3600" value="<?= ss($ss,'camera_interval_sec','1800') ?>" <?= !$isOwner?'disabled':'' ?>>
               <span style="font-size:11px;color:var(--muted);">How often the camera uploads a photo (default: 1800 = 30 min)</span>
             </div>
-
           </div>
-
           <div class="info-box" style="margin-top:8px;">
             <i class="fas fa-circle-info"></i>
             Image quality settings (brightness, contrast, flip, mirror, etc.) can be adjusted from the <strong>Live Camera</strong> button on the Dashboard.
           </div>
-
           <?php if ($isOwner): ?>
           <div class="form-footer" style="margin-top:14px;">
             <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> <span class="btn-label">Save Camera Settings</span></button>
@@ -708,7 +488,6 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
 </main>
 
 <script>
-// Clock
 (function(){
   const el = document.getElementById('phTime'); if (!el) return;
   let t = parseInt(el.dataset.serverTs, 10) || Date.now();
@@ -719,19 +498,6 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
   el.textContent = fmt(t);
   setInterval(() => { t += 1000; el.textContent = fmt(t); }, 1000);
 })();
-
-// ✅ Fixed: single form, hidden field tells PHP what action to run
-function submitSmtp(action) {
-  if (action === 'test') {
-    if (!confirm('Send a test email to the configured address?')) return;
-    document.getElementById('formAction').value = 'test';
-  } else {
-    document.getElementById('formAction').value = 'save';
-  }
-  document.getElementById('smtpForm').submit();
-}
-
-
 </script>
 <script>
 (function() {

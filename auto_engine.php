@@ -296,11 +296,39 @@ function _logAlert($conn, $type, $severity, $message, $value) {
 
         if (file_exists(__DIR__.'/send_email.php')) {
             require_once __DIR__.'/send_email.php';
-            $icons = ['device'=>'🔧','system'=>'📡','temperature'=>'🌡️','humidity'=>'💧'];
-            $icon = $icons[$type] ?? '⚠️';
-            $subj = "$icon MushroomOS " . ucfirst($type) . " Alert";
-            $body = "<b>$icon " . ucfirst($severity) . " Alert</b><br><br>" . nl2br(htmlspecialchars($message)) .
-                    "<br><br><small>Triggered: " . date('M j, Y h:i:s A') . "</small>";
+
+            $icons      = ['device'=>'🔧','system'=>'📡','temperature'=>'🌡️','humidity'=>'💧'];
+            $icon       = $icons[$type] ?? '⚠️';
+            $colorHex   = ($severity === 'critical') ? '#d93025' : '#b45309';
+            $colorLt    = ($severity === 'critical') ? '#fff0f0' : '#fef3c7';
+            $borderCol  = ($severity === 'critical') ? '#e53935' : '#f9a825';
+            $typeLabel  = ucfirst($type);
+            $sevLabel   = ucfirst($severity);
+            $detectedAt = date('M j, Y h:i:s A');
+
+            $subj = "$icon MushroomOS — {$typeLabel} Alert";
+            $body = "
+                <div style='font-family:sans-serif;max-width:480px;margin:0 auto;'>
+                    <div style='background:#2b4d30;padding:24px;border-radius:12px 12px 0 0;text-align:center;'>
+                        <h2 style='color:#c8e8b8;margin:0;font-size:20px;'>&#127812; MushroomOS — {$typeLabel} Alert</h2>
+                        <p style='color:rgba(200,232,184,0.6);font-size:12px;margin:6px 0 0;'>J.WHO Mushroom Farm</p>
+                    </div>
+                    <div style='background:#ffffff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #e0e0e0;'>
+                        <p style='background:{$colorLt};border-left:4px solid {$borderCol};padding:12px 16px;border-radius:4px;color:{$colorHex};font-weight:600;margin:0 0 16px;'>
+                            &#9888; {$sevLabel}: {$typeLabel} alert detected.
+                        </p>
+                        <p style='color:#555;font-size:13px;line-height:1.6;margin:0 0 16px;'>" . nl2br(htmlspecialchars($message)) . "</p>
+                        <table style='width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;'>
+                            <tr><td style='padding:8px 12px;background:#f7f8fa;color:#6e7681;width:40%;'>Type</td><td style='padding:8px 12px;font-weight:600;'>{$icon} {$typeLabel}</td></tr>
+                            <tr><td style='padding:8px 12px;color:#6e7681;'>Severity</td><td style='padding:8px 12px;font-weight:600;color:{$colorHex};'>{$sevLabel}</td></tr>
+                            <tr><td style='padding:8px 12px;background:#f7f8fa;color:#6e7681;'>Detected At</td><td style='padding:8px 12px;font-weight:600;'>{$detectedAt}</td></tr>
+                        </table>
+                        <p style='color:#555;font-size:13px;'>Please check your chamber and devices immediately.</p>
+                        <hr style='border:none;border-top:1px solid #eee;margin:16px 0;'>
+                        <p style='font-size:12px;color:#aaa;text-align:center;margin:0;'>MushroomOS &middot; J.WHO Mushroom Farm</p>
+                    </div>
+                </div>";
+
             sendEmail($recipient, $subj, $body);
 
             $now = date('Y-m-d H:i:s');
