@@ -173,24 +173,33 @@ function _sendHarvestEmail($conn, $status, $diameter, $imagePath) {
 
         $icon      = $status === 'Ready for Harvest' ? '🍄' : '⚠️';
         $colorHex  = $status === 'Ready for Harvest' ? '#1a9e5c' : '#b45309';
+        $colorLt   = $status === 'Ready for Harvest' ? '#e6f7ef' : '#fef3c7';
+        $borderCol = $status === 'Ready for Harvest' ? '#1a9e5c' : '#f9a825';
+        $detectedAt = date('M j, Y h:i:s A');
         $subject   = "$icon MushroomOS — {$status} Detected";
-        $body      = "
-            <div style='font-family:sans-serif;max-width:480px;'>
-                <h2 style='color:{$colorHex};'>{$icon} {$status}</h2>
-                <p>The chamber camera has detected a mushroom that is <strong>{$status}</strong>.</p>
-                <table style='margin:12px 0;border-collapse:collapse;'>
-                    <tr><td style='padding:4px 12px 4px 0;color:#666;'>Diameter</td><td><strong>{$diameter} cm</strong></td></tr>
-                    <tr><td style='padding:4px 12px 4px 0;color:#666;'>Status</td><td><strong style='color:{$colorHex};'>{$status}</strong></td></tr>
-                    <tr><td style='padding:4px 12px 4px 0;color:#666;'>Detected at</td><td>" . date('M j, Y h:i:s A') . "</td></tr>
-                </table>
-                " . ($status === 'Ready for Harvest'
-                    ? "<p style='color:#1a9e5c;font-weight:600;'>✅ Please harvest your mushrooms now for best quality.</p>"
-                    : "<p style='color:#b45309;font-weight:600;'>⚠️ Mushrooms are overripe — harvest immediately to prevent further deterioration.</p>"
-                ) . "
-                <hr style='border:none;border-top:1px solid #eee;margin:16px 0;'>
-                <small style='color:#999;'>MushroomOS Cultivation System &mdash; Automated Camera Alert</small>
-            </div>
-        ";
+        $actionMsg = $status === 'Ready for Harvest'
+            ? "&#10003; Please harvest your mushrooms now for best quality."
+            : "&#9888; Mushrooms are overripe — harvest immediately to prevent further deterioration.";
+        $body = "
+            <div style='font-family:sans-serif;max-width:480px;margin:0 auto;'>
+                <div style='background:#2b4d30;padding:24px;border-radius:12px 12px 0 0;text-align:center;'>
+                    <h2 style='color:#c8e8b8;margin:0;font-size:20px;'>&#127812; MushroomOS — {$status}</h2>
+                    <p style='color:rgba(200,232,184,0.6);font-size:12px;margin:6px 0 0;'>J.WHO Mushroom Farm</p>
+                </div>
+                <div style='background:#ffffff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #e0e0e0;'>
+                    <p style='background:{$colorLt};border-left:4px solid {$borderCol};padding:12px 16px;border-radius:4px;color:{$colorHex};font-weight:600;margin:0 0 16px;'>
+                        {$icon} The chamber camera has detected a mushroom that is <strong>{$status}</strong>.
+                    </p>
+                    <table style='width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;'>
+                        <tr><td style='padding:8px 12px;background:#f7f8fa;color:#6e7681;width:40%;'>Diameter</td><td style='padding:8px 12px;font-weight:600;'>{$diameter} cm</td></tr>
+                        <tr><td style='padding:8px 12px;color:#6e7681;'>Status</td><td style='padding:8px 12px;font-weight:600;color:{$colorHex};'>{$status}</td></tr>
+                        <tr><td style='padding:8px 12px;background:#f7f8fa;color:#6e7681;'>Detected At</td><td style='padding:8px 12px;font-weight:600;'>{$detectedAt}</td></tr>
+                    </table>
+                    <p style='color:{$colorHex};font-size:13px;font-weight:600;'>{$actionMsg}</p>
+                    <hr style='border:none;border-top:1px solid #eee;margin:16px 0;'>
+                    <p style='font-size:12px;color:#aaa;text-align:center;margin:0;'>MushroomOS &middot; J.WHO Mushroom Farm &mdash; Automated Camera Alert</p>
+                </div>
+            </div>";
 
         sendEmail($recipient, $subject, $body);
 
