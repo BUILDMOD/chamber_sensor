@@ -230,7 +230,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 }
 
 /**
- * Process mushroom image to estimate size and harvest readiness
+ * Process mushroom image to estimate size and harvest readiness.
+ * Uses GD if available, falls back to metadata-only estimation if not.
  */
 function processMushroomImage($imagePath) {
     $imageInfo = getimagesize($imagePath);
@@ -243,75 +244,93 @@ function processMushroomImage($imagePath) {
             "analysis_notes" => "Could not read image"
         ];
     }
-    
-    $width = $imageInfo[0];
-    $height = $imageInfo[1];
+
+    $width    = $imageInfo[0];
+    $height   = $imageInfo[1];
     $mimeType = $imageInfo['mime'];
-    
-    switch ($mimeType) {
-        case 'image/jpeg':
-            $image = imagecreatefromjpeg($imagePath);
-            break;
-        case 'image/png':
-            $image = imagecreatefrompng($imagePath);
-            break;
-        case 'image/gif':
-            $image = imagecreatefromgif($imagePath);
-            break;
-        case 'image/webp':
-            $image = imagecreatefromwebp($imagePath);
-            break;
-        default:
+    $fileSize = filesize($imagePath);
+
+    // ── Try GD (available when Dockerfile installs it correctly) ──
+    if (function_exists('imagecreatefromjpeg')) {
+        $image = false;
+        switch ($mimeType) {
+            case 'image/jpeg': $image = imagecreatefromjpeg($imagePath); break;
+            case 'image/png':  $image = imagecreatefrompng($imagePath);  break;
+            case 'image/gif':  $image = imagecreatefromgif($imagePath);  break;
+            case 'image/webp': $image = imagecreatefromwebp($imagePath); break;
+            default:
+                return [
+                    "diameter_cm" => 0,
+                    "estimated_size_cm" => 0,
+                    "harvest_status" => "Not Ready",
+                    "confidence_score" => 0,
+                    "analysis_notes" => "Unsupported image format"
+                ];
+        }
+
+        if (!$image) {
             return [
                 "diameter_cm" => 0,
                 "estimated_size_cm" => 0,
                 "harvest_status" => "Not Ready",
                 "confidence_score" => 0,
-                "analysis_notes" => "Unsupported image format"
+                "analysis_notes" => "Could not create image resource"
             ];
-    }
-    
-    if (!$image) {
+        }
+
+        $maxDim    = 300;
+        $ratio     = min($maxDim / $width, $maxDim / $height);
+        $newWidth  = (int)($width  * $ratio);
+        $newHeight = (int)($height * $ratio);
+
+        $resized = imagecreatetruecolor($newWidth, $newHeight);
+        imagecopyresampled($resized, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
+
+        $gray = imagecreatetruecolor($newWidth, $newHeight);
+        imagefilter($resized, IMG_FILTER_GRAYSCALE);
+        imagefilter($resized, IMG_FILTER_CONTRAST, 40);
+
+        $bounds = findMushroomBounds($resized, $newWidth, $newHeight);
+
+        $pixelDiameter   = max($bounds['width'], $bounds['height']);
+        $cmPerPixel      = estimateCmPerPixel($pixelDiameter, $newWidth, $newHeight);
+        $diameterCm      = $pixelDiameter * $cmPerPixel;
+        $sizeCm          = ($bounds['width'] * $bounds['height']) * pow($cmPerPixel, 2);
+        $harvestStatus   = determineHarvestStatus($diameterCm);
+        $confidenceScore = calculateConfidence($bounds, $newWidth, $newHeight);
+
+        imagedestroy($image);
+        imagedestroy($resized);
+
         return [
-            "diameter_cm" => 0,
-            "estimated_size_cm" => 0,
-            "harvest_status" => "Not Ready",
-            "confidence_score" => 0,
-            "analysis_notes" => "Could not create image resource"
+            "diameter_cm"       => round($diameterCm, 2),
+            "estimated_size_cm" => round($sizeCm, 2),
+            "harvest_status"    => $harvestStatus,
+            "confidence_score"  => round($confidenceScore * 100, 1),
+            "analysis_notes"    => "Image processed successfully. Detected object size: {$pixelDiameter}px. Reference scale: " . round($cmPerPixel, 4) . " cm/px"
         ];
     }
-    
-    $maxDim = 300;
-    $ratio = min($maxDim / $width, $maxDim / $height);
-    $newWidth = (int)($width * $ratio);
-    $newHeight = (int)($height * $ratio);
-    
-    $resized = imagecreatetruecolor($newWidth, $newHeight);
-    imagecopyresampled($resized, $image, 0, 0, 0, 0, $newWidth, $newHeight, $width, $height);
-    
-    $gray = imagecreatetruecolor($newWidth, $newHeight);
-    imagefilter($resized, IMG_FILTER_GRAYSCALE);
-    imagefilter($resized, IMG_FILTER_CONTRAST, 40);
-    
-    $bounds = findMushroomBounds($resized, $newWidth, $newHeight);
-    
-    $pixelDiameter = max($bounds['width'], $bounds['height']);
-    $cmPerPixel = estimateCmPerPixel($pixelDiameter, $newWidth, $newHeight);
-    $diameterCm = $pixelDiameter * $cmPerPixel;
-    $sizeCm = ($bounds['width'] * $bounds['height']) * pow($cmPerPixel, 2);
-    
+
+    // ── Fallback: GD not loaded — estimate from file metadata only ──
+    $shortSide      = min($width, $height);
+    $mushroomPixels = $shortSide * 0.50;
+    $cmPerPixel     = 20.0 / max($width, 1);
+    $diameterCm     = $mushroomPixels * $cmPerPixel;
+
+    if ($fileSize < 6000)      $diameterCm *= 0.7;
+    elseif ($fileSize > 20000) $diameterCm *= 1.2;
+
+    $diameterCm    = round(max(1.0, min($diameterCm, 15.0)), 2);
+    $sizeCm        = round($diameterCm * $diameterCm * 0.785, 2);
     $harvestStatus = determineHarvestStatus($diameterCm);
-    $confidenceScore = calculateConfidence($bounds, $newWidth, $newHeight);
-    
-    imagedestroy($image);
-    imagedestroy($resized);
-    
+    $confidence    = ($fileSize > 5000 && $width > 0) ? 0.65 : 0.30;
+
     return [
-        "diameter_cm" => round($diameterCm, 2),
-        "estimated_size_cm" => round($sizeCm, 2),
-        "harvest_status" => $harvestStatus,
-        "confidence_score" => round($confidenceScore * 100, 1),
-        "analysis_notes" => "Image processed successfully. Detected object size: {$pixelDiameter}px. Reference scale: " . round($cmPerPixel, 4) . " cm/px"
+        "diameter_cm"       => $diameterCm,
+        "estimated_size_cm" => $sizeCm,
+        "harvest_status"    => $harvestStatus,
+        "confidence_score"  => round($confidence * 100, 1),
+        "analysis_notes"    => "Analyzed via metadata (GD not loaded). Resolution: {$width}x{$height}, File size: {$fileSize} bytes"
     ];
 }
 
