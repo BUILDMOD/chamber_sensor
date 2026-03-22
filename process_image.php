@@ -1,4 +1,5 @@
 <?php
+date_default_timezone_set('Asia/Manila');
 /**
  * Image Processing API for Mushroom Analysis
  * Receives images from devices, processes them to determine:

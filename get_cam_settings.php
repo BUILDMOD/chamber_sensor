@@ -1,4 +1,5 @@
 <?php
+date_default_timezone_set('Asia/Manila');
 /**
  * get_cam_settings.php
  * Called by ESP32-CAM every 30 seconds to get latest camera settings.
