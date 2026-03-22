@@ -394,6 +394,23 @@ function navUrl($view, $year, $month, $day) {
       .health-circle{width:80px;height:80px;}
       .summary-rows{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
     }
+
+    /* ── INFO BUTTON + MODAL (matches dashboard pattern) ── */
+    .info-btn{width:24px;height:24px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted);cursor:pointer;font-size:11px;transition:all .15s;flex-shrink:0;}
+    .info-btn:hover{background:var(--border);color:var(--text);}
+    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;opacity:0;visibility:hidden;transition:opacity .2s,visibility .2s;}
+    .modal-backdrop.show{opacity:1;visibility:visible;}
+    .modal{background:var(--surface);border-radius:var(--r);padding:24px;max-width:380px;width:90%;box-shadow:0 2px 8px rgba(0,0,0,0.08),0 12px 40px rgba(0,0,0,0.06);position:relative;transform:translateY(8px);transition:transform .2s;}
+    .modal-backdrop.show .modal{transform:translateY(0);}
+    .modal-close{position:absolute;top:14px;right:16px;background:none;border:none;font-size:18px;color:var(--muted);cursor:pointer;}
+    .modal-close:hover{color:var(--text);}
+    .modal h3{font-size:16px;font-weight:700;margin-bottom:16px;}
+    .modal h4{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px;}
+    .modal p,.modal li{font-size:13px;color:var(--muted);line-height:1.6;}
+    .modal ul{padding-left:16px;}
+    .legend-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+    .leg-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+    .legend-row span{font-size:12px;color:var(--muted);}
   </style>
 </head>
 <body>
@@ -580,7 +597,10 @@ function navUrl($view, $year, $month, $day) {
           <span class="icon icon-green"><i class="fas fa-heart-pulse"></i></span>
           Chamber Health Score
         </div>
-        <span class="card-sub">% of readings within ideal ranges (22–28°C · 85–95% RH) — <?= htmlspecialchars($rpt_label) ?></span>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="card-sub">% of readings within ideal ranges (22–28°C · 85–95% RH) — <?= htmlspecialchars($rpt_label) ?></span>
+          <button class="info-btn" id="healthInfoIcon" onclick="document.getElementById('healthInfoModal').classList.add('show')"><i class="fas fa-info"></i></button>
+        </div>
       </div>
       <?php if ($health_score === null): ?>
         <div class="empty-state"><i class="fas fa-database"></i><span>No sensor data for this period.</span></div>
@@ -753,8 +773,29 @@ function navUrl($view, $year, $month, $day) {
       <?php endif; ?>
     </div>
 
-  </div>
+</div>
 </main>
+
+<!-- HEALTH SCORE INFO MODAL -->
+<div class="modal-backdrop" id="healthInfoModal" onclick="if(event.target===this)this.classList.remove('show')">
+  <div class="modal">
+    <button class="modal-close" id="healthInfoModalClose" onclick="document.getElementById('healthInfoModal').classList.remove('show')">&times;</button>
+    <h3><i class="fas fa-heart-pulse" style="color:var(--green);margin-right:8px;"></i>Chamber Health Score</h3>
+    <p>Percentage of individual sensor readings that fell within <strong>both</strong> ideal ranges simultaneously.</p>
+    <h4>Formula</h4>
+    <p><code style="font-family:'DM Mono',monospace;font-size:12px;background:var(--surface2);padding:2px 7px;border-radius:4px;">(Ideal Readings ÷ Total Readings) × 100</code></p>
+    <p style="margin-top:6px;">A reading is "ideal" only when <strong>temperature</strong> and <strong>humidity</strong> are both in range at the same time.</p>
+    <h4>Ideal Ranges</h4>
+    <div class="legend-row"><span class="leg-dot" style="background:#fb7185;"></span><span>Temperature: 22–28°C</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:#34d399;"></span><span>Humidity: 85–95% RH</span></div>
+    <h4>Score Thresholds</h4>
+    <div class="legend-row"><span class="leg-dot" style="background:#1a9e5c;"></span><span><strong>≥ 80 — Healthy:</strong> Chamber is consistently within optimal parameters. No action needed.</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:#b45309;"></span><span><strong>50–79 — Fair:</strong> Occasional deviations detected. Monitor conditions closely.</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:#d93025;"></span><span><strong>&lt; 50 — Poor:</strong> Frequent out-of-range readings. Immediate attention needed.</span></div>
+    <h4>Note on Sub-bars</h4>
+    <p>The Temperature and Humidity sub-bars use <strong>daily averages</strong> evaluated separately — so they may read higher than the overall score, which uses stricter per-reading logic.</p>
+  </div>
+</div>
 
 <script>
 (function(){
@@ -816,6 +857,17 @@ function navUrl($view, $year, $month, $day) {
   h.onclick=function(){s.classList.contains('open')?close():open();};
   o.onclick=close;
   s.querySelectorAll('.sidebar-nav a').forEach(function(a){a.addEventListener('click',function(){if(window.innerWidth<=768)close();});});
+})();
+
+// Health info modal
+(function(){
+  var btn=document.getElementById('healthInfoIcon');
+  var modal=document.getElementById('healthInfoModal');
+  var closeBtn=document.getElementById('healthInfoModalClose');
+  if(!btn||!modal)return;
+  btn.addEventListener('click',function(){ modal.classList.add('show'); });
+  if(closeBtn) closeBtn.addEventListener('click',function(){ modal.classList.remove('show'); });
+  modal.addEventListener('click',function(e){ if(e.target===modal) modal.classList.remove('show'); });
 })();
 </script>
 </body>

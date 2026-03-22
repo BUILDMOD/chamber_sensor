@@ -269,7 +269,7 @@ $isOwner = $sessionRole === 'owner';
     .img-all-empty i{font-size:36px;display:block;margin-bottom:10px;opacity:.3;}
 
     /* MODAL */
-    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:200;opacity:0;visibility:hidden;transition:opacity .2s,visibility .2s;}
+    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:9999;opacity:0;visibility:hidden;transition:opacity .2s,visibility .2s;}
     .modal-backdrop.show{opacity:1;visibility:visible;}
     .modal{background:var(--surface);border-radius:var(--r);padding:24px;max-width:380px;width:90%;box-shadow:var(--shadow-lg);position:relative;transform:translateY(8px);transition:transform .2s;}
     .modal-backdrop.show .modal{transform:translateY(0);}
@@ -530,7 +530,7 @@ $isOwner = $sessionRole === 'owner';
     <div class="card col-4">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-green"><i class="fas fa-leaf"></i></span> Live Environment</div>
-        <button class="info-btn" id="statusInfoIcon"><i class="fas fa-info"></i></button>
+        <button class="info-btn" id="statusInfoIcon" onclick="document.getElementById('statusInfoModal').classList.add('show')"><i class="fas fa-info"></i></button>
       </div>
       <div class="card-body">
         <div class="gauges-row">
@@ -553,7 +553,7 @@ $isOwner = $sessionRole === 'owner';
     <div class="card col-4">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-blue"><i class="fas fa-sliders"></i></span> Device Control</div>
-        <button class="info-btn" id="deviceInfoIcon"><i class="fas fa-info"></i></button>
+        <button class="info-btn" id="deviceInfoIcon" onclick="document.getElementById('deviceInfoModal').classList.add('show')"><i class="fas fa-info"></i></button>
       </div>
       <div class="card-body" aria-live="polite">
         <div class="mode-row">
@@ -582,7 +582,7 @@ $isOwner = $sessionRole === 'owner';
     <div class="card col-4">
       <div class="card-header">
         <div class="card-title"><span class="icon icon-red"><i class="fas fa-bell"></i></span> Alerts</div>
-        <button class="info-btn" id="alertInfoIcon"><i class="fas fa-info"></i></button>
+        <button class="info-btn" id="alertInfoIcon" onclick="document.getElementById('alertInfoModal').classList.add('show')"><i class="fas fa-info"></i></button>
       </div>
       <div class="card-body">
         <div class="alert-list" id="alertList">
@@ -848,45 +848,55 @@ $isOwner = $sessionRole === 'owner';
 </div>
 
 <!-- MODALS -->
-<div class="modal-backdrop" id="statusInfoModal">
+<div class="modal-backdrop" id="statusInfoModal" onclick="if(event.target===this)this.classList.remove('show')">
   <div class="modal">
-    <button class="modal-close" data-close="statusInfoModal">&times;</button>
-    <h3>Environment Status</h3>
+    <button class="modal-close" onclick="document.getElementById('statusInfoModal').classList.remove('show')">&times;</button>
+    <h3><i class="fas fa-leaf" style="color:var(--green);margin-right:8px;"></i>Live Environment</h3>
+    <p>Real-time temperature and humidity readings from the sensor inside the mushroom chamber.</p>
     <h4>Temperature</h4>
-    <div class="legend-row"><span class="leg-dot" style="background:#60a5fa"></span><span>Too Low — below 22°C</span></div>
-    <div class="legend-row"><span class="leg-dot" style="background:#fb7185"></span><span>Ideal — <?= $thr["temp_min"] ?>–<?= $thr["temp_max"] ?>°C</span></div>
-    <div class="legend-row"><span class="leg-dot" style="background:#fbbf24"></span><span>Too High — above 28°C</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:#60a5fa"></span><span><strong>Too Low</strong> — below <?= $thr["temp_min"] ?>°C. May slow down mushroom growth.</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:#fb7185"></span><span><strong>Ideal</strong> — <?= $thr["temp_min"] ?>–<?= $thr["temp_max"] ?>°C. Optimal for fruiting.</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:#fbbf24"></span><span><strong>Too High</strong> — above <?= $thr["temp_max"] ?>°C. Risk of contamination or stress.</span></div>
     <h4>Humidity</h4>
-    <div class="legend-row"><span class="leg-dot" style="background:#60a5fa"></span><span>Too Low — below 85%</span></div>
-    <div class="legend-row"><span class="leg-dot" style="background:#34d399"></span><span>Ideal — <?= $thr["hum_min"] ?>–<?= $thr["hum_max"] ?>%</span></div>
-    <div class="legend-row"><span class="leg-dot" style="background:#fb7185"></span><span>Too High — above 95%</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:#60a5fa"></span><span><strong>Too Low</strong> — below <?= $thr["hum_min"] ?>%. Mushrooms may dry out.</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:#34d399"></span><span><strong>Ideal</strong> — <?= $thr["hum_min"] ?>–<?= $thr["hum_max"] ?>%. Optimal moisture level.</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:#fb7185"></span><span><strong>Too High</strong> — above <?= $thr["hum_max"] ?>%. May encourage mold growth.</span></div>
+    <h4>Note</h4>
+    <p>Readings auto-refresh every few seconds. If the sensor shows "Offline", check the ESP32 connection.</p>
   </div>
 </div>
-<div class="modal-backdrop" id="deviceInfoModal">
+<div class="modal-backdrop" id="deviceInfoModal" onclick="if(event.target===this)this.classList.remove('show')">
   <div class="modal">
-    <button class="modal-close" data-close="deviceInfoModal">&times;</button>
-    <h3>Device Control</h3>
-    <h4>Auto Mode</h4><p>System automatically controls devices based on sensor readings.</p>
-    <h4>Manual Mode</h4><p>Override device states for emergencies or adjustments.</p>
+    <button class="modal-close" onclick="document.getElementById('deviceInfoModal').classList.remove('show')">&times;</button>
+    <h3><i class="fas fa-sliders" style="color:var(--blue);margin-right:8px;"></i>Device Control</h3>
+    <h4>Auto Mode</h4>
+    <p>System automatically controls all devices based on live sensor readings. This is the recommended setting during normal operation.</p>
+    <h4>Manual Mode</h4>
+    <p>Allows direct override of individual devices. Use only for emergencies or maintenance — auto mode will not resume until switched back.</p>
     <h4>Devices</h4>
     <ul>
-      <li><strong>Mist</strong> – Maintains ideal humidity.</li>
-      <li><strong>Fan</strong> – Regulates temperature and airflow.</li>
-      <li><strong>Heater</strong> – Adds heat when temp is too low.</li>
-      <li><strong>Sprayer</strong> – Moistens mushrooms directly.</li>
+      <li><strong>Mist</strong> — Activates to raise humidity when below ideal range.</li>
+      <li><strong>Fan</strong> — Regulates temperature and maintains air circulation.</li>
+      <li><strong>Heater</strong> — Adds heat when temperature drops too low.</li>
+      <li><strong>Sprayer</strong> — Directly moistens mushrooms and substrate.</li>
+      <li><strong>Exhaust</strong> — Vents excess heat or humidity from the chamber.</li>
     </ul>
   </div>
 </div>
-<div class="modal-backdrop" id="alertInfoModal">
+<div class="modal-backdrop" id="alertInfoModal" onclick="if(event.target===this)this.classList.remove('show')">
   <div class="modal">
-    <button class="modal-close" data-close="alertInfoModal">&times;</button>
-    <h3>Alerts</h3>
-    <p>Alerts fire when conditions deviate from ideal ranges.</p>
+    <button class="modal-close" onclick="document.getElementById('alertInfoModal').classList.remove('show')">&times;</button>
+    <h3><i class="fas fa-bell" style="color:var(--red);margin-right:8px;"></i>Alerts</h3>
+    <p>Alerts are triggered when sensor readings deviate from the configured ideal ranges. Check and address them promptly to avoid crop damage.</p>
     <h4>Ideal Ranges</h4>
-    <ul><li>Temperature: <?= $thr["temp_min"] ?>–<?= $thr["temp_max"] ?>°C</li><li>Humidity: <?= $thr["hum_min"] ?>–<?= $thr["hum_max"] ?>%</li></ul>
-    <h4>Color Codes</h4>
-    <div class="legend-row"><span class="leg-dot" style="background:var(--red)"></span><span>Critical — out of range</span></div>
-    <div class="legend-row"><span class="leg-dot" style="background:var(--green)"></span><span>All clear — conditions ideal</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:#fb7185"></span><span>Temperature: <?= $thr["temp_min"] ?>–<?= $thr["temp_max"] ?>°C</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:#34d399"></span><span>Humidity: <?= $thr["hum_min"] ?>–<?= $thr["hum_max"] ?>% RH</span></div>
+    <h4>Alert Types</h4>
+    <div class="legend-row"><span class="leg-dot" style="background:var(--green)"></span><span><strong>All Clear</strong> — All conditions within ideal range.</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:var(--amber)"></span><span><strong>Warning</strong> — Minor deviation, monitor closely.</span></div>
+    <div class="legend-row"><span class="leg-dot" style="background:var(--red)"></span><span><strong>Critical</strong> — Significant out-of-range reading, action needed.</span></div>
+    <h4>Note</h4>
+    <p>Thresholds can be adjusted in <strong>Settings</strong> to match your specific mushroom variety.</p>
   </div>
 </div>
 
