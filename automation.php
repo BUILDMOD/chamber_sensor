@@ -11,24 +11,29 @@ $isOwner = isset($_SESSION['role']) && $_SESSION['role'] === 'owner';
 // ── Create tables ──
 $conn->query("CREATE TABLE IF NOT EXISTS automation_rules (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    device ENUM('mist','fan','heater','sprayer') NOT NULL,
+    device ENUM('mist','fan','heater','exhaust') NOT NULL,
     sensor ENUM('temperature','humidity') NOT NULL,
     operator ENUM('below','above') NOT NULL,
     threshold FLOAT NOT NULL,
-    duration_minutes INT NOT NULL DEFAULT 5,
     enabled TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )");
+// Add exhaust column if upgrading from old schema
+$conn->query("ALTER TABLE automation_rules MODIFY COLUMN device ENUM('mist','fan','heater','exhaust') NOT NULL");
+// Remove duration_minutes if exists (no longer needed — devices turn OFF based on sensor, not timer)
+$conn->query("ALTER TABLE automation_rules DROP COLUMN IF EXISTS duration_minutes");
 
 $conn->query("CREATE TABLE IF NOT EXISTS scheduled_tasks (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    device ENUM('mist','fan','heater','sprayer') NOT NULL,
+    device ENUM('mist','fan','heater','sprayer','exhaust') NOT NULL,
     run_time TIME NOT NULL,
-    duration_minutes INT NOT NULL DEFAULT 5,
+    duration_minutes FLOAT NOT NULL DEFAULT 1,
     days VARCHAR(20) NOT NULL DEFAULT 'daily',
     enabled TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )");
+// Upgrade duration_minutes to FLOAT if it was INT
+$conn->query("ALTER TABLE scheduled_tasks MODIFY COLUMN duration_minutes FLOAT NOT NULL DEFAULT 1");
 
 $conn->query("CREATE TABLE IF NOT EXISTS device_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -67,11 +72,10 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['add_rule'])) {
         $sensor   = $_POST['sensor'] ?? '';
         $operator = $_POST['operator'] ?? '';
         $threshold= floatval($_POST['threshold'] ?? 0);
-        $duration = intval($_POST['duration_minutes'] ?? 5);
         if (!$device||!$sensor||!$operator) $errors[]='All fields required.';
         if (empty($errors)) {
-            $s=$conn->prepare("INSERT INTO automation_rules (device,sensor,operator,threshold,duration_minutes) VALUES (?,?,?,?,?)");
-            if ($s){$s->bind_param("sssdi",$device,$sensor,$operator,$threshold,$duration);if($s->execute())$success='Rule added.';else $errors[]='DB error.';$s->close();}
+            $s=$conn->prepare("INSERT INTO automation_rules (device,sensor,operator,threshold) VALUES (?,?,?,?)");
+            if ($s){$s->bind_param("sssd",$device,$sensor,$operator,$threshold);if($s->execute())$success='Rule added.';else $errors[]='DB error: '.$conn->error;$s->close();}
         }
     }
 }
@@ -169,9 +173,10 @@ if ($stmt) {
     $stmt->close();
 }
 
-$devices = ['mist'=>'Mist','fan'=>'Fan','heater'=>'Heater','sprayer'=>'Sprayer'];
-$device_icons = ['mist'=>'fa-droplet','fan'=>'fa-fan','heater'=>'fa-fire','sprayer'=>'fa-spray-can-sparkles'];
-$device_colors= ['mist'=>'blue','fan'=>'green','heater'=>'red','sprayer'=>'amber'];
+$devices         = ['mist'=>'Mist','fan'=>'Fan','heater'=>'Heater','exhaust'=>'Exhaust'];
+$devices_sched   = ['mist'=>'Mist','fan'=>'Fan','heater'=>'Heater','sprayer'=>'Sprayer','exhaust'=>'Exhaust'];
+$device_icons    = ['mist'=>'fa-droplet','fan'=>'fa-fan','heater'=>'fa-fire','sprayer'=>'fa-spray-can-sparkles','exhaust'=>'fa-wind'];
+$device_colors   = ['mist'=>'blue','fan'=>'green','heater'=>'red','sprayer'=>'amber','exhaust'=>'green'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -460,7 +465,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
             <div class="rule-device-badge" style="background:var(--<?=$col?>-lt);color:var(--<?=$col?>);"><i class="fas <?=$icon?>"></i></div>
             <div class="rule-text">
               Turn <span><?=ucfirst($rule['device'])?> ON</span> when <span><?=$rule['sensor']?></span> is <span><?=$rule['operator']?></span> <span><?=$rule['threshold']?><?=$rule['sensor']==='temperature'?'°C':'%'?></span>
-              <div class="rule-detail">Run for <?=$rule['duration_minutes']?> min · <?=$rule['enabled']?'<span style="color:var(--green);font-weight:600;">Active</span>':'<span style="color:var(--muted);">Disabled</span>'?></div>
+              <div class="rule-detail">Auto OFF when back in range · <?=$rule['enabled']?'<span style="color:var(--green);font-weight:600;">Active</span>':'<span style="color:var(--muted);">Disabled</span>'?></div>
             </div>
             <?php if($isOwner): ?>
             <form method="POST" style="display:flex;align-items:center;gap:8px;">
@@ -481,29 +486,36 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
         <?php endif; ?>
       </div>
 
-      <!-- Scheduled Tasks -->
+      <!-- Sprayer Schedule -->
       <div class="card" style="margin-bottom:0;">
         <div class="card-header">
-          <div class="card-title"><span class="icon icon-amber"><i class="fas fa-clock"></i></span> Scheduled Tasks</div>
+          <div class="card-title"><span class="icon icon-amber"><i class="fas fa-spray-can-sparkles"></i></span> Sprayer Schedule</div>
           <div class="card-header-right">
             <span class="card-sub"><?=count($schedules)?> schedules</span>
             <?php if($isOwner): ?>
-            <button class="btn btn-amber btn-sm" id="openAddSchedule"><i class="fas fa-clock"></i> Add Schedule</button>
+            <button class="btn btn-amber btn-sm" id="openAddSchedule"><i class="fas fa-plus"></i> Add Spray Schedule</button>
             <?php endif; ?>
           </div>
         </div>
         <?php if(empty($schedules)): ?>
-          <div class="empty-state"><i class="fas fa-clock"></i><span>No schedules yet.</span></div>
+          <div class="empty-state"><i class="fas fa-spray-can-sparkles"></i><span>No spray schedules yet.</span></div>
         <?php else: ?>
         <div class="rule-list">
           <?php foreach($schedules as $sched):
-            $col=$device_colors[$sched['device']]??'blue';
-            $icon=$device_icons[$sched['device']]??'fa-cog';
+            $col='amber';
+            $icon='fa-spray-can-sparkles';
           ?>
           <div class="rule-item">
-            <div class="rule-device-badge" style="background:var(--<?=$col?>-lt);color:var(--<?=$col?>);"><i class="fas <?=$icon?>"></i></div>
+            <div class="rule-device-badge" style="background:var(--amber-lt);color:var(--amber);"><i class="fas <?=$icon?>"></i></div>
             <div class="rule-text">
-              <span><?=ucfirst($sched['device'])?></span> at <span><?=date('g:i A',strtotime($sched['run_time']))?></span> for <span><?=$sched['duration_minutes']?> min</span>
+              Spray at <span><?=date('g:i A',strtotime($sched['run_time']))?></span> for <span><?php
+                $dm = floatval($sched['duration_minutes']);
+                $mins = (int)$dm;
+                $secs = round(($dm - $mins) * 60);
+                if ($mins > 0 && $secs > 0) echo "{$mins} min {$secs} sec";
+                elseif ($mins > 0) echo "{$mins} min";
+                else echo "{$secs} sec";
+              ?></span>
               <div class="rule-detail"><?=htmlspecialchars($sched['days'])?> · <?=$sched['enabled']?'<span style="color:var(--green);font-weight:600;">Active</span>':'<span style="color:var(--muted);">Disabled</span>'?></div>
             </div>
             <?php if($isOwner): ?>
@@ -586,22 +598,25 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
       <input type="hidden" name="add_rule" value="1">
       <div class="form-grid-2">
         <div class="form-group"><label>Device</label>
-          <select name="device" required>
+          <select name="device" id="ruleDevice" required>
             <?php foreach($devices as $k=>$n): ?><option value="<?=$k?>"><?=$n?></option><?php endforeach; ?>
           </select>
         </div>
         <div class="form-group"><label>Sensor</label>
-          <select name="sensor" required><option value="temperature">Temperature</option><option value="humidity">Humidity</option></select>
+          <select name="sensor" id="ruleSensor" required><option value="temperature">Temperature</option><option value="humidity">Humidity</option></select>
         </div>
       </div>
-      <div class="form-grid-3">
+      <div class="form-grid-2">
         <div class="form-group"><label>Condition</label>
-          <select name="operator" required><option value="below">Below</option><option value="above">Above</option></select>
+          <select name="operator" id="ruleOperator" required><option value="below">Below</option><option value="above">Above</option></select>
         </div>
-        <div class="form-group"><label>Value</label><input type="number" name="threshold" step="0.1" placeholder="e.g. 85" required></div>
-        <div class="form-group"><label>Run (min)</label><input type="number" name="duration_minutes" min="1" value="5" required></div>
+        <div class="form-group"><label>Threshold Value</label><input type="number" name="threshold" id="ruleThreshold" step="0.1" placeholder="e.g. 85" required></div>
       </div>
-      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;">Example: Turn Mist ON when Humidity is below 85, run for 5 minutes.</p>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px;background:var(--surface2);padding:10px 12px;border-radius:7px;line-height:1.6;">
+        <i class="fas fa-circle-info" style="color:var(--blue);margin-right:5px;"></i>
+        The device turns <strong>ON</strong> when the condition is met, and turns <strong>OFF automatically</strong> once the sensor reading returns to the ideal range. No timer needed.
+        <br>Example: <em>Turn Mist ON when Humidity is below 85 → auto OFF when humidity reaches 85%+</em>
+      </p>
       <div class="modal-footer">
         <button type="button" class="btn btn-ghost" data-close="addRuleModal">Cancel</button>
         <button type="submit" class="btn btn-primary"><i class="fas fa-plus"></i> Add Rule</button>
@@ -610,34 +625,63 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
   </div>
 </div>
 
-<!-- Add Schedule Modal -->
+<!-- Add Spray Schedule Modal -->
 <div id="addScheduleModal" class="modal-backdrop">
   <div class="modal">
     <button class="modal-close" data-close="addScheduleModal">&times;</button>
-    <h3><i class="fas fa-clock" style="color:var(--amber);margin-right:8px;"></i>Add Schedule</h3>
-    <form method="POST">
+    <h3><i class="fas fa-spray-can-sparkles" style="color:var(--amber);margin-right:8px;"></i>Add Spray Schedule</h3>
+    <form method="POST" id="scheduleForm">
       <input type="hidden" name="add_schedule" value="1">
+      <input type="hidden" name="s_device" value="sprayer">
+      <input type="hidden" name="run_time" id="run_time_hidden">
       <div class="form-grid-2">
-        <div class="form-group"><label>Device</label>
-          <select name="s_device" required>
-            <?php foreach($devices as $k=>$n): ?><option value="<?=$k?>"><?=$n?></option><?php endforeach; ?>
-          </select>
+        <div class="form-group">
+          <label>Time</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <select id="sched_hour" style="flex:1;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;">
+              <?php for($h=1;$h<=12;$h++): ?>
+              <option value="<?=$h?>" <?=$h===8?'selected':''?>><?=$h?></option>
+              <?php endfor; ?>
+            </select>
+            <span style="font-weight:700;color:var(--muted);">:</span>
+            <select id="sched_min" style="flex:1;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;">
+              <option value="00">00</option>
+              <option value="15">15</option>
+              <option value="30">30</option>
+              <option value="45">45</option>
+            </select>
+            <select id="sched_ampm" style="flex:1;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;">
+              <option value="AM">AM</option>
+              <option value="PM">PM</option>
+            </select>
+          </div>
         </div>
-        <div class="form-group"><label>Time</label><input type="time" name="run_time" required></div>
-      </div>
-      <div class="form-grid-2">
-        <div class="form-group"><label>Duration (min)</label><input type="number" name="s_duration" min="1" value="5" required></div>
-        <div class="form-group"><label>Days</label>
-          <select name="days">
-            <option value="daily">Daily</option>
-            <option value="weekdays">Weekdays</option>
-            <option value="weekends">Weekends</option>
-          </select>
+        <div class="form-group">
+          <label>Duration</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input type="number" id="sched_dur_min" min="0" value="0" style="flex:1;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;">
+            <span style="font-size:12px;color:var(--muted);font-weight:600;white-space:nowrap;">min</span>
+            <input type="number" id="sched_dur_sec" min="0" max="59" value="30" style="flex:1;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;">
+            <span style="font-size:12px;color:var(--muted);font-weight:600;white-space:nowrap;">sec</span>
+          </div>
+          <input type="hidden" name="s_duration" id="s_duration_hidden">
         </div>
       </div>
+      <div class="form-group">
+        <label>Days</label>
+        <select name="days">
+          <option value="daily">Daily</option>
+          <option value="weekdays">Weekdays</option>
+          <option value="weekends">Weekends</option>
+        </select>
+      </div>
+      <p style="font-size:12px;color:var(--muted);background:var(--surface2);padding:10px 12px;border-radius:7px;line-height:1.6;margin-bottom:12px;">
+        <i class="fas fa-circle-info" style="color:var(--blue);margin-right:5px;"></i>
+        Recommended: <strong>3x per day</strong> — 8:00 AM, 4:00 PM, 12:00 AM · <strong>1 min</strong> each spray session.
+      </p>
       <div class="modal-footer">
         <button type="button" class="btn btn-ghost" data-close="addScheduleModal">Cancel</button>
-        <button type="submit" class="btn btn-amber"><i class="fas fa-clock"></i> Add Schedule</button>
+        <button type="submit" class="btn btn-amber" id="scheduleSubmitBtn"><i class="fas fa-plus"></i> Add Spray Schedule</button>
       </div>
     </form>
   </div>
@@ -677,8 +721,91 @@ function openModal(id){document.getElementById(id)?.classList.add('open');}
 function closeModal(id){document.getElementById(id)?.classList.remove('open');}
 document.querySelectorAll('[data-close]').forEach(el=>el.addEventListener('click',()=>closeModal(el.dataset.close)));
 document.querySelectorAll('.modal-backdrop').forEach(bd=>bd.addEventListener('click',e=>{if(e.target===bd)bd.classList.remove('open');}));
-document.getElementById('openAddRule')?.addEventListener('click',()=>openModal('addRuleModal'));
+// ── Spray Schedule time + duration picker ──
+(function(){
+  const form = document.getElementById('scheduleForm');
+  if (!form) return;
+  form.addEventListener('submit', function(e) {
+    // Convert 12hr → 24hr
+    const hour   = parseInt(document.getElementById('sched_hour').value);
+    const min    = document.getElementById('sched_min').value;
+    const ampm   = document.getElementById('sched_ampm').value;
+    let h24 = hour;
+    if (ampm === 'AM' && hour === 12) h24 = 0;
+    if (ampm === 'PM' && hour !== 12) h24 = hour + 12;
+    document.getElementById('run_time_hidden').value = String(h24).padStart(2,'0') + ':' + min + ':00';
+
+    // Convert min+sec → decimal minutes (stored as FLOAT in DB)
+    const durMin = parseInt(document.getElementById('sched_dur_min').value) || 0;
+    const durSec = parseInt(document.getElementById('sched_dur_sec').value) || 0;
+    const totalMin = durMin + (durSec / 60);
+    if (totalMin <= 0) { e.preventDefault(); alert('Duration must be greater than 0.'); return; }
+    document.getElementById('s_duration_hidden').value = totalMin.toFixed(4);
+  });
+})();
+
+document.getElementById('openAddRule')?.addEventListener('click',()=>{ openModal('addRuleModal'); updateRuleDefaults(); });
 document.getElementById('openAddSchedule')?.addEventListener('click',()=>openModal('addScheduleModal'));
+
+// ── Smart threshold auto-fill ──
+const THR = {
+  temp_min: <?= $thr['temp_min'] ?>,
+  temp_max: <?= $thr['temp_max'] ?>,
+  hum_min:  <?= $thr['hum_min'] ?>,
+  hum_max:  <?= $thr['hum_max'] ?>
+};
+
+// device → which sensor it uses + which condition + which threshold value
+const DEVICE_DEFAULTS = {
+  mist:    { sensor: 'humidity',    operator: 'below', value: () => THR.hum_min  },
+  fan:     { sensor: 'temperature', operator: 'above', value: () => THR.temp_max },
+  heater:  { sensor: 'temperature', operator: 'below', value: () => THR.temp_min },
+  exhaust: { sensor: 'temperature', operator: 'above', value: () => THR.temp_max },
+};
+
+function updateRuleDefaults() {
+  const device   = document.getElementById('ruleDevice');
+  const sensor   = document.getElementById('ruleSensor');
+  const operator = document.getElementById('ruleOperator');
+  const threshold= document.getElementById('ruleThreshold');
+  if (!device || !sensor || !operator || !threshold) return;
+
+  const def = DEVICE_DEFAULTS[device.value];
+  if (!def) return;
+
+  // Set sensor
+  sensor.value = def.sensor;
+  // Set operator
+  operator.value = def.operator;
+  // Set threshold value
+  threshold.value = def.value();
+
+  // Update placeholder with unit hint
+  const unit = def.sensor === 'temperature' ? '°C' : '%';
+  threshold.placeholder = `e.g. ${def.value()}${unit}`;
+}
+
+// Auto-update when device changes
+document.getElementById('ruleDevice')?.addEventListener('change', updateRuleDefaults);
+// Also update when sensor/operator changes manually
+document.getElementById('ruleSensor')?.addEventListener('change', function() {
+  const threshold = document.getElementById('ruleThreshold');
+  const operator  = document.getElementById('ruleOperator');
+  if (this.value === 'temperature') {
+    threshold.value = operator.value === 'below' ? THR.temp_min : THR.temp_max;
+  } else {
+    threshold.value = operator.value === 'below' ? THR.hum_min : THR.hum_max;
+  }
+});
+document.getElementById('ruleOperator')?.addEventListener('change', function() {
+  const threshold = document.getElementById('ruleThreshold');
+  const sensor    = document.getElementById('ruleSensor');
+  if (sensor.value === 'temperature') {
+    threshold.value = this.value === 'below' ? THR.temp_min : THR.temp_max;
+  } else {
+    threshold.value = this.value === 'below' ? THR.hum_min : THR.hum_max;
+  }
+});
 </script>
 <script>
 (function() {

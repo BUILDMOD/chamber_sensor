@@ -77,7 +77,7 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
         if ($r2['metric']==='emergency_hum') { $thr['emerg_hum_high']=$r2['max_value']; }
     }
 
-    // STEP 1 — EMERGENCY SHUTOFF
+    // STEP 1 — EMERGENCY SHUTOFF (runs in both auto and manual mode)
     $emergencies = [];
     if ($temperature > $thr['emerg_temp_high'])
         $emergencies['heater']  = "Emergency: Temp {$temperature}°C critically high (>{$thr['emerg_temp_high']}°C) — Heater forced OFF";
@@ -104,62 +104,64 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
         }
     }
 
-    // STEP 2 — FAULT DETECTION
-    foreach ($DEVICE_SENSOR_EXPECTATION as $device => $expect) {
-        if ((int)($row[$device] ?? 0) !== 1) continue;
+    // ── STEP 2 — FAULT DETECTION (skip in manual mode — user controls devices manually) ──
+    if (!$manualMode) {
+        foreach ($DEVICE_SENSOR_EXPECTATION as $device => $expect) {
+            if ((int)($row[$device] ?? 0) !== 1) continue;
 
-        $sensorVal = $expect['sensor'] === 'temperature' ? $temperature : $humidity;
+            $sensorVal = $expect['sensor'] === 'temperature' ? $temperature : $humidity;
 
-        $lastOn = $conn->query("SELECT logged_at FROM device_logs
-                                WHERE device='{$device}' AND action='ON'
-                                ORDER BY logged_at DESC LIMIT 1");
-        if (!$lastOn || $lastOn->num_rows === 0) continue;
+            $lastOn = $conn->query("SELECT logged_at FROM device_logs
+                                    WHERE device='{$device}' AND action='ON'
+                                    ORDER BY logged_at DESC LIMIT 1");
+            if (!$lastOn || $lastOn->num_rows === 0) continue;
 
-        $onSince   = new DateTime($lastOn->fetch_assoc()['logged_at']);
-        $now       = new DateTime($timestamp);
-        $onMinutes = ($now->getTimestamp() - $onSince->getTimestamp()) / 60;
+            $onSince   = new DateTime($lastOn->fetch_assoc()['logged_at']);
+            $now       = new DateTime($timestamp);
+            $onMinutes = ($now->getTimestamp() - $onSince->getTimestamp()) / 60;
 
-        $faultType   = null;
-        $faultReason = null;
+            $faultType   = null;
+            $faultReason = null;
 
-        if ($onMinutes >= $FAULT_MAX_ON_MINUTES) {
-            $faultType   = 'stuck_on';
-            $faultReason = "Fault: {$device} ON for " . round($onMinutes) . " min (max " . $FAULT_MAX_ON_MINUTES . " min) — forced OFF";
-        }
+            if ($onMinutes >= $FAULT_MAX_ON_MINUTES) {
+                $faultType   = 'stuck_on';
+                $faultReason = "Fault: {$device} ON for " . round($onMinutes) . " min (max " . $FAULT_MAX_ON_MINUTES . " min) — forced OFF";
+            }
 
-        if (!$faultType && $onMinutes >= $FAULT_NO_RESPONSE_MINUTES) {
-            $valAtOn = $conn->query(
-                "SELECT " . $expect['sensor'] . " FROM sensor_data
-                 WHERE timestamp <= '{$onSince->format('Y-m-d H:i:s')}'
-                 ORDER BY id DESC LIMIT 1"
-            );
-            if ($valAtOn && $valAtOn->num_rows > 0) {
-                $valThen = floatval($valAtOn->fetch_assoc()[$expect['sensor']]);
-                $delta   = $sensorVal - $valThen;
-                $notResp = ($expect['direction'] === 'rising'  && $delta <= 0)
-                        || ($expect['direction'] === 'falling' && $delta >= 0);
-                if ($notResp) {
-                    $faultType   = 'no_response';
-                    $dir         = $expect['direction'] === 'rising' ? 'increase' : 'decrease';
-                    $faultReason = "Fault: {$device} ON {$onMinutes} min but {$expect['sensor']} did not {$dir} (was {$valThen}, now {$sensorVal}) — forced OFF";
+            if (!$faultType && $onMinutes >= $FAULT_NO_RESPONSE_MINUTES) {
+                $valAtOn = $conn->query(
+                    "SELECT " . $expect['sensor'] . " FROM sensor_data
+                     WHERE timestamp <= '{$onSince->format('Y-m-d H:i:s')}'
+                     ORDER BY id DESC LIMIT 1"
+                );
+                if ($valAtOn && $valAtOn->num_rows > 0) {
+                    $valThen = floatval($valAtOn->fetch_assoc()[$expect['sensor']]);
+                    $delta   = $sensorVal - $valThen;
+                    $notResp = ($expect['direction'] === 'rising'  && $delta <= 0)
+                            || ($expect['direction'] === 'falling' && $delta >= 0);
+                    if ($notResp) {
+                        $faultType   = 'no_response';
+                        $dir         = $expect['direction'] === 'rising' ? 'increase' : 'decrease';
+                        $faultReason = "Fault: {$device} ON {$onMinutes} min but {$expect['sensor']} did not {$dir} (was {$valThen}, now {$sensorVal}) — forced OFF";
+                    }
                 }
             }
+
+            if ($faultType && $faultReason) {
+                $conn->query("UPDATE device_status SET {$device}=0 WHERE id=1");
+                _logDevice($conn, $device, 'OFF', 'fault', $faultReason);
+                _logAlert($conn, 'device', 'critical', $faultReason, $sensorVal);
+
+                $fs = $conn->prepare("INSERT INTO device_faults (device,fault_type,detail,sensor_val) VALUES (?,?,?,?)");
+                if ($fs) { $fs->bind_param("sssd",$device,$faultType,$faultReason,$sensorVal); $fs->execute(); $fs->close(); }
+
+                $row[$device] = 0;
+                $buzzerOn = true;
+            }
         }
+    } // end !$manualMode STEP 2
 
-        if ($faultType && $faultReason) {
-            $conn->query("UPDATE device_status SET {$device}=0 WHERE id=1");
-            _logDevice($conn, $device, 'OFF', 'fault', $faultReason);
-            _logAlert($conn, 'device', 'critical', $faultReason, $sensorVal);
-
-            $fs = $conn->prepare("INSERT INTO device_faults (device,fault_type,detail,sensor_val) VALUES (?,?,?,?)");
-            if ($fs) { $fs->bind_param("sssd",$device,$faultType,$faultReason,$sensorVal); $fs->execute(); $fs->close(); }
-
-            $row[$device] = 0;
-            $buzzerOn = true;
-        }
-    }
-
-    // STEP 3 — AUTO MODE RULES
+    // STEP 3 — AUTO MODE RULES (sensor-based: ON when condition met, OFF when back in range)
     if (!$manualMode) {
         $rules = [];
         $r = $conn->query("SELECT * FROM automation_rules WHERE enabled=1 ORDER BY id");
@@ -180,26 +182,13 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
                 _logDevice($conn, $device, 'ON', 'auto', "Auto: {$sensor} {$operator} {$threshold} (now {$sensorVal})");
                 $row[$device] = 1;
             } elseif (!$condMet && $current === 1) {
-                $conn->query("UPDATE device_status SET {$device}=0 WHERE id=1");
-                _logDevice($conn, $device, 'OFF', 'auto', "Auto: {$sensor} no longer {$operator} {$threshold} (now {$sensorVal})");
-                $row[$device] = 0;
-            }
-        }
-    }
-
-    // ── EXHAUST: humidity-based auto control ──
-    if (!$manualMode) {
-        $currentExhaust = (int)($row['exhaust'] ?? 0);
-        if ($humidity > $thr['hum_max'] && $currentExhaust === 0) {
-            $conn->query("UPDATE device_status SET exhaust=1 WHERE id=1");
-            _logDevice($conn, 'exhaust', 'ON', 'auto', "Auto: humidity {$humidity}% above max {$thr['hum_max']}% — ventilating");
-            $row['exhaust'] = 1;
-        } elseif ($humidity <= $thr['hum_max'] && $currentExhaust === 1) {
-            $lastEx = $conn->query("SELECT trigger_type FROM device_logs WHERE device='exhaust' AND action='ON' ORDER BY logged_at DESC LIMIT 1");
-            if ($lastEx && ($lr = $lastEx->fetch_assoc()) && $lr['trigger_type'] === 'auto') {
-                $conn->query("UPDATE device_status SET exhaust=0 WHERE id=1");
-                _logDevice($conn, 'exhaust', 'OFF', 'auto', "Auto: humidity {$humidity}% back within range");
-                $row['exhaust'] = 0;
+                // Only turn OFF if it was turned ON by auto (not manual or schedule)
+                $lastTrig = $conn->query("SELECT trigger_type FROM device_logs WHERE device='{$device}' AND action='ON' ORDER BY logged_at DESC LIMIT 1");
+                if ($lastTrig && ($lr = $lastTrig->fetch_assoc()) && $lr['trigger_type'] === 'auto') {
+                    $conn->query("UPDATE device_status SET {$device}=0 WHERE id=1");
+                    _logDevice($conn, $device, 'OFF', 'auto', "Auto: {$sensor} back in range (now {$sensorVal}, threshold {$threshold})");
+                    $row[$device] = 0;
+                }
             }
         }
     }
@@ -219,10 +208,12 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
             $dayMatch = ($days==='daily') || ($days==='weekdays' && !$isWeekend) || ($days==='weekends' && $isWeekend);
             if (!$dayMatch) continue;
 
-            $start    = new DateTime($now->format('Y-m-d') . ' ' . $sched['run_time']);
-            $end      = (clone $start)->modify("+{$sched['duration_minutes']} minutes");
-            $inWindow = ($now >= $start && $now <= $end);
-            $current  = (int)($row[$device] ?? 0);
+            $start      = new DateTime($now->format('Y-m-d') . ' ' . $sched['run_time']);
+            $durFloat   = floatval($sched['duration_minutes']);
+            $durSeconds = (int)round($durFloat * 60);
+            $end        = (clone $start)->modify("+{$durSeconds} seconds");
+            $inWindow   = ($now >= $start && $now <= $end);
+            $current    = (int)($row[$device] ?? 0);
 
             if ($inWindow && $current === 0) {
                 $conn->query("UPDATE device_status SET {$device}=1 WHERE id=1");
