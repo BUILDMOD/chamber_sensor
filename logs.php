@@ -269,7 +269,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
 /* ============================================================
    RESPONSIVE / MOBILE
    ============================================================ */
-.hamburger{display:none;position:fixed;top:4px;left:10px;z-index:200;width:38px;height:38px;border-radius:9px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow);align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;padding:9px;touch-action:manipulation;pointer-events:auto;}
+.hamburger{display:none;position:fixed;top:4px;left:10px;z-index:600;width:38px;height:38px;border-radius:9px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow);align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;padding:9px;touch-action:manipulation;pointer-events:auto;}
 .hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
 .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);}
 .sidebar-overlay.open{display:block;}

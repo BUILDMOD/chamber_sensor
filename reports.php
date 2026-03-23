@@ -340,7 +340,7 @@ function navUrl($view, $year, $month, $day) {
     .cal-legend-dot{width:10px;height:10px;border-radius:3px;}
 
     /* ── RESPONSIVE ── */
-    .hamburger{display:none;position:fixed;top:4px;left:10px;z-index:500;width:38px;height:38px;border-radius:9px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow);align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;padding:9px;touch-action:manipulation;}
+    .hamburger{display:none;position:fixed;top:4px;left:10px;z-index:600;width:38px;height:38px;border-radius:9px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow);align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px;padding:9px;touch-action:manipulation;}
     .hamburger span{display:block;width:16px;height:2px;background:var(--text);border-radius:2px;transition:all .25s;}
     .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:99;backdrop-filter:blur(3px);}
     .sidebar-overlay.open{display:block;}
@@ -854,8 +854,8 @@ function navUrl($view, $year, $month, $day) {
   if(!h||!s||!o)return;
   function open(){s.classList.add('open');o.classList.add('open');h.classList.add('open');}
   function close(){s.classList.remove('open');o.classList.remove('open');h.classList.remove('open');}
-  h.onclick=function(){s.classList.contains('open')?close():open();};
-  o.onclick=close;
+  h.addEventListener('click',function(){s.classList.contains('open')?close():open();});
+  o.addEventListener('click',close);
   s.querySelectorAll('.sidebar-nav a').forEach(function(a){a.addEventListener('click',function(){if(window.innerWidth<=768)close();});});
 })();
 

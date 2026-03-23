@@ -47,7 +47,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
     $sessionRole = $_SESSION['role'] ?? '';
     if ($sessionRole !== 'owner') { $errors[] = "Access denied."; } else {
         $a_first=$_POST['a_first_name']??''; $a_middle=$_POST['a_middle_name']??''; $a_last=$_POST['a_last_name']??''; $a_suffix=$_POST['a_suffix']??'';
-        $a_email=$_POST['a_email']??''; $a_phone=$_POST['a_phone']??''; $a_username=$_POST['a_username']??''; $a_password_raw=$_POST['a_password']??'';
+        $a_email=$_POST['a_email']??''; $a_phone=$_POST['a_phone']??'';
+        
+        // Auto-generate username and password if not provided
+        if (empty($_POST['a_username']) || empty($_POST['a_password'])) {
+            // Generate username from first name and last name
+            $base_username = strtolower(preg_replace('/[^A-Za-z]/', '', $a_first)) . strtolower(preg_replace('/[^A-Za-z]/', '', $a_last));
+            $a_username = $base_username . rand(100, 999);
+            
+            // Generate secure random password
+            $a_password_raw = generateSecurePassword();
+        } else {
+            $a_username=$_POST['a_username']??''; $a_password_raw=$_POST['a_password']??'';
+        }
+        
         $a_role=in_array($_POST['a_role']??'staff',['owner','staff'])?$_POST['a_role']:'staff';
         if (!$a_first) $errors[]="First name required."; if (!$a_last) $errors[]="Last name required.";
         if (!$a_email) $errors[]="Email required."; if (!$a_username) $errors[]="Username required."; if (!$a_password_raw) $errors[]="Password required.";
@@ -57,8 +70,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
         if ($a_phone && !preg_match("/^[0-9]+$/", $a_phone)) $errors[]="Phone number must contain numbers only.";
         if ($a_username && !preg_match("/^[A-Za-z0-9]+$/", $a_username)) $errors[]="Username must contain letters and numbers only.";
         if ($a_email && !filter_var($a_email, FILTER_VALIDATE_EMAIL)) $errors[]="Invalid email format.";
-        if (!preg_match('@[A-Z]@',$a_password_raw)||!preg_match('@[a-z]@',$a_password_raw)||!preg_match('@[0-9]@',$a_password_raw)||!preg_match('@[^\w]@',$a_password_raw)||strlen($a_password_raw)<8)
+        if (!preg_match('@[A-Z]@',$a_password_raw)||!preg_match('@[a-z]@',$a_password_raw)||!preg_match('@[0-9]@',$a_password_raw)||!preg_match('@[^\w]@',$a_password_raw)||strlen($a_password_raw)<8) {
             $errors[]="Password must be 8+ chars with uppercase, lowercase, number, and special character.";
+        }
         if (empty($errors)) {
             $chk=$conn->prepare("SELECT id FROM users WHERE username=? OR email=? LIMIT 1");
             if ($chk) { $chk->bind_param("ss",$a_username,$a_email); $chk->execute(); $chk->store_result(); if ($chk->num_rows>0) $errors[]="Username or email already exists."; $chk->close(); }
@@ -83,18 +97,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
                             . '</td></tr>'
                             . '<tr><td style="padding:32px;">'
                             . '<p style="font-size:16px;color:#333;margin-top:0;">Hi <strong>' . htmlspecialchars($a_fullname) . '</strong>,</p>'
-                            . '<p style="font-size:14px;color:#555;">Your MushroomOS account has been created by <strong>' . htmlspecialchars($addedBy) . '</strong>. You can log in right away using the credentials below.</p>'
+                            . '<p style="font-size:14px;color:#555;">Your MushroomOS account has been created by <strong>' . htmlspecialchars($addedBy) . '</strong>. Your login credentials are:</p>'
                             . '<div style="background:#e8f5e9;border-left:4px solid #2b4d30;border-radius:4px;padding:16px 20px;margin:24px 0;">'
                             . '<p style="margin:0;font-size:13px;color:#555;">&#10003; &nbsp;<strong>Account Status: Active</strong></p>'
                             . '</div>'
                             . '<table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-size:14px;margin-bottom:24px;">'
                             . '<tr style="background:#f9f9f9;"><td style="color:#777;width:40%;border-bottom:1px solid #eee;">Full Name</td><td style="color:#333;border-bottom:1px solid #eee;"><strong>' . htmlspecialchars($a_fullname) . '</strong></td></tr>'
                             . '<tr><td style="color:#777;border-bottom:1px solid #eee;">Username</td><td style="color:#333;border-bottom:1px solid #eee;"><strong>' . htmlspecialchars($a_username) . '</strong></td></tr>'
-                            . '<tr style="background:#f9f9f9;"><td style="color:#777;border-bottom:1px solid #eee;">Role</td><td style="color:#333;border-bottom:1px solid #eee;">' . $roleLabel . '</td></tr>'
+                            . '<tr style="background:#f9f9f9;"><td style="color:#777;border-bottom:1px solid #eee;">Password</td><td style="color:#333;border-bottom:1px solid #eee;"><strong>' . htmlspecialchars($a_password_raw) . '</strong></td></tr>'
+                            . '<tr><td style="color:#777;border-bottom:1px solid #eee;">Role</td><td style="color:#333;border-bottom:1px solid #eee;">' . $roleLabel . '</td></tr>'
                             . '<tr><td style="color:#777;">Added By</td><td style="color:#333;">' . htmlspecialchars($addedBy) . '</td></tr>'
                             . '</table>'
                             . '<div style="background:#fff8e1;border-left:4px solid #f9a825;border-radius:4px;padding:14px 18px;margin-bottom:24px;">'
-                            . '<p style="margin:0;font-size:13px;color:#7a6000;">&#9888; &nbsp;For security, please change your password after your first login.</p>'
+                            . '<p style="margin:0;font-size:13px;color:#7a6000;">&#10003; &nbsp;<strong>Login Credentials:</strong></p>'
+                            . '<div style="background:#f0f8ff;padding:12px;border-radius:4px;margin-bottom:16px;">'
+                            . '<p style="margin:0;font-family:monospace;font-size:14px;color:#333;">Username: <strong>' . htmlspecialchars($a_username) . '</strong></p>'
+                            . '<p style="margin:0;font-family:monospace;font-size:14px;color:#333;">Password: <strong>' . htmlspecialchars($a_password_raw) . '</strong></p>'
+                            . '</div>'
+                            . '<p style="font-size:13px;color:#555;">You can log in immediately using these credentials. Please keep them secure and change your password after first login.</p>'
                             . '</div>'
                             . '<p style="font-size:13px;color:#999;border-top:1px solid #eee;padding-top:16px;margin-bottom:0;">This is an automated message from <strong>MushroomOS</strong>. Please do not reply.</p>'
                             . '</td></tr></table></td></tr></table></body></html>';
@@ -102,9 +122,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
                         if ($emailResult !== "SUCCESS") error_log("Add-user welcome email failed for {$a_email}: " . $emailResult);
                     }
                 } else $errors[]="Database error.";
-                $ins->close(); }
+                $ins->close(); 
+            }
         }
     }
+}
+
+// Function to generate secure password
+function generateSecurePassword() {
+    $chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+    $password = '';
+    for ($i = 0; $i < 12; $i++) {
+        $password .= $chars[rand(0, strlen($chars) - 1)];
+    }
+    return $password;
 }
 
 // DELETE USER
@@ -149,18 +180,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_user'])) {
 // EDIT USER
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_user'])) {
     $sessionRole=$_SESSION['role']??''; if ($sessionRole!=='owner') { $errors[]="Access denied."; } else {
-        $eid=intval($_POST['edit_user_id']??0); $ef=$_POST['e_first_name']??''; $em=$_POST['e_middle_name']??''; $el=$_POST['e_last_name']??''; $es=$_POST['e_suffix']??''; $ee=$_POST['e_email']??''; $ep=$_POST['e_phone']??''; $er=in_array($_POST['e_role']??'staff',['owner','staff'])?$_POST['e_role']:'staff';
-        if (!$ef) $errors[]="First name required."; if (!$el) $errors[]="Last name required."; if (!$ee) $errors[]="Email required."; if ($eid<=0) $errors[]="Invalid ID.";
+        $eid=intval($_POST['edit_user_id']??0); $ef=$_POST['e_first_name']??''; $em=$_POST['e_middle_name']??''; $el=$_POST['e_last_name']??''; $es=$_POST['e_suffix']??''; $ee=$_POST['e_email']??''; $ep=$_POST['e_phone']??''; $eu_username=$_POST['e_username']??''; $er=in_array($_POST['e_role']??'staff',['owner','staff'])?$_POST['e_role']:'staff';
+        if (!$ef) $errors[]="First name required."; if (!$el) $errors[]="Last name required."; if (!$ee) $errors[]="Email required."; if (!$eu_username) $errors[]="Username required."; if ($eid<=0) $errors[]="Invalid ID.";
         if (empty($errors)) {
             $eu=null; $s=$conn->prepare("SELECT id,username,role FROM users WHERE id=? LIMIT 1");
             if ($s) { $s->bind_param("i",$eid); $s->execute(); $r=$s->get_result(); if ($r&&$r->num_rows>0) $eu=$r->fetch_assoc(); $s->close(); }
             if (!$eu) { $errors[]="User not found."; } elseif ($eu['id']===$user['id']) { $errors[]="Cannot edit own account here."; } else {
                 $chk=$conn->prepare("SELECT id FROM users WHERE email=? AND id!=? LIMIT 1");
                 if ($chk) { $chk->bind_param("si",$ee,$eid); $chk->execute(); $chk->store_result(); if ($chk->num_rows>0) $errors[]="Email exists."; $chk->close(); }
+                $chk_user=$conn->prepare("SELECT id FROM users WHERE username=? AND id!=? LIMIT 1");
+                if ($chk_user) { $chk_user->bind_param("si",$eu_username,$eid); $chk_user->execute(); $chk_user->store_result(); if ($chk_user->num_rows>0) $errors[]="Username already exists."; $chk_user->close(); }
                 if (empty($errors)) {
                     $ef_full=trim($ef.' '.($em?$em.' ':'').$el.($es?', '.$es:''));
-                    $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,suffix=?,fullname=?,email=?,phone=?,role=? WHERE id=?");
-                    if ($u) { $u->bind_param("ssssssssi",$ef,$em,$el,$es,$ef_full,$ee,$ep,$er,$eid); if ($u->execute()) { $success="User updated."; logActivity($conn,$user['id'],"Edited: {$eu['username']}"); } else $errors[]="DB error."; $u->close(); }
+                    $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,suffix=?,fullname=?,email=?,phone=?,username=?,role=? WHERE id=?");
+                    if ($u) { $u->bind_param("sssssssssi",$ef,$em,$el,$es,$ef_full,$ee,$ep,$eu_username,$er,$eid); if ($u->execute()) { $success="User updated."; logActivity($conn,$user['id'],"Edited: {$eu['username']} -> {$eu_username}"); } else $errors[]="DB error."; $u->close(); }
                 }
             }
         }
@@ -258,7 +291,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile']) && 
     if (empty($errors)) {
         $fullname=trim($first.' '.($middle?$middle.' ':'').$last.($suffix?', '.$suffix:''));
         $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,suffix=?,fullname=?,email=?,phone=? WHERE id=?");
-        if ($u) { $u->bind_param("sssssssi",$first,$middle,$last,$suffix,$fullname,$email,$phone,$user['id']); if ($u->execute()) { $success="Profile updated."; logActivity($conn,$user['id'],"Profile updated"); $stmt=$conn->prepare("SELECT id,first_name,middle_name,last_name,fullname,email,phone,username,created_at FROM users WHERE id=? LIMIT 1"); if ($stmt) { $stmt->bind_param("i",$user['id']); $stmt->execute(); $r=$stmt->get_result(); if ($r&&$r->num_rows>0) $user=$r->fetch_assoc(); $stmt->close(); } } else $errors[]="DB error."; $u->close(); }
+        if ($u) { $u->bind_param("sssssssi",$first,$middle,$last,$suffix,$fullname,$email,$phone,$user['id']); if ($u->execute()) { $success="Profile updated."; logActivity($conn,$user['id'],"Profile updated"); $_SESSION['fullname'] = $fullname; $stmt=$conn->prepare("SELECT id,first_name,middle_name,last_name,fullname,email,phone,username,created_at FROM users WHERE id=? LIMIT 1"); if ($stmt) { $stmt->bind_param("i",$user['id']); $stmt->execute(); $r=$stmt->get_result(); if ($r&&$r->num_rows>0) $user=$r->fetch_assoc(); $stmt->close(); } } else $errors[]="DB error."; $u->close(); }
     }
 }
 
@@ -421,12 +454,14 @@ body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); col
 .pw-eye { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--muted); font-size: 13px; }
 .pw-eye:hover { color: var(--text); }
 /* ── Password Requirements Checklist ── */
-.pw-requirements { background: var(--blue-lt); border: 1px solid rgba(26,107,186,0.15); border-radius: 8px; padding: 12px 14px; margin-top: 8px; }
+.pw-requirements { background: var(--blue-lt); border: 1px solid rgba(26,107,186,0.15); border-radius: 8px; padding: 12px 14px; margin-top: 4px; }
 .pw-requirements strong { display: block; font-size: 11px; font-weight: 700; color: var(--blue); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .4px; }
 .pw-req-item { display: flex; align-items: center; gap: 7px; padding: 2px 0; color: var(--muted); font-size: 12px; transition: color .2s; }
 .pw-req-item .req-icon { font-size: 11px; width: 14px; text-align: center; color: var(--red); transition: color .2s; flex-shrink: 0; }
 .pw-req-item.met { color: var(--text); }
 .pw-req-item.met .req-icon { color: var(--green); }
+.pw-strength-indicator { margin-top: 6px; font-size: 12px; font-weight: 600; display: none; }
+.pw-strength-indicator.strong { color: var(--green); display: block; }
 .username-note { font-size: 11px; color: var(--muted); padding: 8px 0; }
 .username-note strong { color: var(--text); font-family: 'DM Mono', monospace; }
 .form-actions { display: flex; gap: 8px; margin-top: 4px; }
@@ -775,6 +810,12 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
                     oninput="this.value=this.value.replace(/[^0-9]/g,'')" maxlength="11">
                 </div>
               </div>
+              <div class="form-group">
+                <label>Username</label>
+                <input type="text" name="username" value="<?= htmlspecialchars($user['username'] ?? '') ?>" required
+                  placeholder="e.g. juandelacruz01"
+                  oninput="this.value=this.value.replace(/[^A-Za-z0-9]/g,'')">
+              </div>
               <p class="username-note">Username: <strong><?= htmlspecialchars($user['username'] ?? '') ?></strong> — cannot be changed</p>
               <div class="form-actions">
                 <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
@@ -801,14 +842,6 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
                   <input type="password" name="new_password" id="new_password" required placeholder="Min. 8 characters">
                   <button type="button" class="pw-eye" data-target="new_password"><i class="fa fa-eye"></i></button>
                 </div>
-                <div class="pw-requirements" id="req-new_password">
-                  <strong>Password requirements:</strong>
-                  <div class="pw-req-item" data-req="length"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least 8 characters</div>
-                  <div class="pw-req-item" data-req="upper"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one uppercase letter (A–Z)</div>
-                  <div class="pw-req-item" data-req="lower"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one lowercase letter (a–z)</div>
-                  <div class="pw-req-item" data-req="number"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one number (0–9)</div>
-                  <div class="pw-req-item" data-req="special"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one special character (!@#$...)</div>
-                </div>
               </div>
               <div class="form-group">
                 <label>Confirm Password</label>
@@ -817,6 +850,18 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
                   <button type="button" class="pw-eye" data-target="confirm_password"><i class="fa fa-eye"></i></button>
                 </div>
               </div>
+              <div class="pw-requirements" id="req-new_password">
+                <strong>Password requirements:</strong>
+                <div class="pw-req-item" data-req="length"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least 8 characters</div>
+                <div class="pw-req-item" data-req="upper"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one uppercase letter (A–Z)</div>
+                <div class="pw-req-item" data-req="lower"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one lowercase letter (a–z)</div>
+                <div class="pw-req-item" data-req="number"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one number (0–9)</div>
+                <div class="pw-req-item" data-req="special"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one special character (!@#$...)</div>
+              </div>
+              <div class="pw-strength-indicator" id="strength-new_password">
+                <i class="fa fa-check-circle"></i> Strong password - all requirements met!
+              </div>
+              <script>bindPasswordChecklist('new_password');</script>
               <div class="form-actions">
                 <button type="submit" class="btn btn-primary btn-sm">Update Password</button>
                 <button type="button" class="btn btn-ghost btn-sm" id="passwdCancel">Cancel</button>
@@ -901,7 +946,8 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
                         data-suffix="<?= htmlspecialchars($u['suffix']??''  ) ?>"
                         data-email="<?= htmlspecialchars($u['email']) ?>"
                         data-phone="<?= htmlspecialchars($u['phone']??'') ?>"
-                        data-role="<?= htmlspecialchars($u['role']) ?>">
+                        data-role="<?= htmlspecialchars($u['role']) ?>"
+                        data-username="<?= htmlspecialchars($u['username']) ?>">
                         <i class="fas fa-pen"></i> Edit
                       </button>
                       <form method="POST" style="display:inline;" onsubmit="return confirm('Delete this user?')">
@@ -1001,35 +1047,39 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
           oninput="this.value=this.value.replace(/[^0-9]/g,'')" maxlength="11"
           placeholder="e.g. 09123456789"></div>
       </div>
-      <div class="form-group"><label>Username</label><input type="text" name="a_username" required
-        oninput="this.value=this.value.replace(/[^A-Za-z0-9]/g,'')"
-        placeholder="e.g. juandelacruz01"></div>
+      <div class="form-group"><label>Username</label><input type="text" name="a_username" 
+        placeholder="e.g. juandelacruz01 (optional)"
+        oninput="this.value=this.value.replace(/[^A-Za-z0-9]/g,'')"></div>
+      <div class="form-group">
+        <label>Role</label>
+        <select name="a_role"><option value="staff" selected>Staff</option></select>
+      </div>
       <div class="form-group">
         <label>Password</label>
         <div class="pw-wrap">
-          <input type="password" name="a_password" id="a_password" required placeholder="Min. 8 characters">
+          <input type="password" name="a_password" id="a_password" placeholder="12 characters (optional)">
           <button type="button" class="pw-eye" data-target="a_password"><i class="fa fa-eye"></i></button>
-        </div>
-        <div class="pw-requirements" id="req-a_password">
-          <strong>Password requirements:</strong>
-          <div class="pw-req-item" data-req="length"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least 8 characters</div>
-          <div class="pw-req-item" data-req="upper"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one uppercase letter (A–Z)</div>
-          <div class="pw-req-item" data-req="lower"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one lowercase letter (a–z)</div>
-          <div class="pw-req-item" data-req="number"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one number (0–9)</div>
-          <div class="pw-req-item" data-req="special"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one special character (!@#$...)</div>
         </div>
       </div>
       <div class="form-group">
         <label>Confirm Password</label>
         <div class="pw-wrap">
-          <input type="password" name="a_confirm_password" id="a_confirm_password" required placeholder="Re-enter password">
+          <input type="password" name="a_confirm_password" id="a_confirm_password" placeholder="Re-enter password">
           <button type="button" class="pw-eye" data-target="a_confirm_password"><i class="fa fa-eye"></i></button>
         </div>
       </div>
-      <div class="form-group">
-        <label>Role</label>
-        <select name="a_role"><option value="staff" selected>Staff</option></select>
+      <div class="pw-requirements" id="req-a_password">
+        <strong>Password requirements:</strong>
+        <div class="pw-req-item" data-req="length"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least 8 characters</div>
+        <div class="pw-req-item" data-req="upper"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one uppercase letter (A–Z)</div>
+        <div class="pw-req-item" data-req="lower"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one lowercase letter (a–z)</div>
+        <div class="pw-req-item" data-req="number"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one number (0–9)</div>
+        <div class="pw-req-item" data-req="special"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one special character (!@#$...)</div>
       </div>
+      <div class="pw-strength-indicator" id="strength-a_password">
+        <i class="fa fa-check-circle"></i> Strong password - all requirements met!
+      </div>
+      <script>bindPasswordChecklist('a_password');</script>
       <div class="modal-footer">
         <button type="button" class="btn btn-ghost" data-close="addUserModal">Cancel</button>
         <button type="submit" class="btn btn-primary"><i class="fas fa-user-plus"></i> Create User</button>
@@ -1069,6 +1119,9 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
           oninput="this.value=this.value.replace(/[^0-9]/g,'')" maxlength="11"
           placeholder="e.g. 09123456789"></div>
       </div>
+      <div class="form-group"><label>Username</label><input type="text" name="e_username" id="e_username" required
+        placeholder="e.g. juandelacruz01"
+        oninput="this.value=this.value.replace(/[^A-Za-z0-9]/g,'')"></div>
       <div class="form-group">
         <label>Role</label>
         <select name="e_role" id="e_role"><option value="staff">Staff</option><option value="owner">Owner</option></select>
@@ -1111,6 +1164,7 @@ document.querySelectorAll('.pw-eye').forEach(btn => {
 function bindPasswordChecklist(inputId) {
   const inp = document.getElementById(inputId);
   const box = document.getElementById('req-' + inputId);
+  const strength = document.getElementById('strength-' + inputId);
   if (!inp || !box) return;
   const rules = {
     length:  v => v.length >= 8,
@@ -1121,13 +1175,19 @@ function bindPasswordChecklist(inputId) {
   };
   inp.addEventListener('input', () => {
     const v = inp.value;
+    let allMet = true;
     box.querySelectorAll('.pw-req-item').forEach(item => {
       const key = item.dataset.req;
       const icon = item.querySelector('.req-icon i');
       const passed = rules[key]?.(v);
       item.classList.toggle('met', passed);
       icon.className = passed ? 'fa fa-check' : 'fa fa-xmark';
+      if (!passed) allMet = false;
     });
+    // Show/hide green strength indicator
+    if (strength) {
+      strength.classList.toggle('strong', allMet && v.length > 0);
+    }
   });
 }
 bindPasswordChecklist('new_password');
@@ -1181,6 +1241,7 @@ document.addEventListener('click', e => {
   document.getElementById('e_suffix').value       = btn.dataset.suffix || '';
   document.getElementById('e_email').value        = btn.dataset.email  || '';
   document.getElementById('e_phone').value        = btn.dataset.phone  || '';
+  document.getElementById('e_username').value     = btn.dataset.username || '';
   document.getElementById('e_role').value         = btn.dataset.role   || 'staff';
   openModal('editUserModal');
 });
