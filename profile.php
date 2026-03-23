@@ -420,9 +420,13 @@ body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); col
 .pw-wrap input { padding-right: 38px; }
 .pw-eye { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--muted); font-size: 13px; }
 .pw-eye:hover { color: var(--text); }
-.strength-bar { height: 4px; background: var(--border); border-radius: 4px; overflow: hidden; margin-top: 6px; }
-.strength-fill { height: 100%; width: 0; border-radius: 4px; transition: width .3s, background .3s; }
-.strength-note { font-size: 11px; color: var(--muted); margin-top: 4px; }
+/* ── Password Requirements Checklist ── */
+.pw-requirements { background: var(--blue-lt); border: 1px solid rgba(26,107,186,0.15); border-radius: 8px; padding: 12px 14px; margin-top: 8px; }
+.pw-requirements strong { display: block; font-size: 11px; font-weight: 700; color: var(--blue); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .4px; }
+.pw-req-item { display: flex; align-items: center; gap: 7px; padding: 2px 0; color: var(--muted); font-size: 12px; transition: color .2s; }
+.pw-req-item .req-icon { font-size: 11px; width: 14px; text-align: center; color: var(--red); transition: color .2s; flex-shrink: 0; }
+.pw-req-item.met { color: var(--text); }
+.pw-req-item.met .req-icon { color: var(--green); }
 .username-note { font-size: 11px; color: var(--muted); padding: 8px 0; }
 .username-note strong { color: var(--text); font-family: 'DM Mono', monospace; }
 .form-actions { display: flex; gap: 8px; margin-top: 4px; }
@@ -733,31 +737,42 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
               <div class="form-grid-2">
                 <div class="form-group">
                   <label>First Name</label>
-                  <input type="text" name="first_name" value="<?= htmlspecialchars($user['first_name'] ?? '') ?>" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')">
+                  <input type="text" name="first_name" value="<?= htmlspecialchars($user['first_name'] ?? '') ?>" required
+                    placeholder="e.g. Juan"
+                    oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'').replace(/\b\w/g,c=>c.toUpperCase())">
                 </div>
                 <div class="form-group">
                   <label>Middle Name</label>
-                  <input type="text" name="middle_name" value="<?= htmlspecialchars($user['middle_name'] ?? '') ?>" oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')">
+                  <input type="text" name="middle_name" value="<?= htmlspecialchars($user['middle_name'] ?? '') ?>"
+                    placeholder="e.g. Reyes (optional)"
+                    oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'').replace(/\b\w/g,c=>c.toUpperCase())">
                 </div>
               </div>
               <div class="form-grid-2">
                 <div class="form-group">
                   <label>Last Name</label>
-                  <input type="text" name="last_name" value="<?= htmlspecialchars($user['last_name'] ?? '') ?>" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')">
+                  <input type="text" name="last_name" value="<?= htmlspecialchars($user['last_name'] ?? '') ?>" required
+                    placeholder="e.g. Dela Cruz"
+                    oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'').replace(/\b\w/g,c=>c.toUpperCase())">
                 </div>
                 <div class="form-group">
                   <label>Suffix</label>
-                  <input type="text" name="suffix" value="<?= htmlspecialchars($user['suffix'] ?? '') ?>" oninput="this.value=this.value.replace(/[^A-Za-z0-9.\s]/g,'')" maxlength="10" placeholder="Jr., Sr., III (optional)">
+                  <input type="text" name="suffix" value="<?= htmlspecialchars($user['suffix'] ?? '') ?>"
+                    oninput="this.value=this.value.replace(/[^A-Za-z0-9.\s]/g,'')" maxlength="10"
+                    placeholder="e.g. Jr., Sr., III (optional)">
                 </div>
               </div>
               <div class="form-grid-2">
                 <div class="form-group">
                   <label>Email</label>
-                  <input type="email" name="email" value="<?= htmlspecialchars($user['email'] ?? '') ?>" required>
+                  <input type="email" name="email" value="<?= htmlspecialchars($user['email'] ?? '') ?>" required
+                    placeholder="e.g. juan@email.com">
                 </div>
                 <div class="form-group">
                   <label>Phone</label>
-                  <input type="tel" name="phone" value="<?= htmlspecialchars($user['phone'] ?? '') ?>" required oninput="this.value=this.value.replace(/[^0-9]/g,'')" maxlength="11">
+                  <input type="tel" name="phone" value="<?= htmlspecialchars($user['phone'] ?? '') ?>" required
+                    placeholder="e.g. 09123456789"
+                    oninput="this.value=this.value.replace(/[^0-9]/g,'')" maxlength="11">
                 </div>
               </div>
               <p class="username-note">Username: <strong><?= htmlspecialchars($user['username'] ?? '') ?></strong> — cannot be changed</p>
@@ -776,23 +791,29 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
               <div class="form-group">
                 <label>Current Password</label>
                 <div class="pw-wrap">
-                  <input type="password" name="current_password" id="current_password" required>
+                  <input type="password" name="current_password" id="current_password" required placeholder="Enter your current password">
                   <button type="button" class="pw-eye" data-target="current_password"><i class="fa fa-eye"></i></button>
                 </div>
               </div>
               <div class="form-group">
                 <label>New Password</label>
                 <div class="pw-wrap">
-                  <input type="password" name="new_password" id="new_password" required>
+                  <input type="password" name="new_password" id="new_password" required placeholder="Min. 8 characters">
                   <button type="button" class="pw-eye" data-target="new_password"><i class="fa fa-eye"></i></button>
                 </div>
-                <div class="strength-bar"><div class="strength-fill" id="pw-fill"></div></div>
-                <div class="strength-note" id="pw-note">8+ chars, uppercase, lowercase, number, special character.</div>
+                <div class="pw-requirements" id="req-new_password">
+                  <strong>Password requirements:</strong>
+                  <div class="pw-req-item" data-req="length"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least 8 characters</div>
+                  <div class="pw-req-item" data-req="upper"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one uppercase letter (A–Z)</div>
+                  <div class="pw-req-item" data-req="lower"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one lowercase letter (a–z)</div>
+                  <div class="pw-req-item" data-req="number"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one number (0–9)</div>
+                  <div class="pw-req-item" data-req="special"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one special character (!@#$...)</div>
+                </div>
               </div>
               <div class="form-group">
                 <label>Confirm Password</label>
                 <div class="pw-wrap">
-                  <input type="password" name="confirm_password" id="confirm_password" required>
+                  <input type="password" name="confirm_password" id="confirm_password" required placeholder="Re-enter new password">
                   <button type="button" class="pw-eye" data-target="confirm_password"><i class="fa fa-eye"></i></button>
                 </div>
               </div>
@@ -959,26 +980,51 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
     <form method="POST" id="addUserForm">
       <input type="hidden" name="add_user" value="1">
       <div class="form-grid-2">
-        <div class="form-group"><label>First Name</label><input type="text" name="a_first_name" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')" placeholder="Letters only"></div>
-        <div class="form-group"><label>Middle Name</label><input type="text" name="a_middle_name" oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')" placeholder="Letters only (optional)"></div>
+        <div class="form-group"><label>First Name</label><input type="text" name="a_first_name" required
+          placeholder="e.g. Juan"
+          oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'').replace(/\b\w/g,c=>c.toUpperCase())"></div>
+        <div class="form-group"><label>Middle Name</label><input type="text" name="a_middle_name"
+          placeholder="e.g. Reyes (optional)"
+          oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'').replace(/\b\w/g,c=>c.toUpperCase())"></div>
       </div>
       <div class="form-grid-2">
-        <div class="form-group"><label>Last Name</label><input type="text" name="a_last_name" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')" placeholder="Letters only"></div>
-        <div class="form-group"><label>Suffix</label><input type="text" name="a_suffix" oninput="this.value=this.value.replace(/[^A-Za-z0-9.\s]/g,'')" maxlength="10" placeholder="Jr., Sr., III (optional)"></div>
+        <div class="form-group"><label>Last Name</label><input type="text" name="a_last_name" required
+          placeholder="e.g. Dela Cruz"
+          oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'').replace(/\b\w/g,c=>c.toUpperCase())"></div>
+        <div class="form-group"><label>Suffix</label><input type="text" name="a_suffix"
+          oninput="this.value=this.value.replace(/[^A-Za-z0-9.\s]/g,'')" maxlength="10"
+          placeholder="e.g. Jr., Sr., III (optional)"></div>
       </div>
       <div class="form-grid-2">
-        <div class="form-group"><label>Email</label><input type="email" name="a_email" required placeholder="example@email.com"></div>
-        <div class="form-group"><label>Phone</label><input type="text" name="a_phone" oninput="this.value=this.value.replace(/[^0-9]/g,'')" maxlength="11" placeholder="Numbers only"></div>
+        <div class="form-group"><label>Email</label><input type="email" name="a_email" required placeholder="e.g. juan@email.com"></div>
+        <div class="form-group"><label>Phone</label><input type="text" name="a_phone"
+          oninput="this.value=this.value.replace(/[^0-9]/g,'')" maxlength="11"
+          placeholder="e.g. 09123456789"></div>
       </div>
-      <div class="form-group"><label>Username</label><input type="text" name="a_username" required oninput="this.value=this.value.replace(/[^A-Za-z0-9]/g,'')" placeholder="Letters and numbers only"></div>
+      <div class="form-group"><label>Username</label><input type="text" name="a_username" required
+        oninput="this.value=this.value.replace(/[^A-Za-z0-9]/g,'')"
+        placeholder="e.g. juandelacruz01"></div>
       <div class="form-group">
         <label>Password</label>
         <div class="pw-wrap">
-          <input type="password" name="a_password" id="a_password" required>
+          <input type="password" name="a_password" id="a_password" required placeholder="Min. 8 characters">
           <button type="button" class="pw-eye" data-target="a_password"><i class="fa fa-eye"></i></button>
         </div>
-        <div class="strength-bar"><div class="strength-fill" id="a-pw-fill"></div></div>
-        <div class="strength-note" id="a-pw-note">8+ chars, uppercase, lowercase, number, special character.</div>
+        <div class="pw-requirements" id="req-a_password">
+          <strong>Password requirements:</strong>
+          <div class="pw-req-item" data-req="length"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least 8 characters</div>
+          <div class="pw-req-item" data-req="upper"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one uppercase letter (A–Z)</div>
+          <div class="pw-req-item" data-req="lower"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one lowercase letter (a–z)</div>
+          <div class="pw-req-item" data-req="number"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one number (0–9)</div>
+          <div class="pw-req-item" data-req="special"><span class="req-icon"><i class="fa fa-xmark"></i></span> At least one special character (!@#$...)</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Confirm Password</label>
+        <div class="pw-wrap">
+          <input type="password" name="a_confirm_password" id="a_confirm_password" required placeholder="Re-enter password">
+          <button type="button" class="pw-eye" data-target="a_confirm_password"><i class="fa fa-eye"></i></button>
+        </div>
       </div>
       <div class="form-group">
         <label>Role</label>
@@ -1002,16 +1048,26 @@ td.actions-col { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; 
       <input type="hidden" name="edit_user" value="1">
       <input type="hidden" name="edit_user_id" id="edit_user_id">
       <div class="form-grid-2">
-        <div class="form-group"><label>First Name</label><input type="text" name="e_first_name" id="e_first_name" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')" placeholder="Letters only"></div>
-        <div class="form-group"><label>Middle Name</label><input type="text" name="e_middle_name" id="e_middle_name" oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')" placeholder="Letters only (optional)"></div>
+        <div class="form-group"><label>First Name</label><input type="text" name="e_first_name" id="e_first_name" required
+          placeholder="e.g. Juan"
+          oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'').replace(/\b\w/g,c=>c.toUpperCase())"></div>
+        <div class="form-group"><label>Middle Name</label><input type="text" name="e_middle_name" id="e_middle_name"
+          placeholder="e.g. Reyes (optional)"
+          oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'').replace(/\b\w/g,c=>c.toUpperCase())"></div>
       </div>
       <div class="form-grid-2">
-        <div class="form-group"><label>Last Name</label><input type="text" name="e_last_name" id="e_last_name" required oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'')" placeholder="Letters only"></div>
-        <div class="form-group"><label>Suffix</label><input type="text" name="e_suffix" id="e_suffix" oninput="this.value=this.value.replace(/[^A-Za-z0-9.\s]/g,'')" maxlength="10" placeholder="Jr., Sr., III (optional)"></div>
+        <div class="form-group"><label>Last Name</label><input type="text" name="e_last_name" id="e_last_name" required
+          placeholder="e.g. Dela Cruz"
+          oninput="this.value=this.value.replace(/[^A-Za-z\s]/g,'').replace(/\b\w/g,c=>c.toUpperCase())"></div>
+        <div class="form-group"><label>Suffix</label><input type="text" name="e_suffix" id="e_suffix"
+          oninput="this.value=this.value.replace(/[^A-Za-z0-9.\s]/g,'')" maxlength="10"
+          placeholder="e.g. Jr., Sr., III (optional)"></div>
       </div>
       <div class="form-grid-2">
-        <div class="form-group"><label>Email</label><input type="email" name="e_email" id="e_email" required placeholder="example@email.com"></div>
-        <div class="form-group"><label>Phone</label><input type="text" name="e_phone" id="e_phone" oninput="this.value=this.value.replace(/[^0-9]/g,'')" maxlength="11" placeholder="Numbers only"></div>
+        <div class="form-group"><label>Email</label><input type="email" name="e_email" id="e_email" required placeholder="e.g. juan@email.com"></div>
+        <div class="form-group"><label>Phone</label><input type="text" name="e_phone" id="e_phone"
+          oninput="this.value=this.value.replace(/[^0-9]/g,'')" maxlength="11"
+          placeholder="e.g. 09123456789"></div>
       </div>
       <div class="form-group">
         <label>Role</label>
@@ -1051,24 +1107,31 @@ document.querySelectorAll('.pw-eye').forEach(btn => {
   });
 });
 
-// ── Password strength ──
-function bindStrength(inputId, fillId, noteId) {
+// ── Password Requirements Checklist ──
+function bindPasswordChecklist(inputId) {
   const inp = document.getElementById(inputId);
-  const fill = document.getElementById(fillId);
-  const note = document.getElementById(noteId);
-  if (!inp || !fill || !note) return;
+  const box = document.getElementById('req-' + inputId);
+  if (!inp || !box) return;
+  const rules = {
+    length:  v => v.length >= 8,
+    upper:   v => /[A-Z]/.test(v),
+    lower:   v => /[a-z]/.test(v),
+    number:  v => /[0-9]/.test(v),
+    special: v => /[^\w]/.test(v),
+  };
   inp.addEventListener('input', () => {
-    const v = inp.value; let s = 0;
-    if (v.match(/[a-z]/)) s++; if (v.match(/[A-Z]/)) s++; if (v.match(/[0-9]/)) s++; if (v.match(/[^\w]/)) s++; if (v.length >= 8) s++;
-    const w = (s / 5) * 100;
-    fill.style.width = w + '%';
-    if (s <= 2)      { fill.style.background = 'var(--red)';   note.textContent = 'Weak — add uppercase, numbers, special chars.'; }
-    else if (s === 3){ fill.style.background = 'var(--amber)'; note.textContent = 'Medium — add more variety.'; }
-    else             { fill.style.background = 'var(--green)'; note.textContent = 'Strong password.'; }
+    const v = inp.value;
+    box.querySelectorAll('.pw-req-item').forEach(item => {
+      const key = item.dataset.req;
+      const icon = item.querySelector('.req-icon i');
+      const passed = rules[key]?.(v);
+      item.classList.toggle('met', passed);
+      icon.className = passed ? 'fa fa-check' : 'fa fa-xmark';
+    });
   });
 }
-bindStrength('new_password', 'pw-fill', 'pw-note');
-bindStrength('a_password', 'a-pw-fill', 'a-pw-note');
+bindPasswordChecklist('new_password');
+bindPasswordChecklist('a_password');
 
 // ── Inline forms (edit profile / change password) ──
 const editToggle  = document.getElementById('editToggle');
@@ -1093,9 +1156,18 @@ document.querySelectorAll('.modal-backdrop').forEach(bd => bd.addEventListener('
 const openAddUserBtn = document.getElementById('openAddUser');
 if (openAddUserBtn) openAddUserBtn.addEventListener('click', () => openModal('addUserModal'));
 
-document.getElementById('addUserForm')?.addEventListener('submit', () => {
-  document.getElementById('addModalMsg').textContent = 'Creating user…';
-  document.getElementById('addModalMsg').className = 'modal-msg ok';
+document.getElementById('addUserForm')?.addEventListener('submit', function(e) {
+  const pw  = document.getElementById('a_password')?.value || '';
+  const cpw = document.getElementById('a_confirm_password')?.value || '';
+  const msg = document.getElementById('addModalMsg');
+  if (pw !== cpw) {
+    e.preventDefault();
+    msg.textContent = 'Passwords do not match.';
+    msg.className = 'modal-msg err';
+    return;
+  }
+  msg.textContent = 'Creating user…';
+  msg.className = 'modal-msg ok';
 });
 
 // ── Edit user modal populate ──
