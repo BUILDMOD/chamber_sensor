@@ -76,6 +76,25 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['add_rule'])) {
         $operator = $_POST['operator'] ?? '';
         $threshold= floatval($_POST['threshold'] ?? 0);
         if (!$device||!$sensor||!$operator) $errors[]='All fields required.';
+
+        // ── Conflict check: block opposing rules (e.g. fan+heater, mist+exhaust) ──
+        $RULE_CONFLICTS = ['heater'=>'fan','fan'=>'heater','mist'=>'exhaust','exhaust'=>'mist'];
+        if (empty($errors) && isset($RULE_CONFLICTS[$device])) {
+            $opp = $RULE_CONFLICTS[$device];
+            $chk = $conn->prepare("SELECT id FROM automation_rules WHERE device=? AND enabled=1 LIMIT 1");
+            if ($chk) { $chk->bind_param('s',$opp); $chk->execute(); $chk->store_result();
+                if ($chk->num_rows > 0) $errors[] = "Conflict: cannot add rule for '{$device}' while a '{$opp}' rule is enabled. Disable '{$opp}' rule first.";
+                $chk->close(); }
+        }
+
+        // ── Duplicate check: only one rule per device ──
+        if (empty($errors)) {
+            $dup = $conn->prepare("SELECT id FROM automation_rules WHERE device=? AND enabled=1 LIMIT 1");
+            if ($dup) { $dup->bind_param('s',$device); $dup->execute(); $dup->store_result();
+                if ($dup->num_rows > 0) $errors[] = "A rule for '{$device}' already exists. Delete or disable it first.";
+                $dup->close(); }
+        }
+
         if (empty($errors)) {
             $s=$conn->prepare("INSERT INTO automation_rules (device,sensor,operator,threshold) VALUES (?,?,?,?)");
             if ($s){$s->bind_param("sssd",$device,$sensor,$operator,$threshold);if($s->execute())$success='Rule added.';else $errors[]='DB error: '.$conn->error;$s->close();}
@@ -112,7 +131,6 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['add_schedule'])) {
             if($s){$s->bind_param("ssiis",$device,$run_time,$dur_min,$dur_sec,$days);if($s->execute())$success='Schedule added.';else $errors[]='DB error: '.$conn->error;$s->close();}
         }
     }
-}
 }
 
 // ── Toggle Schedule ──

@@ -1,101 +1,172 @@
 <?php
-// update_device_status.php
+/**
+ * update_device_status.php
+ * Writes to device_state table (new architecture).
+ * Accepts same params as old version — no changes needed in dashboard JS or ESP32 code.
+ *
+ * Supported params (GET, POST, or JSON body):
+ *   ?mode=0|1                        — switch auto/manual
+ *   ?device=fan                      — toggle a single device (reads current, flips)
+ *   ?fan=1&mist=0                    — set explicit values
+ *   ?sprayer=1&lock_seconds=60       — set + lock (used by ESP32 schedule)
+ *   ?active_spray_until=1234567890   — legacy ESP32 compat (converted to lock_seconds internally)
+ */
 header('Content-Type: application/json');
 include 'includes/db_connect.php';
 
-// Read from GET, POST, or JSON body
+// ── Read input from GET, POST, or JSON body ──
 $input = [];
 $raw = file_get_contents('php://input');
 if ($raw) $input = json_decode($raw, true) ?? [];
 if (empty($input)) $input = array_merge($_GET, $_POST);
 
-// Ensure device_status row exists
-$conn->query("CREATE TABLE IF NOT EXISTS device_status (
-    id INT PRIMARY KEY,
-    manual_mode TINYINT(1) NOT NULL DEFAULT 0,
-    mist        TINYINT(1) NOT NULL DEFAULT 0,
-    fan         TINYINT(1) NOT NULL DEFAULT 0,
-    heater      TINYINT(1) NOT NULL DEFAULT 0,
-    sprayer     TINYINT(1) NOT NULL DEFAULT 0,
-    exhaust     TINYINT(1) NOT NULL DEFAULT 0,
-    buzzer      TINYINT(1) NOT NULL DEFAULT 0,
-    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+// ── Bootstrap tables ──
+$conn->query("CREATE TABLE IF NOT EXISTS device_state (
+    device        VARCHAR(20)  NOT NULL PRIMARY KEY,
+    status        ENUM('on','off') NOT NULL DEFAULT 'off',
+    controlled_by ENUM('auto','manual','schedule','emergency') NOT NULL DEFAULT 'auto',
+    locked_until  INT UNSIGNED NOT NULL DEFAULT 0,
+    updated_at    TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 )");
-$check = $conn->query("SELECT id FROM device_status WHERE id=1 LIMIT 1");
-if ($check->num_rows == 0) {
-    $conn->query("INSERT INTO device_status (id,manual_mode,mist,fan,heater,sprayer,exhaust,buzzer) VALUES (1,0,0,0,0,0,0,0)");
+foreach (['mist','fan','heater','sprayer','exhaust'] as $dev) {
+    $conn->query("INSERT IGNORE INTO device_state (device,status,controlled_by,locked_until)
+                  VALUES ('{$dev}','off','auto',0)");
+}
+$conn->query("CREATE TABLE IF NOT EXISTS system_mode (
+    id INT PRIMARY KEY DEFAULT 1,
+    mode ENUM('auto','manual') NOT NULL DEFAULT 'auto'
+)");
+$conn->query("INSERT IGNORE INTO system_mode (id,mode) VALUES (1,'auto')");
+
+$conn->query("CREATE TABLE IF NOT EXISTS device_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    device VARCHAR(30) NOT NULL,
+    action ENUM('ON','OFF') NOT NULL,
+    trigger_type ENUM('auto','manual','schedule','emergency','fault') NOT NULL DEFAULT 'manual',
+    trigger_detail VARCHAR(200),
+    duration_seconds INT DEFAULT NULL,
+    logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)");
+$conn->query("ALTER TABLE device_logs MODIFY COLUMN trigger_type
+              ENUM('auto','manual','schedule','emergency','fault') NOT NULL DEFAULT 'manual'");
+
+function _logDev($conn, $device, $action, $by, $detail) {
+    $s = $conn->prepare("INSERT INTO device_logs (device,action,trigger_type,trigger_detail) VALUES (?,?,?,?)");
+    if ($s) { $s->bind_param("ssss",$device,$action,$by,$detail); $s->execute(); $s->close(); }
 }
 
-// ── Handle mode switch ──
-if (isset($input['mode'])) {
-    $mode = intval($input['mode']);
-    if ($mode === 1) {
-        // Switching TO manual — keep current device states as-is (don't reset to 0)
-        // Just flip the manual_mode flag, relay states stay whatever they currently are
-        $conn->query("UPDATE device_status SET manual_mode=1 WHERE id=1");
-    } else {
-        // Switching TO auto — just flip the flag, ESP32 auto logic takes over
-        $conn->query("UPDATE device_status SET manual_mode=0 WHERE id=1");
+function buildResponse($conn) {
+    $deviceMap = [];
+    $r = $conn->query("SELECT device,status,controlled_by,locked_until FROM device_state");
+    if ($r) while ($row = $r->fetch_assoc()) $deviceMap[$row['device']] = $row;
+    $modeRow    = $conn->query("SELECT mode FROM system_mode WHERE id=1 LIMIT 1")->fetch_assoc();
+    $manualMode = ($modeRow['mode'] ?? 'auto') === 'manual' ? 1 : 0;
+    // Build legacy-compatible 'data' block
+    $data = ['manual_mode' => $manualMode];
+    foreach (['mist','fan','heater','sprayer','exhaust'] as $dev) {
+        $data[$dev] = (($deviceMap[$dev]['status'] ?? 'off') === 'on') ? 1 : 0;
     }
-    $row = $conn->query("SELECT * FROM device_status WHERE id=1 LIMIT 1")->fetch_assoc();
-    echo json_encode(['success' => true, 'data' => $row]);
+    $data['controlled_by'] = array_map(fn($s) => $s['controlled_by'], $deviceMap);
+    $data['locked_until']  = array_map(fn($s) => (int)$s['locked_until'], $deviceMap);
+    return $data;
+}
+
+$allowed = ['mist','fan','heater','sprayer','exhaust'];
+
+// ════════════════════════════════════════════════════
+//  MODE SWITCH  ?mode=0|1
+// ════════════════════════════════════════════════════
+if (isset($input['mode'])) {
+    $wantManual = intval($input['mode']) === 1;
+    $conn->query("UPDATE system_mode SET mode='" . ($wantManual ? 'manual' : 'auto') . "' WHERE id=1");
+
+    if (!$wantManual) {
+        // Switching TO auto: release all manual locks and reset manual-controlled devices to off
+        // Schedule locks (sprayer) are preserved
+        foreach ($allowed as $dev) {
+            $row = $conn->query("SELECT controlled_by FROM device_state WHERE device='{$dev}' LIMIT 1")->fetch_assoc();
+            if (($row['controlled_by'] ?? '') === 'manual') {
+                $conn->query("UPDATE device_state SET status='off', controlled_by='auto', locked_until=0 WHERE device='{$dev}'");
+                _logDev($conn, $dev, 'OFF', 'auto', 'Switched to Auto Mode — manual devices reset to OFF');
+            }
+        }
+    }
+
+    echo json_encode(['success' => true, 'data' => buildResponse($conn)]);
     exit;
 }
 
-// ── Handle device toggle via ?device=xxx (reads current, flips it) ──
-$allowed = ['mist','fan','heater','sprayer','exhaust'];
+// ════════════════════════════════════════════════════
+//  LEGACY: active_spray_until (ESP32 schedule lock)
+//  Converts to lock_seconds internally
+// ════════════════════════════════════════════════════
+if (isset($input['active_spray_until'])) {
+    $asu = (int)$input['active_spray_until'];
+    if ($asu === 0) {
+        // Clear lock
+        $conn->query("UPDATE device_state SET locked_until=0, controlled_by='auto' WHERE device='sprayer'");
+    } else {
+        $conn->query("UPDATE device_state SET locked_until={$asu} WHERE device='sprayer'");
+    }
+    // Don't exit — may also have sprayer=0|1 in same request, fall through
+}
 
+// ════════════════════════════════════════════════════
+//  DEVICE TOGGLE  ?device=fan  (reads current, flips)
+// ════════════════════════════════════════════════════
 if (isset($input['device'])) {
     $dev = $input['device'];
     if (!in_array($dev, $allowed)) {
         echo json_encode(['success'=>false,'message'=>'Invalid device']);
         exit;
     }
-    $cur = $conn->query("SELECT `$dev` FROM device_status WHERE id=1 LIMIT 1")->fetch_assoc();
-    $newVal = $cur[$dev] ? 0 : 1;
-    $conn->query("UPDATE device_status SET `$dev`=$newVal WHERE id=1");
-    // Log
-    $action = $newVal ? 'ON' : 'OFF';
-    $ls = $conn->prepare("INSERT INTO device_logs (device,action,trigger_type,trigger_detail) VALUES (?,'$action','manual','Manual toggle via dashboard')");
-    if ($ls) { $ls->bind_param("s",$dev); $ls->execute(); $ls->close(); }
-    $row = $conn->query("SELECT * FROM device_status WHERE id=1 LIMIT 1")->fetch_assoc();
-    echo json_encode(['success'=>true,'data'=>$row]);
+    $cur = $conn->query("SELECT status FROM device_state WHERE device='{$dev}' LIMIT 1")->fetch_assoc();
+    $newStatus = ($cur['status'] === 'on') ? 'off' : 'on';
+    $conn->query("UPDATE device_state
+                  SET status='{$newStatus}', controlled_by='manual', locked_until=0
+                  WHERE device='{$dev}'");
+    $action = $newStatus === 'on' ? 'ON' : 'OFF';
+    _logDev($conn, $dev, $action, 'manual', 'Manual toggle via dashboard');
+    echo json_encode(['success'=>true,'data'=>buildResponse($conn)]);
     exit;
 }
 
-// ── Handle explicit device value e.g. ?fan=1&mist=0 ──
-$fields = []; $logs = [];
+// ════════════════════════════════════════════════════
+//  EXPLICIT VALUES  ?fan=1&mist=0
+//  With optional ?lock_seconds=N for schedule use
+// ════════════════════════════════════════════════════
+$lockSeconds = isset($input['lock_seconds']) ? intval($input['lock_seconds']) : 0;
+$lockUntil   = $lockSeconds > 0 ? (time() + $lockSeconds) : 0;
+
+// Determine trigger: if lock is set → schedule, else → manual
+$triggerBy = ($lockSeconds > 0 || isset($input['active_spray_until'])) ? 'schedule' : 'manual';
+
+$changed = false;
 foreach ($allowed as $dev) {
-    if (isset($input[$dev])) {
-        $val = intval($input[$dev]) ? 1 : 0;
-        $fields[] = "`$dev`=$val";
-        $logs[$dev] = $val;
+    if (!isset($input[$dev])) continue;
+    $val    = intval($input[$dev]) ? 'on' : 'off';
+    $action = $val === 'on' ? 'ON' : 'OFF';
+
+    if ($val === 'on' && $lockUntil > 0) {
+        $conn->query("UPDATE device_state
+                      SET status='on', controlled_by='{$triggerBy}', locked_until={$lockUntil}
+                      WHERE device='{$dev}'");
+    } else {
+        // OFF always clears the lock
+        $lockClear = $val === 'off' ? 0 : $lockUntil;
+        $conn->query("UPDATE device_state
+                      SET status='{$val}', controlled_by='{$triggerBy}', locked_until={$lockClear}
+                      WHERE device='{$dev}'");
     }
+    _logDev($conn, $dev, $action, $triggerBy, ucfirst($triggerBy) . " set {$dev} {$action}");
+    $changed = true;
 }
 
-if (empty($fields)) {
+if (!$changed && !isset($input['active_spray_until'])) {
     echo json_encode(['success'=>false,'message'=>'No valid fields provided']);
     exit;
 }
 
-$conn->query("UPDATE device_status SET ".implode(',',$fields)." WHERE id=1");
-
-// Log each changed device
-$conn->query("CREATE TABLE IF NOT EXISTS device_logs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    device VARCHAR(30) NOT NULL,
-    action ENUM('ON','OFF') NOT NULL,
-    trigger_type ENUM('auto','manual','schedule','emergency','fault') NOT NULL DEFAULT 'manual',
-    trigger_detail VARCHAR(100),
-    logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)");
-foreach ($logs as $dev => $val) {
-    $action = $val ? 'ON' : 'OFF';
-    $ls = $conn->prepare("INSERT INTO device_logs (device,action,trigger_type,trigger_detail) VALUES (?,'$action','manual','Manual toggle via dashboard')");
-    if ($ls) { $ls->bind_param("s",$dev); $ls->execute(); $ls->close(); }
-}
-
-$row = $conn->query("SELECT * FROM device_status WHERE id=1 LIMIT 1")->fetch_assoc();
-echo json_encode(['success'=>true,'data'=>$row]);
+echo json_encode(['success'=>true,'data'=>buildResponse($conn)]);
 $conn->close();
 ?>

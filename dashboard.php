@@ -668,6 +668,7 @@ $isOwner = $sessionRole === 'owner';
         <div class="date-picker-wrap">
           <button id="liveCamBtn" onclick="openLiveCam()" style="display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:20px;background:var(--red);color:#fff;border:none;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;"><span style="width:7px;height:7px;background:#fff;border-radius:50%;display:inline-block;animation:blink 1s infinite;"></span> Live</button>
           <button onclick="openViewAll()" style="display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:20px;background:var(--surface2);color:var(--text);border:1px solid var(--border);font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;"><i class="fas fa-images"></i> View All</button>
+          <button onclick="$$('manualUploadModal').classList.add('show')" style="display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:20px;background:var(--blue);color:#fff;border:none;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;"><i class="fas fa-upload"></i> Upload</button>
         </div>
       </div>
       <div class="card-body" style="padding:14px 16px;flex:1;">
@@ -687,6 +688,44 @@ $isOwner = $sessionRole === 'owner';
 
   </div><!-- end grid -->
 </main>
+
+<!-- MANUAL IMAGE UPLOAD MODAL -->
+<div class="modal-backdrop" id="manualUploadModal" onclick="if(event.target===this)this.classList.remove('show')" style="z-index:9999;">
+  <div class="modal" style="max-width:440px;max-height:88vh;overflow-y:auto;">
+    <button class="modal-close" onclick="$$('manualUploadModal').classList.remove('show')">&times;</button>
+    <h3><i class="fas fa-upload" style="color:var(--blue);margin-right:8px;"></i>Manual Image Upload</h3>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px;line-height:1.6;">
+      Upload a mushroom photo from your phone or computer. Gemini AI will analyze it for harvest readiness and contamination.
+    </p>
+
+    <!-- Drop zone -->
+    <div id="uploadDropZone" style="border:2px dashed var(--border);border-radius:10px;padding:28px;text-align:center;cursor:pointer;transition:all .15s;background:var(--surface2);margin-bottom:14px;"
+         onclick="$$('uploadFileInput').click()"
+         ondragover="event.preventDefault();this.style.borderColor='var(--blue)';this.style.background='var(--blue-lt)'"
+         ondragleave="this.style.borderColor='var(--border)';this.style.background='var(--surface2)'"
+         ondrop="handleUploadDrop(event)">
+      <i class="fas fa-cloud-upload-alt" style="font-size:28px;color:var(--muted);display:block;margin-bottom:8px;"></i>
+      <div style="font-size:13px;font-weight:600;color:var(--text);">Click to select or drag & drop</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px;">JPG, PNG, WEBP — max 10MB</div>
+    </div>
+
+    <input type="file" id="uploadFileInput" accept="image/*" style="display:none;" onchange="handleUploadSelect(this.files[0])">
+
+    <!-- Preview -->
+    <div id="uploadPreview" style="display:none;margin-bottom:14px;">
+      <img id="uploadPreviewImg" style="width:100%;border-radius:8px;max-height:180px;object-fit:cover;border:1px solid var(--border);">
+      <div style="font-size:12px;color:var(--muted);margin-top:6px;" id="uploadFileName"></div>
+    </div>
+
+    <!-- Result -->
+    <div id="uploadResult" style="display:none;padding:12px 14px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);margin-bottom:14px;font-size:13px;"></div>
+
+    <div style="display:flex;gap:8px;">
+      <button type="button" onclick="$$('manualUploadModal').classList.remove('show')" style="flex:1;padding:9px;border-radius:7px;background:var(--surface2);color:var(--text);border:1px solid var(--border);font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+      <button type="button" id="uploadSubmitBtn" onclick="submitManualUpload()" style="flex:2;padding:9px;border-radius:7px;background:var(--blue);color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer;display:none;"><i class="fas fa-magnifying-glass"></i> Analyze Image</button>
+    </div>
+  </div>
+</div>
 
 <!-- CAMERA SETTINGS MODAL -->
 <div class="modal-backdrop" id="camSettingsModal" style="z-index:400;">
@@ -831,6 +870,7 @@ $isOwner = $sessionRole === 'owner';
       <label style="margin-left:4px;"><i class="fas fa-filter"></i> Status</label>
       <select id="viewAllStatus" class="dash-datepicker" style="min-width:150px;" onchange="renderViewAll()">
         <option value="">All Status</option>
+        <option value="No Mushroom">⬜ No Mushroom</option>
         <option value="Ready for Harvest">🟢 Ready for Harvest</option>
         <option value="Almost Ready">🟡 Almost Ready</option>
         <option value="Not Ready">🔵 Not Ready</option>
@@ -1076,15 +1116,10 @@ $$('modeSwitch').addEventListener('change',async function(){
   const wantManual = this.checked;
   setMode(wantManual);
   try{
-    if(wantManual){
-      // Switch to manual: turn all devices OFF first, then set manual mode
-      await fetch('update_device_status.php?mist=0&fan=0&heater=0&sprayer=0&exhaust=0',{cache:'no-store'});
-      await fetch('update_device_status.php?mode=1',{cache:'no-store'});
-    } else {
-      // Switch to auto: just flip mode flag, auto_engine takes over
-      await fetch('update_device_status.php?mode=0',{cache:'no-store'});
-    }
-    // Fetch actual DB states to update labels correctly
+    // Just flip the mode flag — device states stay as-is
+    // In manual: user controls devices. In auto: auto_engine takes over.
+    await fetch(`update_device_status.php?mode=${wantManual?1:0}`,{cache:'no-store'});
+    // Fetch actual DB states to show correct labels
     await fetchDeviceStates();
   }catch(_){}
   setTimeout(()=>{ modeSwitching = false; }, 2000);
@@ -1117,16 +1152,26 @@ function renderCamImages(images){
   if(!images||!images.length){
     grid.innerHTML=`<div class="empty-state" id="noImages" style="grid-column:1/-1;"><i class="fas fa-camera"></i><span>No captures found.</span></div>`;return;
   }
-  const statusMap={'Ready for Harvest':['harvest-ready','Ready for Harvest'],'Almost Ready':['harvest-almost','Almost Ready'],'Not Ready':['harvest-not','Not Ready'],'Overripe':['harvest-over','Overripe']};
+  const statusMap={'No Mushroom':['harvest-not','No Mushroom'],'Ready for Harvest':['harvest-ready','Ready for Harvest'],'Almost Ready':['harvest-almost','Almost Ready'],'Not Ready':['harvest-not','Not Ready'],'Overripe':['harvest-over','Overripe']};
   grid.innerHTML='';
   images.slice(0,4).forEach(img=>{
     const[cls,label]=statusMap[img.harvest_status]||['harvest-not',img.harvest_status||'—'];
+    const isContam   = img.contamination_status === 'Contaminated';
+    const isUnknown  = img.contamination_status === 'Unknown' || !img.contamination_status;
+    const contamBadge = isContam
+      ? `<span style="background:#fdecea;color:#d93025;font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;margin-left:4px;">⚠️ Contaminated</span>`
+      : isUnknown
+        ? `<span style="background:#f7f8fa;color:#6e7681;font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;margin-left:4px;">— Unknown</span>`
+        : `<span style="background:#e6f7ef;color:#1a9e5c;font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;margin-left:4px;">✓ Clean</span>`;
     const card=document.createElement('div');
     card.className='img-card';
     card.innerHTML=`<img src="${img.image_path||'#'}" alt="Mushroom" onerror="this.src='assets/img/no-image.png'">
       <div class="img-info">
         <div class="img-size">⌀ ${img.diameter_cm??'—'} cm</div>
-        <span class="status-pill ${cls}" style="font-size:11px;padding:2px 8px;">${label}</span>
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:2px;margin-top:3px;">
+          <span class="status-pill ${cls}" style="font-size:11px;padding:2px 8px;">${label}</span>
+          ${contamBadge}
+        </div>
         <div class="img-ts">${img.analyzed_at?(()=>{const d=new Date(img.analyzed_at.replace(' ','T')+'+08:00');return d.toLocaleString('en-PH',{timeZone:'Asia/Manila',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true});})():''}</div>
         <div class="img-conf">Confidence: ${img.confidence_score??'—'}%</div>
       </div>`;
@@ -1163,13 +1208,20 @@ function renderViewAll(){
   const countEl=$$('viewAllCount');
   if(countEl) countEl.textContent=`${filtered.length} image${filtered.length!==1?'s':''}`;
   const grid=$$('viewAllGrid');
-  const statusMap={'Ready for Harvest':['harvest-ready','Ready for Harvest'],'Almost Ready':['harvest-almost','Almost Ready'],'Not Ready':['harvest-not','Not Ready'],'Overripe':['harvest-over','Overripe']};
+  const statusMap={'No Mushroom':['harvest-not','No Mushroom'],'Ready for Harvest':['harvest-ready','Ready for Harvest'],'Almost Ready':['harvest-almost','Almost Ready'],'Not Ready':['harvest-not','Not Ready'],'Overripe':['harvest-over','Overripe']};
   if(!filtered.length){
     grid.innerHTML='<div class="img-all-empty"><i class="fas fa-camera"></i><span>No captures found.</span></div>';return;
   }
   grid.innerHTML='';
   filtered.forEach(img=>{
     const[cls,label]=statusMap[img.harvest_status]||['harvest-not',img.harvest_status||'—'];
+    const isContam  = img.contamination_status === 'Contaminated';
+    const isUnknown = img.contamination_status === 'Unknown' || !img.contamination_status;
+    const contamBadge = isContam
+      ? `<span style="background:#fdecea;color:#d93025;font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;">⚠️ Contaminated</span>`
+      : isUnknown
+        ? `<span style="background:#f7f8fa;color:#6e7681;font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;">— Unknown</span>`
+        : `<span style="background:#e6f7ef;color:#1a9e5c;font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px;">✓ Clean</span>`;
     const ts=img.analyzed_at?(()=>{const d=new Date(img.analyzed_at.replace(' ','T')+'+08:00');return d.toLocaleString('en-PH',{timeZone:'Asia/Manila',month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true});})():'';
     const card=document.createElement('div');
     card.className='img-all-card';
@@ -1177,7 +1229,10 @@ function renderViewAll(){
       <img src="${img.image_path||'#'}" alt="Mushroom" onerror="this.src='assets/img/no-image.png'">
       <div class="img-all-card-info">
         <div class="img-all-card-size">⌀ ${img.diameter_cm??'—'} cm</div>
-        <span class="status-pill ${cls}" style="font-size:11px;padding:2px 10px;">${label}</span>
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:3px;margin-top:3px;">
+          <span class="status-pill ${cls}" style="font-size:11px;padding:2px 10px;">${label}</span>
+          ${contamBadge}
+        </div>
         <div class="img-all-card-ts">${ts}</div>
         <div class="img-all-card-conf">Confidence: ${img.confidence_score??'—'}%</div>
       </div>`;
@@ -1386,7 +1441,105 @@ function shiftMonthRange(dir) {
 
 loadMonthlySummary();
 
-// ── Camera reset ──
+// ── Manual Image Upload ──
+let uploadFile = null;
+
+function handleUploadSelect(file) {
+  if (!file) return;
+  uploadFile = file;
+  const reader = new FileReader();
+  reader.onload = e => {
+    $$('uploadPreviewImg').src = e.target.result;
+    $$('uploadFileName').textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+    $$('uploadPreview').style.display = 'block';
+    $$('uploadSubmitBtn').style.display = 'block';
+    $$('uploadResult').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+}
+
+function handleUploadDrop(e) {
+  e.preventDefault();
+  $$('uploadDropZone').style.borderColor = 'var(--border)';
+  $$('uploadDropZone').style.background = 'var(--surface2)';
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) handleUploadSelect(file);
+}
+
+async function submitManualUpload() {
+  if (!uploadFile) return;
+  const btn = $$('uploadSubmitBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing…';
+
+  const formData = new FormData();
+  formData.append('image', uploadFile);
+
+  try {
+    const r = await fetch('process_image.php', { method: 'POST', body: formData });
+    const d = await r.json();
+
+    if (d.success) {
+      const statusColors = {
+        'Ready for Harvest': '#1a9e5c', 'Almost Ready': '#b45309',
+        'Not Ready': '#1a6bba', 'Overripe': '#d93025', 'No Mushroom': '#6e7681'
+      };
+      const isNoMushroom  = d.harvest_status === 'No Mushroom';
+      const isLowConf     = d.confidence_score < 30;
+      const isUnreliable  = isNoMushroom || (isLowConf && d.contamination_status === 'Unknown');
+      const color         = isUnreliable ? '#6e7681' : (statusColors[d.harvest_status] || '#6e7681');
+      const contamColor   = d.contamination_status === 'Contaminated' ? '#d93025' : d.contamination_status === 'Clean' ? '#1a9e5c' : '#6e7681';
+      const contamBg      = d.contamination_status === 'Contaminated' ? '#fdecea' : d.contamination_status === 'Clean' ? '#e6f7ef' : '#f7f8fa';
+      const contamIcon    = d.contamination_status === 'Contaminated' ? '⚠️ Contaminated' : d.contamination_status === 'Clean' ? '✓ Clean' : '— Unknown';
+      const harvestIcon   = {'Ready for Harvest':'🟢','Almost Ready':'🟡','Not Ready':'🔵','Overripe':'🔴','No Mushroom':'⬜'}[d.harvest_status] || '⬜';
+
+      $$('uploadResult').style.display = 'block';
+      $$('uploadResult').style.borderColor = color;
+      $$('uploadResult').style.background = isUnreliable ? '#f7f8fa' : 'var(--surface2)';
+
+      $$('uploadResult').innerHTML = isUnreliable ? `
+        <div style="font-weight:700;color:#6e7681;font-size:13px;margin-bottom:6px;">⬜ No mushroom detected or image unclear</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Confidence: <strong>${d.confidence_score}%</strong> — too low to determine harvest status</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.6;">${d.analysis_notes}</div>
+      ` : `
+        <div style="font-weight:700;color:${color};font-size:15px;margin-bottom:10px;">${harvestIcon} ${d.harvest_status}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+          <span style="background:#f0f2f5;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;">⌀ ${d.diameter_cm} cm</span>
+          <span style="background:${contamBg};color:${contamColor};padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700;">${contamIcon}</span>
+          <span style="background:#f0f2f5;padding:3px 10px;border-radius:20px;font-size:12px;color:var(--muted);">Confidence: ${d.confidence_score}%</span>
+        </div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.6;">${d.analysis_notes}</div>
+      `;
+      btn.innerHTML = '<i class="fas fa-check"></i> Done — Result Saved';
+      btn.style.background = 'var(--green)';
+      setTimeout(loadCameraImages, 1000);
+    } else {
+      $$('uploadResult').style.display = 'block';
+      $$('uploadResult').innerHTML = `<span style="color:var(--red);">Error: ${d.error || 'Analysis failed'}</span>`;
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fas fa-magnifying-glass"></i> Analyze Image';
+    }
+  } catch(err) {
+    $$('uploadResult').style.display = 'block';
+    $$('uploadResult').innerHTML = `<span style="color:var(--red);">Network error — please try again.</span>`;
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-magnifying-glass"></i> Analyze Image';
+  }
+}
+
+// Reset upload modal when closed
+$$('manualUploadModal').addEventListener('click', function(e) {
+  if (e.target === this) {
+    uploadFile = null;
+    $$('uploadPreview').style.display = 'none';
+    $$('uploadSubmitBtn').style.display = 'none';
+    $$('uploadResult').style.display = 'none';
+    $$('uploadSubmitBtn').disabled = false;
+    $$('uploadSubmitBtn').innerHTML = '<i class="fas fa-magnifying-glass"></i> Analyze Image';
+    $$('uploadSubmitBtn').style.background = 'var(--blue)';
+    $$('uploadFileInput').value = '';
+  }
+});
 function resetCamToLive(){
   camViewingDay=null;
   $$('camDetailTitle').textContent='Latest captures';
