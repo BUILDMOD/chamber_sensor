@@ -209,9 +209,11 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
             if (!$dayMatch) continue;
 
             $start      = new DateTime($now->format('Y-m-d') . ' ' . $sched['run_time']);
-            $durFloat   = floatval($sched['duration_minutes']);
-            $durSeconds = (int)round($durFloat * 60);
-            $end        = (clone $start)->modify("+{$durSeconds} seconds");
+            $durMinutes = intval($sched['duration_minutes'] ?? 0);
+            $durSeconds = intval($sched['duration_seconds'] ?? 30);
+            $totalSeconds = ($durMinutes * 60) + $durSeconds;
+            if ($totalSeconds <= 0) $totalSeconds = 30;
+            $end        = (clone $start)->modify("+{$totalSeconds} seconds");
             $inWindow   = ($now >= $start && $now <= $end);
             $current    = (int)($row[$device] ?? 0);
 

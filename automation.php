@@ -25,15 +25,18 @@ $conn->query("ALTER TABLE automation_rules DROP COLUMN IF EXISTS duration_minute
 
 $conn->query("CREATE TABLE IF NOT EXISTS scheduled_tasks (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    device ENUM('mist','fan','heater','sprayer','exhaust') NOT NULL,
+    device VARCHAR(20) NOT NULL DEFAULT 'sprayer',
     run_time TIME NOT NULL,
-    duration_minutes FLOAT NOT NULL DEFAULT 1,
-    days VARCHAR(20) NOT NULL DEFAULT 'daily',
+    duration_minutes INT NOT NULL,
+    duration_seconds INT NOT NULL,
+    days ENUM('daily','weekdays','weekends') NOT NULL DEFAULT 'daily',
     enabled TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )");
-// Upgrade duration_minutes to FLOAT if it was INT
-$conn->query("ALTER TABLE scheduled_tasks MODIFY COLUMN duration_minutes FLOAT NOT NULL DEFAULT 1");
+$conn->query("ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS duration_minutes INT NOT NULL DEFAULT 0");
+$conn->query("ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS duration_seconds INT NOT NULL DEFAULT 30");
+$conn->query("ALTER TABLE scheduled_tasks MODIFY COLUMN duration_minutes INT NOT NULL");
+$conn->query("ALTER TABLE scheduled_tasks MODIFY COLUMN duration_seconds INT NOT NULL");
 
 $conn->query("CREATE TABLE IF NOT EXISTS device_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -97,16 +100,19 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['delete_rule'])) {
 // ── Add Schedule ──
 if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['add_schedule'])) {
     if (!$isOwner) { $errors[]='Access denied.'; } else {
-        $device   = $_POST['s_device'] ?? '';
+        $device   = 'sprayer';
         $run_time = $_POST['run_time'] ?? '';
-        $duration = intval($_POST['s_duration'] ?? 5);
+        $dur_min  = intval($_POST['dur_min'] ?? 0);
+        $dur_sec  = intval($_POST['dur_sec'] ?? 0);
+        if ($dur_min <= 0 && $dur_sec <= 0) $dur_sec = 30; // fallback
         $days     = $_POST['days'] ?? 'daily';
-        if (!$device||!$run_time) $errors[]='Device and time required.';
+        if (!$run_time) $errors[]='Time required.';
         if (empty($errors)) {
-            $s=$conn->prepare("INSERT INTO scheduled_tasks (device,run_time,duration_minutes,days) VALUES (?,?,?,?)");
-            if($s){$s->bind_param("ssis",$device,$run_time,$duration,$days);if($s->execute())$success='Schedule added.';else $errors[]='DB error.';$s->close();}
+            $s=$conn->prepare("INSERT INTO scheduled_tasks (device,run_time,duration_minutes,duration_seconds,days) VALUES (?,?,?,?,?)");
+            if($s){$s->bind_param("ssiis",$device,$run_time,$dur_min,$dur_sec,$days);if($s->execute())$success='Schedule added.';else $errors[]='DB error: '.$conn->error;$s->close();}
         }
     }
+}
 }
 
 // ── Toggle Schedule ──
@@ -509,9 +515,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
             <div class="rule-device-badge" style="background:var(--amber-lt);color:var(--amber);"><i class="fas <?=$icon?>"></i></div>
             <div class="rule-text">
               Spray at <span><?=date('g:i A',strtotime($sched['run_time']))?></span> for <span><?php
-                $dm = floatval($sched['duration_minutes']);
-                $mins = (int)$dm;
-                $secs = round(($dm - $mins) * 60);
+                $mins = intval($sched['duration_minutes'] ?? 0);
+                $secs = intval($sched['duration_seconds'] ?? 30);
                 if ($mins > 0 && $secs > 0) echo "{$mins} min {$secs} sec";
                 elseif ($mins > 0) echo "{$mins} min";
                 else echo "{$secs} sec";
@@ -659,12 +664,12 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
         <div class="form-group">
           <label>Duration</label>
           <div style="display:flex;gap:6px;align-items:center;">
-            <input type="number" id="sched_dur_min" min="0" value="0" style="flex:1;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;">
+            <input type="number" name="dur_min" id="sched_dur_min" min="0" value="0" style="flex:1;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;">
             <span style="font-size:12px;color:var(--muted);font-weight:600;white-space:nowrap;">min</span>
-            <input type="number" id="sched_dur_sec" min="0" max="59" value="30" style="flex:1;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;">
+            <input type="number" name="dur_sec" id="sched_dur_sec" min="0" max="59" value="30" style="flex:1;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;">
             <span style="font-size:12px;color:var(--muted);font-weight:600;white-space:nowrap;">sec</span>
           </div>
-          <input type="hidden" name="s_duration" id="s_duration_hidden">
+          <input type="hidden" name="s_duration" id="s_duration_hidden" value="0">
         </div>
       </div>
       <div class="form-group">
@@ -726,21 +731,25 @@ document.querySelectorAll('.modal-backdrop').forEach(bd=>bd.addEventListener('cl
   const form = document.getElementById('scheduleForm');
   if (!form) return;
   form.addEventListener('submit', function(e) {
-    // Convert 12hr → 24hr
-    const hour   = parseInt(document.getElementById('sched_hour').value);
-    const min    = document.getElementById('sched_min').value;
-    const ampm   = document.getElementById('sched_ampm').value;
+    // Convert 12hr → 24hr for run_time
+    const hour = parseInt(document.getElementById('sched_hour').value);
+    const min  = document.getElementById('sched_min').value;
+    const ampm = document.getElementById('sched_ampm').value;
     let h24 = hour;
     if (ampm === 'AM' && hour === 12) h24 = 0;
     if (ampm === 'PM' && hour !== 12) h24 = hour + 12;
     document.getElementById('run_time_hidden').value = String(h24).padStart(2,'0') + ':' + min + ':00';
 
-    // Convert min+sec → decimal minutes (stored as FLOAT in DB)
+    // Validate duration
     const durMin = parseInt(document.getElementById('sched_dur_min').value) || 0;
     const durSec = parseInt(document.getElementById('sched_dur_sec').value) || 0;
-    const totalMin = durMin + (durSec / 60);
-    if (totalMin <= 0) { e.preventDefault(); alert('Duration must be greater than 0.'); return; }
-    document.getElementById('s_duration_hidden').value = totalMin.toFixed(4);
+    const totalSec = (durMin * 60) + durSec;
+    if (totalSec <= 0) {
+      e.preventDefault();
+      alert('Duration must be greater than 0 seconds.');
+      return;
+    }
+    // dur_min and dur_sec already have name attributes — PHP reads them directly
   });
 })();
 
