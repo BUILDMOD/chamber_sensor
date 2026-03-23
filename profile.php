@@ -37,7 +37,7 @@ function logActivity($conn, $userId, $action) {
 }
 
 $user = null;
-$stmt = $conn->prepare("SELECT id, first_name, middle_name, last_name, fullname, email, phone, username, created_at FROM users WHERE username = ? LIMIT 1");
+$stmt = $conn->prepare("SELECT id, first_name, middle_name, last_name, suffix, fullname, email, phone, username, created_at FROM users WHERE username = ? LIMIT 1");
 if ($stmt) { $stmt->bind_param("s", $currentUsername); $stmt->execute(); $res = $stmt->get_result(); if ($res && $res->num_rows > 0) $user = $res->fetch_assoc(); $stmt->close(); }
 
 $errors = []; $success = "";
@@ -291,7 +291,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile']) && 
     if (empty($errors)) {
         $fullname=trim($first.' '.($middle?$middle.' ':'').$last.($suffix?', '.$suffix:''));
         $u=$conn->prepare("UPDATE users SET first_name=?,middle_name=?,last_name=?,suffix=?,fullname=?,email=?,phone=? WHERE id=?");
-        if ($u) { $u->bind_param("sssssssi",$first,$middle,$last,$suffix,$fullname,$email,$phone,$user['id']); if ($u->execute()) { $success="Profile updated."; logActivity($conn,$user['id'],"Profile updated"); $_SESSION['fullname'] = $fullname; $stmt=$conn->prepare("SELECT id,first_name,middle_name,last_name,fullname,email,phone,username,created_at FROM users WHERE id=? LIMIT 1"); if ($stmt) { $stmt->bind_param("i",$user['id']); $stmt->execute(); $r=$stmt->get_result(); if ($r&&$r->num_rows>0) $user=$r->fetch_assoc(); $stmt->close(); } } else $errors[]="DB error."; $u->close(); }
+        if ($u) { $u->bind_param("sssssssi",$first,$middle,$last,$suffix,$fullname,$email,$phone,$user['id']); if ($u->execute()) { $success="Profile updated."; logActivity($conn,$user['id'],"Profile updated"); $_SESSION['fullname'] = $fullname; $stmt=$conn->prepare("SELECT id,first_name,middle_name,last_name,suffix,fullname,email,phone,username,created_at FROM users WHERE id=? LIMIT 1"); if ($stmt) { $stmt->bind_param("i",$user['id']); $stmt->execute(); $r=$stmt->get_result(); if ($r&&$r->num_rows>0) $user=$r->fetch_assoc(); $stmt->close(); } } else $errors[]="DB error."; $u->close(); }
     }
 }
 
@@ -328,7 +328,7 @@ if (isset($_SESSION['role']) && $_SESSION['role'] === 'owner') {
 // Staff users
 $staff_users = [];
 if (isset($_SESSION['role']) && $_SESSION['role'] === 'owner') {
-    $su = $conn->query("SELECT id,first_name,middle_name,last_name,fullname,username,email,phone,role FROM users WHERE role='staff' AND verified=1 ORDER BY id ASC");
+    $su = $conn->query("SELECT id,first_name,middle_name,last_name,suffix,fullname,username,email,phone,role FROM users WHERE role='staff' AND verified=1 ORDER BY id ASC");
     if ($su) while ($r=$su->fetch_assoc()) $staff_users[]=$r;
 }
 

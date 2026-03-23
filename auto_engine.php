@@ -139,7 +139,7 @@ function _logAlert($conn, $type, $severity, $message, $value) {
         if ($owner && $row = $owner->fetch_assoc()) $recipient = $row['email'];
         if (!$recipient) return;
 
-        $throttle_key = $type . '_' . $recipient;
+        $throttle_key = 'global_alerts_' . $recipient;
         $conn->query("CREATE TABLE IF NOT EXISTS email_throttle (
             email VARCHAR(120) PRIMARY KEY,
             last_sent TIMESTAMP NOT NULL
@@ -323,6 +323,22 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
         }
 
         if ($faultType && $faultReason) {
+            // Check if same fault already exists and is unresolved (deduplication)
+            $existingFault = $conn->prepare("SELECT id FROM device_faults 
+                                            WHERE device=? AND fault_type=? AND resolved=0 
+                                            AND logged_at > DATE_SUB(NOW(), INTERVAL 5 MINUTE) 
+                                            ORDER BY logged_at DESC LIMIT 1");
+            if ($existingFault) {
+                $existingFault->bind_param("ss", $device, $faultType);
+                $existingFault->execute();
+                $existingResult = $existingFault->get_result();
+                if ($existingResult->num_rows > 0) {
+                    $existingFault->close();
+                    continue; // Skip - same fault already logged recently
+                }
+                $existingFault->close();
+            }
+            
             $conn->query("UPDATE device_state SET status='off', controlled_by='auto', locked_until=0 WHERE device='{$device}'");
             _logDevice($conn, $device, 'OFF', 'fault', $faultReason);
             _logAlert($conn, 'device', 'critical', $faultReason, $sensorVal);

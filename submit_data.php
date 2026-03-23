@@ -160,7 +160,7 @@ if ($stmt->execute()) {
         }
 
         if ($should_notify) {
-            $cooldown_min = intval($ss_notif['notify_cooldown_min'] ?? $ns['notify_cooldown_min'] ?? 60);
+            $cooldown_min = intval($ss_notif['notify_cooldown_min'] ?? $ns['notify_cooldown_min'] ?? 30);
             $recipient = '';
             @session_start();
             if (!empty($_SESSION['user'])) {
@@ -180,9 +180,8 @@ if ($stmt->execute()) {
             }
             if (empty($recipient)) $recipient = $ns['smtp_to_email'] ?? '';
 
-            // Per-type throttle key — prevents one alert type from blocking another
-            $alert_types_in = array_unique(array_column($alerts_triggered, 'type'));
-            $throttle_key = implode('_', $alert_types_in) . '_' . $recipient;
+            // Global throttle key — all alerts share same cooldown
+            $throttle_key = 'global_alerts_' . $recipient;
 
             $throttle_query = $conn->prepare("SELECT last_sent FROM email_throttle WHERE email = ?");
             $throttle_query->bind_param("s", $throttle_key);

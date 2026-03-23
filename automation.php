@@ -158,6 +158,9 @@ $conn->query("CREATE TABLE IF NOT EXISTS device_faults (
     logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )");
 
+// ── Auto-cleanup old resolved faults (keep only last 7 days) ──
+$conn->query("DELETE FROM device_faults WHERE resolved=1 AND logged_at < DATE_SUB(NOW(), INTERVAL 7 DAY)");
+
 // ── Log date filter ──
 $log_date_from = $_GET['log_from'] ?? date('Y-m-d');
 $log_date_to   = $_GET['log_to']   ?? date('Y-m-d');

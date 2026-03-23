@@ -81,8 +81,8 @@ if (empty($recipient)) {
 }
 
 // ── 5. Check throttle (cooldown) ──
-$cooldown_min = intval($ss['notify_cooldown_min'] ?? $ns['notify_cooldown_min'] ?? 60);
-$throttle_key = 'offline_' . $recipient; // separate throttle key for offline alerts
+$cooldown_min = intval($ss['notify_cooldown_min'] ?? $ns['notify_cooldown_min'] ?? 30);
+$throttle_key = 'global_alerts_' . $recipient; // use global throttle key for consistency
 
 $conn->query("CREATE TABLE IF NOT EXISTS email_throttle (
     email VARCHAR(120) PRIMARY KEY,

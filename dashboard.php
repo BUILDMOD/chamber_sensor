@@ -1052,7 +1052,7 @@ function renderAlerts(msgs){
   msgs.forEach(m=>{const d=document.createElement('div');d.className='alert-item alert-err';d.innerHTML=`<i class="fas fa-triangle-exclamation"></i> ${m}`;list.appendChild(d);});
 }
 loadLive();
-setInterval(loadLive,1000);
+setInterval(loadLive,5000);
 
 // Device States
 async function fetchDeviceStates(){
