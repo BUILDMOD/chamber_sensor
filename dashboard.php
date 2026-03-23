@@ -568,8 +568,8 @@ $isOwner = $sessionRole === 'owner';
             <div class="device-row">
               <span class="device-name"><?= $name ?></span>
               <span class="device-time" id="last_<?= $id ?>">—</span>
-              <div id="status_<?= $id ?>" class="status-pill pill-unk"><span class="dot"></span> —</div>
-              <button class="toggle-btn" data-device="<?= $id ?>" id="btn_<?= $id ?>">Toggle</button>
+              <div id="status_<?= $id ?>" class="status-pill pill-off"><span class="dot"></span> OFF</div>
+              <button class="toggle-btn" data-device="<?= $id ?>" id="btn_<?= $id ?>" style="background:var(--green);color:#fff;border-color:var(--green);">Power ON</button>
             </div>
             <?php endforeach; ?>
           </div>
@@ -1050,30 +1050,42 @@ function applyPill(dev,status){
   const s=String(status||'').toUpperCase();
   if(['ON','1','TRUE'].includes(s)){
     el.className='status-pill pill-on';el.innerHTML='<span class="dot"></span> ON';
-    if(btn){btn.textContent='Turn OFF';btn.style.background='var(--red)';btn.style.color='#fff';btn.style.borderColor='var(--red)';}
-  } else if(['OFF','0','FALSE'].includes(s)){
-    el.className='status-pill pill-off';el.innerHTML='<span class="dot"></span> OFF';
-    if(btn){btn.textContent='Turn ON';btn.style.background='var(--green)';btn.style.color='#fff';btn.style.borderColor='var(--green)';}
+    if(btn){btn.textContent='Power OFF';btn.style.background='var(--red)';btn.style.color='#fff';btn.style.borderColor='var(--red)';}
   } else {
-    el.className='status-pill pill-unk';el.innerHTML='<span class="dot"></span> —';
-    if(btn){btn.textContent='Toggle';btn.style.background='';btn.style.color='';btn.style.borderColor='';}
+    el.className='status-pill pill-off';el.innerHTML='<span class="dot"></span> OFF';
+    if(btn){btn.textContent='Power ON';btn.style.background='var(--green)';btn.style.color='#fff';btn.style.borderColor='var(--green)';}
   }
 }
+
+function resetAllDevicesToOff(){
+  ['mist','fan','heater','sprayer','exhaust'].forEach(d=>applyPill(d,'0'));
+}
+
 fetchDeviceStates();
 setInterval(fetchDeviceStates,1000);
 function setMode(manual){
   $$('modeLabel').textContent=manual?'Manual Mode':'Auto Mode';
   $$('manualControls').style.display=manual?'':'none';
+  // When switching to manual, turn OFF all devices in DB then fetch actual states
+  // When switching to auto, just hide controls — auto_engine takes over
 }
-let modeSwitching = false; // flag: user is actively changing mode
+let modeSwitching = false;
 
 $$('modeSwitch').addEventListener('change',async function(){
   modeSwitching = true;
   const wantManual = this.checked;
   setMode(wantManual);
   try{
-    await fetch(`update_device_status.php?mode=${wantManual?1:0}`,{cache:'no-store'});
-    // Device states stay as-is — ESP32 reads current DB states on next poll
+    if(wantManual){
+      // Switch to manual: turn all devices OFF first, then set manual mode
+      await fetch('update_device_status.php?mist=0&fan=0&heater=0&sprayer=0&exhaust=0',{cache:'no-store'});
+      await fetch('update_device_status.php?mode=1',{cache:'no-store'});
+    } else {
+      // Switch to auto: just flip mode flag, auto_engine takes over
+      await fetch('update_device_status.php?mode=0',{cache:'no-store'});
+    }
+    // Fetch actual DB states to update labels correctly
+    await fetchDeviceStates();
   }catch(_){}
   setTimeout(()=>{ modeSwitching = false; }, 2000);
 });
@@ -1093,7 +1105,6 @@ document.querySelectorAll('.toggle-btn[data-device]').forEach(btn=>{
       $$('last_'+dev).textContent=now;
       setTimeout(fetchDeviceStates,1000);
     }catch(_){
-      // revert on error
       applyPill(dev, currentlyOn ? '1' : '0');
     }
   });
