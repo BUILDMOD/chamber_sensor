@@ -108,6 +108,10 @@ function _logDevice($conn, $device, $action, $triggerType, $detail) {
     if ($stmt) { $stmt->bind_param("ssss",$device,$action,$triggerType,$detail); $stmt->execute(); $stmt->close(); }
 }
 
+function logDevice($conn, $device, $action, $triggerType, $detail) {
+    _logDevice($conn, $device, $action, $triggerType, $detail);
+}
+
 function _logAlert($conn, $type, $severity, $message, $value) {
     $conn->query("CREATE TABLE IF NOT EXISTS alert_logs (
         id INT AUTO_INCREMENT PRIMARY KEY,
