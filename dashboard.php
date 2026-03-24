@@ -695,7 +695,7 @@ $isOwner = $sessionRole === 'owner';
     <button class="modal-close" onclick="$$('manualUploadModal').classList.remove('show')">&times;</button>
     <h3><i class="fas fa-upload" style="color:var(--blue);margin-right:8px;"></i>Manual Image Upload</h3>
     <p style="font-size:13px;color:var(--muted);margin-bottom:16px;line-height:1.6;">
-      Upload a mushroom photo from your phone or computer. Gemini AI will analyze it for harvest readiness and contamination.
+      Upload a mushroom photo from your phone or computer. GroqCloud AI will analyze it for harvest readiness and contamination.
     </p>
 
     <!-- Drop zone -->
@@ -722,7 +722,8 @@ $isOwner = $sessionRole === 'owner';
 
     <div style="display:flex;gap:8px;">
       <button type="button" onclick="$$('manualUploadModal').classList.remove('show')" style="flex:1;padding:9px;border-radius:7px;background:var(--surface2);color:var(--text);border:1px solid var(--border);font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
-      <button type="button" id="uploadSubmitBtn" onclick="submitManualUpload()" style="flex:2;padding:9px;border-radius:7px;background:var(--blue);color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer;display:none;"><i class="fas fa-magnifying-glass"></i> Analyze Image</button>
+      <button type="button" id="uploadSubmitBtn" onclick="submitManualUpload()" style="flex:1;padding:9px;border-radius:7px;background:var(--blue);color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer;display:none;"><i class="fas fa-magnifying-glass"></i> Analyze</button>
+      <button type="button" id="uploadSaveBtn" onclick="saveAnalyzedImage()" style="flex:1;padding:9px;border-radius:7px;background:var(--green);color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer;display:none;"><i class="fas fa-save"></i> Save to Dashboard</button>
     </div>
   </div>
 </div>
@@ -1443,6 +1444,8 @@ loadMonthlySummary();
 
 // ── Manual Image Upload ──
 let uploadFile = null;
+let tempFilePath = null;
+let analysisData = null;
 
 function handleUploadSelect(file) {
   if (!file) return;
@@ -1454,8 +1457,33 @@ function handleUploadSelect(file) {
     $$('uploadPreview').style.display = 'block';
     $$('uploadSubmitBtn').style.display = 'block';
     $$('uploadResult').style.display = 'none';
+    // Hide the drop zone after image is selected
+    $$('uploadDropZone').style.display = 'none';
+    
+    // Upload file to temporary location first
+    uploadToTemp(file);
   };
   reader.readAsDataURL(file);
+}
+
+async function uploadToTemp(file) {
+  const formData = new FormData();
+  formData.append('image', file);
+  
+  try {
+    const r = await fetch('process_image.php', { method: 'POST', body: formData });
+    const d = await r.json();
+    
+    if (d.success) {
+      tempFilePath = d.temp_file;
+      console.log('File uploaded to temp location:', d.temp_file);
+    } else {
+      console.error('Temp upload failed:', d.error);
+      // Still allow analysis but will show error
+    }
+  } catch(err) {
+    console.error('Temp upload error:', err);
+  }
 }
 
 function handleUploadDrop(e) {
@@ -1467,15 +1495,20 @@ function handleUploadDrop(e) {
 }
 
 async function submitManualUpload() {
-  if (!uploadFile) return;
+  if (!tempFilePath) {
+    $$('uploadResult').style.display = 'block';
+    $$('uploadResult').innerHTML = `<span style="color:var(--red);">Please select an image first.</span>`;
+    return;
+  }
+  
   const btn = $$('uploadSubmitBtn');
   btn.disabled = true;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Analyzing…';
 
-  const formData = new FormData();
-  formData.append('image', uploadFile);
-
   try {
+    const formData = new FormData();
+    formData.append('analyze_temp_file', tempFilePath);
+
     const r = await fetch('process_image.php', { method: 'POST', body: formData });
     const d = await r.json();
 
@@ -1510,9 +1543,13 @@ async function submitManualUpload() {
         </div>
         <div style="font-size:12px;color:var(--muted);line-height:1.6;">${d.analysis_notes}</div>
       `;
-      btn.innerHTML = '<i class="fas fa-check"></i> Done — Result Saved';
+      // Store analysis data and show save button
+      analysisData = d;
+      btn.innerHTML = '<i class="fas fa-check"></i> Analysis Complete';
       btn.style.background = 'var(--green)';
-      setTimeout(loadCameraImages, 1000);
+      // Show save button
+      $$('uploadSaveBtn').style.display = 'block';
+      // Remove auto-refresh - image will only show when user explicitly saves
     } else {
       $$('uploadResult').style.display = 'block';
       $$('uploadResult').innerHTML = `<span style="color:var(--red);">Error: ${d.error || 'Analysis failed'}</span>`;
@@ -1527,19 +1564,66 @@ async function submitManualUpload() {
   }
 }
 
+// Save analyzed image to dashboard
+async function saveAnalyzedImage() {
+  if (!tempFilePath || !analysisData) {
+    $$('uploadResult').style.display = 'block';
+    $$('uploadResult').innerHTML = `<span style="color:var(--red);">No analysis data to save.</span>`;
+    return;
+  }
+  
+  const saveBtn = $$('uploadSaveBtn');
+  saveBtn.disabled = true;
+  saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving…';
+
+  try {
+    const formData = new FormData();
+    formData.append('save_analyzed_file', tempFilePath);
+    formData.append('analysis_data', JSON.stringify(analysisData));
+
+    const r = await fetch('process_image.php', { method: 'POST', body: formData });
+    const d = await r.json();
+
+    if (d.success) {
+      $$('uploadResult').style.display = 'block';
+      $$('uploadResult').innerHTML = `<span style="color:var(--green);">✓ ${d.message}</span>`;
+      saveBtn.innerHTML = '<i class="fas fa-check"></i> Saved';
+      saveBtn.style.background = 'var(--green)';
+      // Refresh camera images to show the new saved image
+      setTimeout(loadCameraImages, 1000);
+    } else {
+      $$('uploadResult').style.display = 'block';
+      $$('uploadResult').innerHTML = `<span style="color:var(--red);">Error: ${d.error || 'Save failed'}</span>`;
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<i class="fas fa-save"></i> Save to Dashboard';
+    }
+  } catch(err) {
+    $$('uploadResult').style.display = 'block';
+    $$('uploadResult').innerHTML = `<span style="color:var(--red);">Network error — please try again.</span>`;
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = '<i class="fas fa-save"></i> Save to Dashboard';
+  }
+}
+
 // Reset upload modal when closed
 $$('manualUploadModal').addEventListener('click', function(e) {
   if (e.target === this) {
     uploadFile = null;
+    tempFilePath = null;
+    analysisData = null;
     $$('uploadPreview').style.display = 'none';
     $$('uploadSubmitBtn').style.display = 'none';
+    $$('uploadSaveBtn').style.display = 'none';
     $$('uploadResult').style.display = 'none';
     $$('uploadSubmitBtn').disabled = false;
     $$('uploadSubmitBtn').innerHTML = '<i class="fas fa-magnifying-glass"></i> Analyze Image';
     $$('uploadSubmitBtn').style.background = 'var(--blue)';
     $$('uploadFileInput').value = '';
+    // Show the drop zone again when modal is closed
+    $$('uploadDropZone').style.display = 'block';
   }
 });
+
 function resetCamToLive(){
   camViewingDay=null;
   $$('camDetailTitle').textContent='Latest captures';

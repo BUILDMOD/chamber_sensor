@@ -290,7 +290,7 @@ function determineHarvestStatus($d) {
     return "Overripe";
 }
 
-// ── Handle POST: new image uploaded ──
+// ── Handle POST: new image uploaded (temporary only) ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['image'])) {
     header('Content-Type: application/json');
 
@@ -301,35 +301,91 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['image'])) {
     $mimeType = finfo_file($finfo, $file['tmp_name']); finfo_close($finfo);
     if (!in_array($mimeType, ['image/jpeg','image/png','image/gif','image/webp'])) { echo json_encode(["success"=>false,"error"=>"Invalid file type."]); exit; }
 
+    // Upload directly to uploads folder but don't save to database yet
     $uploadDir = 'uploads/';
     if (!file_exists($uploadDir)) mkdir($uploadDir, 0777, true);
+    
     $filename   = 'mushroom_'.time().'_'.bin2hex(random_bytes(4)).'.'.pathinfo($file['name'],PATHINFO_EXTENSION ?: 'jpg');
     $targetPath = $uploadDir . $filename;
-    if (!move_uploaded_file($file['tmp_name'], $targetPath)) { echo json_encode(["success"=>false,"error"=>"Failed to save file"]); exit; }
+    
+    if (!move_uploaded_file($file['tmp_name'], $targetPath)) { 
+        echo json_encode(["success"=>false,"error"=>"Failed to save file"]); 
+        exit; 
+    }
+
+    // Return success with file info - no analysis yet
+    echo json_encode([
+        "success" => true, 
+        "temp_file" => $targetPath,
+        "filename" => $filename,
+        "size" => $file['size'],
+        "message" => "Image uploaded successfully. Click 'Analyze' to process."
+    ]);
+    exit;
+}
+
+// ── Handle POST: analyze existing temp image ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['analyze_temp_file'])) {
+    header('Content-Type: application/json');
+    
+    $tempFile = $_POST['analyze_temp_file'] ?? '';
+    if (!file_exists($tempFile)) {
+        echo json_encode(["success"=>false,"error"=>"Temp file not found"]);
+        exit;
+    }
 
     // ── Analyze: Groq first, Gemini backup, fallback last ──
     $groqKey   = getGroqKey($conn);
     $geminiKey = getGeminiKey($conn);
 
     if ($groqKey) {
-        $result = analyzeWithGroq($targetPath, $groqKey);
+        $result = analyzeWithGroq($tempFile, $groqKey);
     } elseif ($geminiKey) {
-        $result = analyzeWithGemini($targetPath, $geminiKey);
+        $result = analyzeWithGemini($tempFile, $geminiKey);
     } else {
-        $result = fallbackAnalysis($targetPath, "No API key configured. Add groq_api_key or gemini_api_key in Settings.");
+        $result = fallbackAnalysis($tempFile, "No API key configured. Add groq_api_key or gemini_api_key in Settings.");
     }
 
+    // Return analysis result WITHOUT saving to database
+    $result['success'] = true;
+    $result['temp_file'] = $tempFile;
+    $result['message'] = 'Analysis complete. Click "Save to Dashboard" to save.';
+    
+    echo json_encode($result);
+    exit;
+}
+
+// ── Handle POST: save analyzed image to database ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_analyzed_file'])) {
+    header('Content-Type: application/json');
+    
+    $tempFile = $_POST['save_analyzed_file'] ?? '';
+    $analysisData = json_decode($_POST['analysis_data'] ?? '{}', true);
+    
+    if (!file_exists($tempFile)) {
+        echo json_encode(["success"=>false,"error"=>"File not found"]);
+        exit;
+    }
+
+    // File is already in uploads/ folder, just save to database
+    $finalPath = $tempFile;
+
+    // Save to database now
     $stmt = $conn->prepare("INSERT INTO image_analysis (image_path,diameter_cm,estimated_size_cm,harvest_status,contamination_status,confidence_score,analysis_notes) VALUES (?,?,?,?,?,?,?)");
-    $stmt->bind_param("sddssds",$targetPath,$result['diameter_cm'],$result['estimated_size_cm'],$result['harvest_status'],$result['contamination_status'],$result['confidence_score'],$result['analysis_notes']);
+    $stmt->bind_param("sddssds",$finalPath,$analysisData['diameter_cm'],$analysisData['estimated_size_cm'],$analysisData['harvest_status'],$analysisData['contamination_status'],$analysisData['confidence_score'],$analysisData['analysis_notes']);
 
     if ($stmt->execute()) {
-        $result['id'] = $conn->insert_id;
-        $result['image_path'] = $targetPath;
-        $result['success'] = true;
-        if (in_array($result['harvest_status'],['Ready for Harvest','Overripe']) || $result['contamination_status']==='Contaminated') {
-            _sendAnalysisEmail($conn, $result);
+        $analysisData['id'] = $conn->insert_id;
+        $analysisData['image_path'] = $finalPath;
+        $analysisData['success'] = true;
+        $analysisData['message'] = 'Image saved to dashboard!';
+        
+        // Send email notification if needed
+        if (in_array($analysisData['harvest_status'],['Ready for Harvest','Overripe']) || $analysisData['contamination_status']==='Contaminated') {
+            _sendAnalysisEmail($conn, $analysisData);
         }
-        echo json_encode($result);
+        
+        echo json_encode($analysisData);
     } else {
         echo json_encode(["success"=>false,"error"=>"DB error: ".$conn->error]);
     }
