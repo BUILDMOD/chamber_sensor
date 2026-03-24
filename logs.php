@@ -555,5 +555,365 @@ if(urlTab==='system'){
   });
 })();
 </script>
+
+<!-- ══════════════════════════════════════════════
+     🍄 MushroomOS AI Assistant — Floating Bubble
+     Uses Groq llama-3.3-70b (free, no credit card)
+     ══════════════════════════════════════════════ -->
+<style>
+/* ── Bubble Button ── */
+#ai-bubble-btn {
+  position: fixed; bottom: 24px; right: 24px; z-index: 9000;
+  width: 56px; height: 56px; border-radius: 50%;
+  background: linear-gradient(135deg, #1a9e5c, #0d7a44);
+  border: none; cursor: pointer; box-shadow: 0 4px 20px rgba(26,158,92,.45);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .2s, box-shadow .2s;
+  color: #fff; font-size: 22px;
+}
+#ai-bubble-btn:hover { transform: scale(1.1); box-shadow: 0 6px 28px rgba(26,158,92,.55); }
+#ai-bubble-btn.open  { background: linear-gradient(135deg, #d93025, #b71c1c); }
+#ai-bubble-badge {
+  position: absolute; top: -3px; right: -3px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: #f9a825; border: 2px solid #fff;
+  font-size: 10px; font-weight: 700; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .2s;
+}
+#ai-bubble-badge.show { opacity: 1; }
+
+/* ── Chat Window ── */
+#ai-chat-window {
+  position: fixed; bottom: 92px; right: 24px; z-index: 8999;
+  width: 360px; max-width: calc(100vw - 32px);
+  background: var(--surface); border-radius: 16px;
+  border: 1px solid var(--border); box-shadow: 0 8px 40px rgba(0,0,0,.14);
+  display: flex; flex-direction: column; overflow: hidden;
+  transform: scale(.92) translateY(16px); opacity: 0;
+  pointer-events: none;
+  transition: transform .22s cubic-bezier(.4,0,.2,1), opacity .22s;
+  max-height: 520px;
+}
+#ai-chat-window.open {
+  transform: scale(1) translateY(0); opacity: 1; pointer-events: all;
+}
+
+/* ── Header ── */
+.ai-chat-header {
+  background: linear-gradient(135deg, #1a9e5c, #0d7a44);
+  padding: 14px 16px; display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
+}
+.ai-chat-avatar {
+  width: 34px; height: 34px; border-radius: 50%;
+  background: rgba(255,255,255,.2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; flex-shrink: 0;
+}
+.ai-chat-header-info { flex: 1; }
+.ai-chat-header-name { font-size: 13px; font-weight: 700; color: #fff; }
+.ai-chat-header-sub  { font-size: 11px; color: rgba(255,255,255,.7); margin-top: 1px; }
+.ai-chat-close-btn {
+  background: rgba(255,255,255,.15); border: none; color: #fff;
+  width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+  font-size: 14px; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: background .15s;
+}
+.ai-chat-close-btn:hover { background: rgba(255,255,255,.28); }
+
+/* ── Messages ── */
+.ai-chat-messages {
+  flex: 1; overflow-y: auto; padding: 14px 14px 8px;
+  display: flex; flex-direction: column; gap: 10px;
+  scroll-behavior: smooth;
+}
+.ai-chat-messages::-webkit-scrollbar { width: 4px; }
+.ai-chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.ai-msg { display: flex; gap: 8px; align-items: flex-end; }
+.ai-msg.user { flex-direction: row-reverse; }
+.ai-msg-avatar {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 13px;
+  background: var(--green-lt); color: var(--green);
+}
+.ai-msg.user .ai-msg-avatar { background: var(--blue-lt); color: var(--blue); }
+.ai-msg-bubble {
+  max-width: 78%; padding: 9px 12px; border-radius: 12px;
+  font-size: 13px; line-height: 1.55; color: var(--text);
+  background: var(--surface2); border: 1px solid var(--border);
+  word-break: break-word;
+}
+.ai-msg.user .ai-msg-bubble {
+  background: var(--green); color: #fff; border-color: var(--green);
+}
+.ai-msg-time {
+  font-size: 10px; color: var(--muted); margin-top: 3px;
+  text-align: right;
+}
+.ai-msg.user .ai-msg-time { text-align: left; }
+
+/* Typing indicator */
+.ai-typing-dots { display: flex; gap: 4px; align-items: center; padding: 4px 2px; }
+.ai-typing-dots span {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--muted);
+  animation: aiDot .9s infinite ease-in-out;
+}
+.ai-typing-dots span:nth-child(2) { animation-delay: .15s; }
+.ai-typing-dots span:nth-child(3) { animation-delay: .3s; }
+@keyframes aiDot { 0%,80%,100%{transform:scale(.7);opacity:.5} 40%{transform:scale(1);opacity:1} }
+
+/* ── Suggestions ── */
+.ai-suggestions {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 0 14px 10px; flex-shrink: 0;
+}
+.ai-suggestion-btn {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 20px; padding: 5px 11px; font-size: 11px;
+  font-weight: 600; color: var(--text); cursor: pointer;
+  transition: all .15s; font-family: 'DM Sans', sans-serif;
+  white-space: nowrap;
+}
+.ai-suggestion-btn:hover { background: var(--green-lt); color: var(--green); border-color: var(--green); }
+
+/* ── Input ── */
+.ai-chat-input-row {
+  display: flex; gap: 8px; padding: 10px 14px 14px;
+  border-top: 1px solid var(--border); flex-shrink: 0;
+}
+#ai-chat-input {
+  flex: 1; padding: 9px 12px; border-radius: 22px;
+  border: 1px solid var(--border); background: var(--surface2);
+  font-size: 13px; color: var(--text); font-family: 'DM Sans', sans-serif;
+  outline: none; resize: none; transition: border-color .15s;
+  line-height: 1.4; max-height: 80px;
+}
+#ai-chat-input:focus { border-color: var(--green); background: var(--surface); }
+#ai-chat-input::placeholder { color: var(--muted); }
+#ai-send-btn {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--green); border: none; color: #fff;
+  cursor: pointer; font-size: 14px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: opacity .15s; align-self: flex-end;
+}
+#ai-send-btn:hover { opacity: .85; }
+#ai-send-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ── Mobile ── */
+@media(max-width: 480px) {
+  #ai-chat-window { bottom: 84px; right: 12px; width: calc(100vw - 24px); }
+  #ai-bubble-btn  { bottom: 16px; right: 16px; width: 50px; height: 50px; font-size: 20px; }
+}
+</style>
+
+<!-- Bubble Toggle Button -->
+<button id="ai-bubble-btn" title="Ask AI Assistant" aria-label="Open AI Assistant">
+  <i class="fas fa-seedling"></i>
+  <span id="ai-bubble-badge">1</span>
+</button>
+
+<!-- Chat Window -->
+<div id="ai-chat-window" role="dialog" aria-label="MushroomOS AI Assistant">
+  <!-- Header -->
+  <div class="ai-chat-header">
+    <div class="ai-chat-avatar">🍄</div>
+    <div class="ai-chat-header-info">
+      <div class="ai-chat-header-name">MushroomOS Assistant</div>
+      <div class="ai-chat-header-sub">Powered by Groq · llama-3.3-70b</div>
+    </div>
+    <button class="ai-chat-close-btn" id="ai-close-btn" aria-label="Close"><i class="fas fa-times"></i></button>
+  </div>
+
+  <!-- Messages -->
+  <div class="ai-chat-messages" id="ai-chat-messages">
+    <!-- Welcome message injected by JS -->
+  </div>
+
+  <!-- Quick Suggestions -->
+  <div class="ai-suggestions" id="ai-suggestions">
+    <button class="ai-suggestion-btn" data-msg="What are the ideal temperature and humidity for oyster mushrooms?">🌡️ Ideal conditions</button>
+    <button class="ai-suggestion-btn" data-msg="What does it mean if humidity is too low in mushroom cultivation?">💧 Low humidity</button>
+    <button class="ai-suggestion-btn" data-msg="How do I know when mushrooms are ready to harvest?">🍄 Harvest tips</button>
+    <button class="ai-suggestion-btn" data-msg="What causes contamination in mushroom farms and how to prevent it?">⚠️ Contamination</button>
+  </div>
+
+  <!-- Input -->
+  <div class="ai-chat-input-row">
+    <textarea id="ai-chat-input" placeholder="Ask about mushroom farming…" rows="1"></textarea>
+    <button id="ai-send-btn" aria-label="Send"><i class="fas fa-paper-plane"></i></button>
+  </div>
+</div>
+
+<script>
+(function () {
+  // ── CONFIG ──
+  // Replace with your Groq API key (get one free at console.groq.com)
+  const GROQ_API_KEY = 'YOUR_GROQ_API_KEY_HERE';
+  const GROQ_MODEL   = 'llama-3.3-70b-versatile';
+
+  const SYSTEM_PROMPT = `You are MushroomOS Assistant, an expert AI embedded inside MushroomOS — a smart mushroom cultivation monitoring system for J.WHO Mushroom Farm. 
+
+You help farm operators with:
+- Mushroom cultivation advice (oyster, shiitake, etc.)
+- Interpreting sensor data (temperature & humidity readings)
+- Diagnosing problems (contamination, poor growth, etc.)
+- Automation & device control suggestions (mist, fan, heater, sprayer, exhaust)
+- Harvest timing and post-harvest tips
+- General mushroom farming best practices
+
+Be concise, practical, and friendly. Use short paragraphs. When giving ranges or numbers, be specific. Always relate answers to mushroom farming context.`;
+
+  // ── State ──
+  const messages = []; // { role, content }
+  let isTyping = false;
+
+  // ── Elements ──
+  const bubbleBtn   = document.getElementById('ai-bubble-btn');
+  const chatWindow  = document.getElementById('ai-chat-window');
+  const closeBtn    = document.getElementById('ai-close-btn');
+  const messagesEl  = document.getElementById('ai-chat-messages');
+  const inputEl     = document.getElementById('ai-chat-input');
+  const sendBtn     = document.getElementById('ai-send-btn');
+  const badge       = document.getElementById('ai-bubble-badge');
+  const suggestionsEl = document.getElementById('ai-suggestions');
+
+  // ── Toggle ──
+  function openChat() {
+    chatWindow.classList.add('open');
+    bubbleBtn.classList.add('open');
+    bubbleBtn.innerHTML = '<i class="fas fa-times"></i>';
+    badge.classList.remove('show');
+    setTimeout(() => inputEl.focus(), 220);
+  }
+  function closeChat() {
+    chatWindow.classList.remove('open');
+    bubbleBtn.classList.remove('open');
+    bubbleBtn.innerHTML = '<i class="fas fa-seedling"></i><span id="ai-bubble-badge" class="' + (badge.classList.contains('show') ? 'show' : '') + '">1</span>';
+  }
+  bubbleBtn.addEventListener('click', () => chatWindow.classList.contains('open') ? closeChat() : openChat());
+  closeBtn.addEventListener('click', closeChat);
+
+  // ── Welcome message ──
+  function addMessage(role, text, skipHistory) {
+    if (!skipHistory) messages.push({ role, content: text });
+    const now = new Date().toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Manila' });
+    const isUser = role === 'user';
+    const div = document.createElement('div');
+    div.className = 'ai-msg' + (isUser ? ' user' : '');
+    div.innerHTML = `
+      <div class="ai-msg-avatar">${isUser ? '<i class="fas fa-user"></i>' : '🍄'}</div>
+      <div>
+        <div class="ai-msg-bubble">${escapeHtml(text).replace(/\n/g, '<br>')}</div>
+        <div class="ai-msg-time">${now}</div>
+      </div>`;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return div;
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function showTyping() {
+    const div = document.createElement('div');
+    div.className = 'ai-msg';
+    div.id = 'ai-typing';
+    div.innerHTML = `
+      <div class="ai-msg-avatar">🍄</div>
+      <div><div class="ai-msg-bubble"><div class="ai-typing-dots"><span></span><span></span><span></span></div></div></div>`;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+  function hideTyping() {
+    const el = document.getElementById('ai-typing');
+    if (el) el.remove();
+  }
+
+  // ── API Call ──
+  async function sendToGroq(userText) {
+    if (isTyping) return;
+    isTyping = true;
+    sendBtn.disabled = true;
+    suggestionsEl.style.display = 'none';
+
+    addMessage('user', userText);
+    showTyping();
+
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + GROQ_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: GROQ_MODEL,
+          max_tokens: 512,
+          temperature: 0.7,
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            ...messages
+          ]
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error?.message || 'Groq API error ' + res.status);
+      }
+
+      const data = await res.json();
+      const reply = data.choices?.[0]?.message?.content?.trim() || 'Sorry, I could not generate a response.';
+      hideTyping();
+      addMessage('assistant', reply);
+
+    } catch (e) {
+      hideTyping();
+      addMessage('assistant', '⚠️ ' + (e.message || 'Could not connect. Check your API key or internet connection.'), true);
+    }
+
+    isTyping = false;
+    sendBtn.disabled = false;
+    inputEl.focus();
+  }
+
+  // ── Send handlers ──
+  function handleSend() {
+    const text = inputEl.value.trim();
+    if (!text || isTyping) return;
+    inputEl.value = '';
+    inputEl.style.height = 'auto';
+    sendToGroq(text);
+  }
+
+  sendBtn.addEventListener('click', handleSend);
+  inputEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  });
+  // Auto-resize textarea
+  inputEl.addEventListener('input', function () {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 80) + 'px';
+  });
+
+  // ── Suggestion buttons ──
+  suggestionsEl.querySelectorAll('.ai-suggestion-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const msg = btn.dataset.msg;
+      if (msg) sendToGroq(msg);
+    });
+  });
+
+  // ── Init welcome message ──
+  addMessage('assistant', 'Hi! 👋 I\'m your MushroomOS Assistant. Ask me anything about mushroom cultivation, sensor readings, or farm management!', true);
+  // Show badge after 2s to draw attention
+  setTimeout(() => badge.classList.add('show'), 2000);
+
+})();
+</script>
 </body>
 </html>
