@@ -50,9 +50,9 @@ $conn->query("CREATE TABLE IF NOT EXISTS device_logs (
 $conn->query("ALTER TABLE device_logs MODIFY COLUMN trigger_type
               ENUM('auto','manual','schedule','emergency','fault') NOT NULL DEFAULT 'manual'");
 
-function _logDev($conn, $device, $action, $by, $detail) {
-    $s = $conn->prepare("INSERT INTO device_logs (device,action,trigger_type,trigger_detail) VALUES (?,?,?,?)");
-    if ($s) { $s->bind_param("ssss",$device,$action,$by,$detail); $s->execute(); $s->close(); }
+function _logDev($conn, $device, $action, $by, $detail, $durationSeconds = null) {
+    $s = $conn->prepare("INSERT INTO device_logs (device,action,trigger_type,trigger_detail,duration_seconds) VALUES (?,?,?,?,?)");
+    if ($s) { $s->bind_param("ssssi",$device,$action,$by,$detail,$durationSeconds); $s->execute(); $s->close(); }
 }
 
 function buildResponse($conn) {
@@ -87,7 +87,7 @@ if (isset($input['mode'])) {
             $row = $conn->query("SELECT controlled_by FROM device_state WHERE device='{$dev}' LIMIT 1")->fetch_assoc();
             if (($row['controlled_by'] ?? '') === 'manual') {
                 $conn->query("UPDATE device_state SET status='off', controlled_by='auto', locked_until=0 WHERE device='{$dev}'");
-                _logDev($conn, $dev, 'OFF', 'auto', 'Switched to Auto Mode — manual devices reset to OFF');
+                _logDev($conn, $dev, 'OFF', 'auto', 'Switched to Auto Mode — manual devices reset to OFF', null);
             }
         }
     }
@@ -126,7 +126,19 @@ if (isset($input['device'])) {
                   SET status='{$newStatus}', controlled_by='manual', locked_until=0
                   WHERE device='{$dev}'");
     $action = $newStatus === 'on' ? 'ON' : 'OFF';
-    _logDev($conn, $dev, $action, 'manual', 'Manual toggle via dashboard');
+                // Calculate duration for manual devices being turned off
+                $durationSeconds = null;
+                if ($newStatus === 'off') {
+                    $lastOn = $conn->query("SELECT logged_at FROM device_logs
+                                            WHERE device='{$dev}' AND action='ON'
+                                            ORDER BY logged_at DESC LIMIT 1");
+                    if ($lastOn && $lastOn->num_rows > 0) {
+                        $onSince = new DateTime($lastOn->fetch_assoc()['logged_at']);
+                        $now = new DateTime();
+                        $durationSeconds = $now->getTimestamp() - $onSince->getTimestamp();
+                    }
+                }
+                _logDev($conn, $dev, $action, 'manual', 'Manual toggle via dashboard', $durationSeconds);
     echo json_encode(['success'=>true,'data'=>buildResponse($conn)]);
     exit;
 }
@@ -158,7 +170,19 @@ foreach ($allowed as $dev) {
                       SET status='{$val}', controlled_by='{$triggerBy}', locked_until={$lockClear}
                       WHERE device='{$dev}'");
     }
-    _logDev($conn, $dev, $action, $triggerBy, ucfirst($triggerBy) . " set {$dev} {$action}");
+    // Calculate duration when turning devices off
+    $durationSeconds = null;
+    if ($val === 'off') {
+        $lastOn = $conn->query("SELECT logged_at FROM device_logs
+                                WHERE device='{$dev}' AND action='ON'
+                                ORDER BY logged_at DESC LIMIT 1");
+        if ($lastOn && $lastOn->num_rows > 0) {
+            $onSince = new DateTime($lastOn->fetch_assoc()['logged_at']);
+            $now = new DateTime();
+            $durationSeconds = $now->getTimestamp() - $onSince->getTimestamp();
+        }
+    }
+    _logDev($conn, $dev, $action, $triggerBy, ucfirst($triggerBy) . " set {$dev} {$action}", $durationSeconds);
     $changed = true;
 }
 

@@ -1,6 +1,7 @@
 <?php
 include('includes/auth_check.php');
 include('includes/db_connect.php');
+include_once('ai_prompt_helper.php');
 if (session_status() === PHP_SESSION_NONE) session_start();
 
 date_default_timezone_set('Asia/Manila');
@@ -154,6 +155,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_camera'])) {
     }
 }
 
+// ── Save AI Settings ──
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_ai_settings'])) {
+    if (!$isOwner) { $errors[] = 'Access denied.'; } else {
+        $api_key = trim($_POST['groq_api_key'] ?? '');
+        if (!empty($api_key)) {
+            $key = 'groq_api_key';
+            $s = $conn->prepare("INSERT INTO system_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
+            if ($s) { $s->bind_param("ss", $key, $api_key); $s->execute(); $s->close(); }
+        }
+        if (empty($errors)) $success = 'AI settings saved.';
+    }
+}
+
 // ── Fetch current settings for display ──
 $thresholds = [];
 $r = $conn->query("SELECT * FROM alert_thresholds");
@@ -169,6 +183,38 @@ $ss = [];
 $r = $conn->query("SELECT setting_key,setting_value FROM system_settings");
 if ($r) while ($row = $r->fetch_assoc()) $ss[$row['setting_key']] = $row['setting_value'];
 function ss($ss, $k, $default = '') { return htmlspecialchars($ss[$k] ?? $default); }
+
+// ── Fetch real-time system data for AI Assistant ──
+$current_temp = null;
+$current_humidity = null;
+$active_devices = [];
+$recent_alerts = [];
+
+// Get latest sensor readings
+$r = $conn->query("SELECT temperature, humidity FROM sensor_data ORDER BY logged_at DESC LIMIT 1");
+if ($r && $row = $r->fetch_assoc()) {
+    $current_temp = $row['temperature'];
+    $current_humidity = $row['humidity'];
+} else {
+    // No sensor data - show message
+    $current_temp = 'No sensor data';
+    $current_humidity = 'No sensor data';
+}
+
+// Get active devices
+$r = $conn->query("SELECT device FROM device_state WHERE status='ON'");
+if ($r) {
+    while ($row = $r->fetch_assoc()) {
+        $active_devices[] = $row['device'];
+    }
+}
+
+// Get recent alerts (last 24 hours)
+$r = $conn->query("SELECT COUNT(*) as count FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency','fault')");
+if ($r && $row = $r->fetch_assoc()) {
+    $recent_alerts = $row['count'] . ' alerts in last 24 hours';
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -484,6 +530,31 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
       </div>
     </div>
 
+    <!-- AI Assistant Settings -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title"><span class="icon icon-blue"><i class="fas fa-robot"></i></span> AI Assistant</div>
+        <span style="font-size:11px;color:var(--muted);">Groq API configuration</span>
+      </div>
+      <?php if($isOwner): ?>
+      <form method="POST">
+        <input type="hidden" name="save_ai_settings" value="1">
+        <div style="padding:20px;">
+          <div class="form-group">
+            <label>Groq API Key</label>
+            <input type="password" name="groq_api_key" value="<?= htmlspecialchars(ss($ss, 'groq_api_key', '')) ?>" placeholder="Enter your Groq API key">
+            <div style="font-size:11px;color:var(--muted);margin-top:4px;">
+              Get your free API key at <a href="https://console.groq.com" target="_blank" style="color:var(--blue);">console.groq.com</a>
+            </div>
+          </div>
+        </div>
+        <div style="padding:0 20px 20px;">
+          <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> <span class="btn-label">Save AI Settings</span></button>
+        </div>
+        <?php endif; ?>
+      </form>
+    </div>
+
   </div>
 </main>
 
@@ -709,35 +780,17 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
 <script>
 (function () {
   // ── CONFIG ──
-  // Replace with your Groq API key (get one free at console.groq.com)
-  const GROQ_API_KEY = 'YOUR_GROQ_API_KEY_HERE';
+  const GROQ_API_KEY = '<?= htmlspecialchars(ss($ss, 'groq_api_key', '')) ?>';
   const GROQ_MODEL   = 'llama-3.3-70b-versatile';
+  
+  // DEBUG: Check API key loading
+  console.log('=== AI Assistant Debug ===');
+  console.log('API Key loaded:', GROQ_API_KEY);
+  console.log('API Key length:', GROQ_API_KEY.length);
+  console.log('API Key format:', GROQ_API_KEY.startsWith('gsk_') ? 'VALID' : 'INVALID');
+  console.log('========================');
 
-  const SYSTEM_PROMPT = `You are MushroomOS Assistant, an expert AI embedded inside MushroomOS — a smart mushroom cultivation monitoring system for J.WHO Mushroom Farm.
-
-SYSTEM DETAILS:
-- Farm: J.WHO Mushroom Farm
-- System: MushroomOS (Web-based monitoring system)
-- Location: Philippines (Asia/Manila timezone)
-- Sensors: Temperature & Humidity monitoring
-- Devices: Mist system, Fan, Heater, Sprayer, Exhaust
-- Camera: ESP32-CAM for visual monitoring
-- Database: MySQL for data storage
-- Features: Real-time monitoring, alerts, automation, reports
-- Ideal ranges: Temperature 22-28°C, Humidity 85-95%
-- Alert system: Email notifications for out-of-range conditions
-- Data retention: 90 days
-
-You help farm operators with:
-- Mushroom cultivation advice (oyster, shiitake, etc.)
-- Interpreting sensor data (temperature & humidity readings)
-- Diagnosing problems (contamination, poor growth, etc.)
-- Automation & device control suggestions (mist, fan, heater, sprayer, exhaust)
-- Harvest timing and post-harvest tips
-- General mushroom farming best practices
-- Understanding MushroomOS features and navigation
-
-Be concise, practical, and friendly. Use short paragraphs. When giving ranges or numbers, be specific. Always relate answers to mushroom farming context and mention relevant MushroomOS features when helpful.`;
+  const SYSTEM_PROMPT = `<?= getAISystemPrompt($conn, $ss) ?>`;
 
   // ── State ──
   const messages = []; // { role, content }

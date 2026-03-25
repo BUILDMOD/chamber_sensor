@@ -1,6 +1,7 @@
 <?php 
 include('includes/auth_check.php');
 include('includes/db_connect.php');
+include_once('ai_prompt_helper.php');
 include_once('send_email.php');
 
 if (session_status() === PHP_SESSION_NONE) session_start();
@@ -41,6 +42,13 @@ $stmt = $conn->prepare("SELECT id, first_name, middle_name, last_name, suffix, f
 if ($stmt) { $stmt->bind_param("s", $currentUsername); $stmt->execute(); $res = $stmt->get_result(); if ($res && $res->num_rows > 0) $user = $res->fetch_assoc(); $stmt->close(); }
 
 $errors = []; $success = "";
+
+// Get latest sensor data
+$latest_sensor = null;
+$result = $conn->query("SELECT temperature, humidity, timestamp FROM sensor_data ORDER BY timestamp DESC LIMIT 1");
+if ($result && $result->num_rows > 0) {
+    $latest_sensor = $result->fetch_assoc();
+}
 
 // ADD USER
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
@@ -311,12 +319,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['change_password']) &&
 
 date_default_timezone_set('Asia/Manila');
 $server_ts_ms = round(microtime(true) * 1000);
+
+// Load system settings for AI Assistant
+$ss = [];
+$r = $conn->query("SELECT setting_key,setting_value FROM system_settings");
+if ($r) while ($row = $r->fetch_assoc()) $ss[$row['setting_key']] = $row['setting_value'];
 $server_time_formatted = date('M j, Y — h:i:s A');
 
 // Latest sensor
-$latest_sensor = null;
-$ls = $conn->query("SELECT temperature, humidity, timestamp FROM sensor_data ORDER BY id DESC LIMIT 1");
-if ($ls && $ls->num_rows > 0) $latest_sensor = $ls->fetch_assoc();
+$r = $conn->query("SELECT temperature, humidity FROM sensor_data ORDER BY logged_at DESC LIMIT 1");
+if ($r && $row = $r->fetch_assoc()) {
+    $current_temp = $row['temperature'];
+    $current_humidity = $row['humidity'];
+} else {
+    // No sensor data - show message
+    $current_temp = 'No sensor data';
+    $current_humidity = 'No sensor data';
+}
 
 // Pending users
 $pending_users = [];
@@ -1463,35 +1482,10 @@ document.getElementById('editUserForm')?.addEventListener('submit', () => {
 <script>
 (function () {
   // ── CONFIG ──
-  // Replace with your Groq API key (get one free at console.groq.com)
-  const GROQ_API_KEY = 'YOUR_GROQ_API_KEY_HERE';
+  const GROQ_API_KEY = '<?= htmlspecialchars(ss($ss, 'groq_api_key', '')) ?>';
   const GROQ_MODEL   = 'llama-3.3-70b-versatile';
 
-  const SYSTEM_PROMPT = `You are MushroomOS Assistant, an expert AI embedded inside MushroomOS — a smart mushroom cultivation monitoring system for J.WHO Mushroom Farm.
-
-SYSTEM DETAILS:
-- Farm: J.WHO Mushroom Farm
-- System: MushroomOS (Web-based monitoring system)
-- Location: Philippines (Asia/Manila timezone)
-- Sensors: Temperature & Humidity monitoring
-- Devices: Mist system, Fan, Heater, Sprayer, Exhaust
-- Camera: ESP32-CAM for visual monitoring
-- Database: MySQL for data storage
-- Features: Real-time monitoring, alerts, automation, reports
-- Ideal ranges: Temperature 22-28°C, Humidity 85-95%
-- Alert system: Email notifications for out-of-range conditions
-- Data retention: 90 days
-
-You help farm operators with:
-- Mushroom cultivation advice (oyster, shiitake, etc.)
-- Interpreting sensor data (temperature & humidity readings)
-- Diagnosing problems (contamination, poor growth, etc.)
-- Automation & device control suggestions (mist, fan, heater, sprayer, exhaust)
-- Harvest timing and post-harvest tips
-- General mushroom farming best practices
-- Understanding MushroomOS features and navigation
-
-Be concise, practical, and friendly. Use short paragraphs. When giving ranges or numbers, be specific. Always relate answers to mushroom farming context and mention relevant MushroomOS features when helpful.`;
+  const SYSTEM_PROMPT = `<?= getAISystemPrompt($conn, $ss) ?>`;
 
   // ── State ──
   const messages = []; // { role, content }

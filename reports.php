@@ -1,6 +1,7 @@
 <?php
 include('includes/auth_check.php');
 include('includes/db_connect.php');
+include_once('ai_prompt_helper.php');
 
 $createTableSql = "CREATE TABLE IF NOT EXISTS sensor_summary (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -62,6 +63,17 @@ $result = $conn->query($sql);
 $data = [];
 if ($result && $result->num_rows > 0)
     while ($row = $result->fetch_assoc()) $data[] = $row;
+
+// Get latest sensor readings
+$r = $conn->query("SELECT temperature, humidity FROM sensor_data ORDER BY logged_at DESC LIMIT 1");
+if ($r && $row = $r->fetch_assoc()) {
+    $current_temp = $row['temperature'];
+    $current_humidity = $row['humidity'];
+} else {
+    // No sensor data - show message
+    $current_temp = 'No sensor data';
+    $current_humidity = 'No sensor data';
+}
 
 foreach ($data as $row) {
     $ins = $conn->prepare("INSERT IGNORE INTO sensor_summary (summary_date,avg_temp,min_temp,max_temp,avg_hum,min_hum,max_hum,readings) VALUES (?,?,?,?,?,?,?,?)");
@@ -1061,35 +1073,10 @@ function navUrl($view, $year, $month, $day) {
 <script>
 (function () {
   // ── CONFIG ──
-  // Replace with your Groq API key (get one free at console.groq.com)
-  const GROQ_API_KEY = 'YOUR_GROQ_API_KEY_HERE';
+  const GROQ_API_KEY = '<?= htmlspecialchars(ss($ss, 'groq_api_key', '')) ?>';
   const GROQ_MODEL   = 'llama-3.3-70b-versatile';
 
-  const SYSTEM_PROMPT = `You are MushroomOS Assistant, an expert AI embedded inside MushroomOS — a smart mushroom cultivation monitoring system for J.WHO Mushroom Farm.
-
-SYSTEM DETAILS:
-- Farm: J.WHO Mushroom Farm
-- System: MushroomOS (Web-based monitoring system)
-- Location: Philippines (Asia/Manila timezone)
-- Sensors: Temperature & Humidity monitoring
-- Devices: Mist system, Fan, Heater, Sprayer, Exhaust
-- Camera: ESP32-CAM for visual monitoring
-- Database: MySQL for data storage
-- Features: Real-time monitoring, alerts, automation, reports
-- Ideal ranges: Temperature 22-28°C, Humidity 85-95%
-- Alert system: Email notifications for out-of-range conditions
-- Data retention: 90 days
-
-You help farm operators with:
-- Mushroom cultivation advice (oyster, shiitake, etc.)
-- Interpreting sensor data (temperature & humidity readings)
-- Diagnosing problems (contamination, poor growth, etc.)
-- Automation & device control suggestions (mist, fan, heater, sprayer, exhaust)
-- Harvest timing and post-harvest tips
-- General mushroom farming best practices
-- Understanding MushroomOS features and navigation
-
-Be concise, practical, and friendly. Use short paragraphs. When giving ranges or numbers, be specific. Always relate answers to mushroom farming context and mention relevant MushroomOS features when helpful.`;
+  const SYSTEM_PROMPT = `<?= getAISystemPrompt($conn, $ss) ?>`;
 
   // ── State ──
   const messages = []; // { role, content }

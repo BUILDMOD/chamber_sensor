@@ -29,10 +29,10 @@ $conn->query("CREATE TABLE IF NOT EXISTS device_logs (
     logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )");
 
-function logDevice($conn, $device, $action, $triggerType, $detail) {
-    $stmt = $conn->prepare("INSERT INTO device_logs (device,action,trigger_type,trigger_detail) VALUES (?,?,?,?)");
+function logDevice($conn, $device, $action, $triggerType, $detail, $durationSeconds = null) {
+    $stmt = $conn->prepare("INSERT INTO device_logs (device,action,trigger_type,trigger_detail,duration_seconds) VALUES (?,?,?,?,?)");
     if ($stmt) { 
-        $stmt->bind_param("ssss",$device,$action,$triggerType,$detail); 
+        $stmt->bind_param("ssssi",$device,$action,$triggerType,$detail,$durationSeconds); 
         $stmt->execute(); 
         $stmt->close(); 
     }
@@ -54,11 +54,11 @@ function deviceOn($conn, $device, $by, $lockSeconds = 0) {
     logDevice($conn, $device, 'ON', $by, "Server schedule: Turned ON by $by" . ($lockSeconds > 0 ? " (locked {$lockSeconds}s)" : ""));
 }
 
-function deviceOff($conn, $device, $by, $detail = '') {
+function deviceOff($conn, $device, $by, $detail = '', $durationSeconds = null) {
     $conn->query("UPDATE device_state
                   SET status='off', controlled_by='$by', locked_until=0
                   WHERE device='$device'");
-    logDevice($conn, $device, 'OFF', $by, $detail ?: "Server schedule: Turned OFF by $by");
+    logDevice($conn, $device, 'OFF', $by, $detail ?: "Server schedule: Turned OFF by $by", $durationSeconds);
 }
 
 // Get current time and day
@@ -143,7 +143,17 @@ if ($r) {
         $lockedUntil = (int)($row['locked_until'] ?? 0);
         if ($lockedUntil > 0 && $lockedUntil <= time()) {
             // Duration expired, turn OFF
-            deviceOff($conn, 'sprayer', 'schedule', 'Server schedule: Duration completed');
+            $lastOn = $conn->query("SELECT logged_at FROM device_logs
+                                    WHERE device='sprayer' AND action='ON'
+                                    ORDER BY logged_at DESC LIMIT 1");
+            $durationSeconds = null;
+            if ($lastOn && $lastOn->num_rows > 0) {
+                $onSince = new DateTime($lastOn->fetch_assoc()['logged_at']);
+                $now = new DateTime();
+                $durationSeconds = $now->getTimestamp() - $onSince->getTimestamp();
+            }
+            
+            deviceOff($conn, 'sprayer', 'schedule', 'Server schedule: Duration completed', $durationSeconds);
             echo "Sprayer turned OFF by schedule - duration completed\n";
         }
     }

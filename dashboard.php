@@ -2,6 +2,7 @@
 // dashboard_redesign.php
 include('includes/auth_check.php');
 include('includes/db_connect.php');
+include_once('ai_prompt_helper.php');
 
 $createMushroomTableSql = "CREATE TABLE IF NOT EXISTS mushroom_records (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -28,6 +29,44 @@ $r_ip = $conn->query("SELECT setting_value FROM system_settings WHERE setting_ke
 if ($r_ip && $row_ip = $r_ip->fetch_assoc()) {
     $esp32cam_ip = $row_ip['setting_value'];
 }
+
+// Load system settings for AI
+$ss = [];
+$r = $conn->query("SELECT setting_key,setting_value FROM system_settings");
+if ($r) while ($row = $r->fetch_assoc()) $ss[$row['setting_key']] = $row['setting_value'];
+function ss($ss, $k, $default = '') { return htmlspecialchars($ss[$k] ?? $default); }
+
+// Get real-time system data for AI Assistant
+$current_temp = null;
+$current_humidity = null;
+$active_devices = [];
+$recent_alerts = [];
+
+// Get latest sensor readings
+$r = $conn->query("SELECT temperature, humidity FROM sensor_data ORDER BY logged_at DESC LIMIT 1");
+if ($r && $row = $r->fetch_assoc()) {
+    $current_temp = $row['temperature'];
+    $current_humidity = $row['humidity'];
+} else {
+    // No sensor data - show message
+    $current_temp = 'No sensor data';
+    $current_humidity = 'No sensor data';
+}
+
+// Get active devices
+$r = $conn->query("SELECT device FROM device_state WHERE status='ON'");
+if ($r) {
+    while ($row = $r->fetch_assoc()) {
+        $active_devices[] = $row['device'];
+    }
+}
+
+// Get recent alerts (last 24 hours)
+$r = $conn->query("SELECT COUNT(*) as count FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency','fault')");
+if ($r && $row = $r->fetch_assoc()) {
+    $recent_alerts = $row['count'] . ' alerts in last 24 hours';
+}
+
 $server_ts_ms = round(microtime(true) * 1000);
 $server_time_formatted = date('M j, Y — h:i:s A');
 
@@ -1937,35 +1976,17 @@ bindModal(['alertInfoIcon'],'alertInfoModal');
 <script>
 (function () {
   // ── CONFIG ──
-  // Replace with your Groq API key (get one free at console.groq.com)
-  const GROQ_API_KEY = 'YOUR_GROQ_API_KEY_HERE';
+  const GROQ_API_KEY = '<?= htmlspecialchars(ss($ss, 'groq_api_key', '')) ?>';
   const GROQ_MODEL   = 'llama-3.3-70b-versatile';
+  
+  // DEBUG: Check API key loading
+  console.log('=== AI Assistant Debug ===');
+  console.log('API Key loaded:', GROQ_API_KEY);
+  console.log('API Key length:', GROQ_API_KEY.length);
+  console.log('API Key format:', GROQ_API_KEY.startsWith('gsk_') ? 'VALID' : 'INVALID');
+  console.log('========================');
 
-  const SYSTEM_PROMPT = `You are MushroomOS Assistant, an expert AI embedded inside MushroomOS — a smart mushroom cultivation monitoring system for J.WHO Mushroom Farm.
-
-SYSTEM DETAILS:
-- Farm: J.WHO Mushroom Farm
-- System: MushroomOS (Web-based monitoring system)
-- Location: Philippines (Asia/Manila timezone)
-- Sensors: Temperature & Humidity monitoring
-- Devices: Mist system, Fan, Heater, Sprayer, Exhaust
-- Camera: ESP32-CAM for visual monitoring
-- Database: MySQL for data storage
-- Features: Real-time monitoring, alerts, automation, reports
-- Ideal ranges: Temperature 22-28°C, Humidity 85-95%
-- Alert system: Email notifications for out-of-range conditions
-- Data retention: 90 days
-
-You help farm operators with:
-- Mushroom cultivation advice (oyster, shiitake, etc.)
-- Interpreting sensor data (temperature & humidity readings)
-- Diagnosing problems (contamination, poor growth, etc.)
-- Automation & device control suggestions (mist, fan, heater, sprayer, exhaust)
-- Harvest timing and post-harvest tips
-- General mushroom farming best practices
-- Understanding MushroomOS features and navigation
-
-Be concise, practical, and friendly. Use short paragraphs. When giving ranges or numbers, be specific. Always relate answers to mushroom farming context and mention relevant MushroomOS features when helpful.`;
+  const SYSTEM_PROMPT = `<?= getAISystemPrompt($conn, $ss) ?>`;
 
   // ── State ──
   const messages = []; // { role, content }

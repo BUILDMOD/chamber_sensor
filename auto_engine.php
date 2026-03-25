@@ -85,14 +85,14 @@ function deviceOn($conn, $device, $by, $lockSeconds = 0) {
     _logDevice($conn, $device, 'ON', $by, "Turned ON by {$by}" . ($lockSeconds > 0 ? " (locked {$lockSeconds}s)" : ""));
 }
 
-function deviceOff($conn, $device, $by, $detail = '') {
+function deviceOff($conn, $device, $by, $detail = '', $durationSeconds = null) {
     $conn->query("UPDATE device_state
                   SET status='off', controlled_by='{$by}', locked_until=0
                   WHERE device='{$device}'");
-    _logDevice($conn, $device, 'OFF', $by, $detail ?: "Turned OFF by {$by}");
+    _logDevice($conn, $device, 'OFF', $by, $detail ?: "Turned OFF by {$by}", $durationSeconds);
 }
 
-function _logDevice($conn, $device, $action, $triggerType, $detail) {
+function _logDevice($conn, $device, $action, $triggerType, $detail, $durationSeconds = null) {
     $conn->query("CREATE TABLE IF NOT EXISTS device_logs (
         id INT AUTO_INCREMENT PRIMARY KEY,
         device VARCHAR(30) NOT NULL,
@@ -104,12 +104,12 @@ function _logDevice($conn, $device, $action, $triggerType, $detail) {
     )");
     $conn->query("ALTER TABLE device_logs MODIFY COLUMN trigger_type
                   ENUM('auto','manual','schedule','emergency','fault') NOT NULL DEFAULT 'auto'");
-    $stmt = $conn->prepare("INSERT INTO device_logs (device,action,trigger_type,trigger_detail) VALUES (?,?,?,?)");
-    if ($stmt) { $stmt->bind_param("ssss",$device,$action,$triggerType,$detail); $stmt->execute(); $stmt->close(); }
+    $stmt = $conn->prepare("INSERT INTO device_logs (device,action,trigger_type,trigger_detail,duration_seconds) VALUES (?,?,?,?,?)");
+    if ($stmt) { $stmt->bind_param("ssssi",$device,$action,$triggerType,$detail,$durationSeconds); $stmt->execute(); $stmt->close(); }
 }
 
-function logDevice($conn, $device, $action, $triggerType, $detail) {
-    _logDevice($conn, $device, $action, $triggerType, $detail);
+function logDevice($conn, $device, $action, $triggerType, $detail, $durationSeconds = null) {
+    _logDevice($conn, $device, $action, $triggerType, $detail, $durationSeconds);
 }
 
 function _logAlert($conn, $type, $severity, $message, $value) {
@@ -236,7 +236,18 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
             foreach ($states as $dev => $state) {
                 if ($dev === 'sprayer') continue; // sprayer is schedule-controlled
                 if ($state['status'] === 'on' && !isLocked($state) && $state['controlled_by'] === 'auto') {
-                    deviceOff($conn, $dev, 'auto', 'Sensor offline — auto devices turned OFF');
+                    // Calculate duration before turning off
+                    $lastOn = $conn->query("SELECT logged_at FROM device_logs
+                                            WHERE device='{$dev}' AND action='ON'
+                                            ORDER BY logged_at DESC LIMIT 1");
+                    $durationSeconds = null;
+                    if ($lastOn && $lastOn->num_rows > 0) {
+                        $onSince = new DateTime($lastOn->fetch_assoc()['logged_at']);
+                        $now = new DateTime($timestamp);
+                        $durationSeconds = $now->getTimestamp() - $onSince->getTimestamp();
+                    }
+                    
+                    deviceOff($conn, $dev, 'auto', 'Sensor offline — auto devices turned OFF', $durationSeconds);
                 }
             }
         }
@@ -271,8 +282,18 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
     foreach ($emergencies as $device => $reason) {
         if (($states[$device]['status'] ?? 'off') === 'on') {
             // Emergency overrides ALL locks — including schedule locks
+            $lastOn = $conn->query("SELECT logged_at FROM device_logs
+                                    WHERE device='{$device}' AND action='ON'
+                                    ORDER BY logged_at DESC LIMIT 1");
+            $durationSeconds = null;
+            if ($lastOn && $lastOn->num_rows > 0) {
+                $onSince = new DateTime($lastOn->fetch_assoc()['logged_at']);
+                $now = new DateTime($timestamp);
+                $durationSeconds = $now->getTimestamp() - $onSince->getTimestamp();
+            }
+            
             $conn->query("UPDATE device_state SET status='off', controlled_by='emergency', locked_until=0 WHERE device='{$device}'");
-            _logDevice($conn, $device, 'OFF', 'emergency', $reason);
+            _logDevice($conn, $device, 'OFF', 'emergency', $reason, $durationSeconds);
             _logAlert($conn, 'device', 'critical', $reason,
                 in_array($device, ['heater','fan']) ? $temperature : $humidity);
             $states[$device]['status']      = 'off';
@@ -343,8 +364,10 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
                 $existingFault->close();
             }
             
+            $durationSeconds = round($onMinutes * 60);
+            
             $conn->query("UPDATE device_state SET status='off', controlled_by='auto', locked_until=0 WHERE device='{$device}'");
-            _logDevice($conn, $device, 'OFF', 'fault', $faultReason);
+            _logDevice($conn, $device, 'OFF', 'fault', $faultReason, $durationSeconds);
             _logAlert($conn, 'device', 'critical', $faultReason, $sensorVal);
             $conn->query("CREATE TABLE IF NOT EXISTS device_faults (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -402,7 +425,18 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
                 // Conflict guard: turn off the opposing device first
                 $opp = $DEVICE_CONFLICTS[$device] ?? null;
                 if ($opp && ($states[$opp]['status'] ?? 'off') === 'on' && !isLocked($states[$opp])) {
-                    deviceOff($conn, $opp, 'auto', "Conflict: {$device} turning ON, {$opp} forced OFF");
+                    // Calculate duration before turning off conflicting device
+                    $lastOn = $conn->query("SELECT logged_at FROM device_logs
+                                            WHERE device='{$opp}' AND action='ON'
+                                            ORDER BY logged_at DESC LIMIT 1");
+                    $durationSeconds = null;
+                    if ($lastOn && $lastOn->num_rows > 0) {
+                        $onSince = new DateTime($lastOn->fetch_assoc()['logged_at']);
+                        $now = new DateTime($timestamp);
+                        $durationSeconds = $now->getTimestamp() - $onSince->getTimestamp();
+                    }
+                    
+                    deviceOff($conn, $opp, 'auto', "Conflict: {$device} turning ON, {$opp} forced OFF", $durationSeconds);
                     $states[$opp]['status'] = 'off';
                 }
                 deviceOn($conn, $device, 'auto');
@@ -410,7 +444,17 @@ function runAutoEngine($conn, $temperature, $humidity, $timestamp) {
                 _logDevice($conn, $device, 'ON', 'auto', "Auto: {$sensor} {$operator} {$threshold} (now {$sensorVal})");
 
             } elseif (!$condMet && $state['status'] === 'on' && $state['controlled_by'] === 'auto') {
-                deviceOff($conn, $device, 'auto', "Auto: {$sensor} back in range (now {$sensorVal}, threshold {$threshold})");
+                $lastOn = $conn->query("SELECT logged_at FROM device_logs
+                                        WHERE device='{$device}' AND action='ON'
+                                        ORDER BY logged_at DESC LIMIT 1");
+                $durationSeconds = null;
+                if ($lastOn && $lastOn->num_rows > 0) {
+                    $onSince = new DateTime($lastOn->fetch_assoc()['logged_at']);
+                    $now = new DateTime($timestamp);
+                    $durationSeconds = $now->getTimestamp() - $onSince->getTimestamp();
+                }
+                
+                deviceOff($conn, $device, 'auto', "Auto: {$sensor} back in range (now {$sensorVal}, threshold {$threshold})", $durationSeconds);
                 $states[$device]['status'] = 'off';
             }
         }
