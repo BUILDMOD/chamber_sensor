@@ -326,6 +326,8 @@ $r = $conn->query("SELECT setting_key,setting_value FROM system_settings");
 if ($r) while ($row = $r->fetch_assoc()) $ss[$row['setting_key']] = $row['setting_value'];
 $server_time_formatted = date('M j, Y — h:i:s A');
 
+function ss($ss, $k, $default = '') { return htmlspecialchars($ss[$k] ?? $default); }
+
 // Latest sensor
 $r = $conn->query("SELECT temperature, humidity FROM sensor_data ORDER BY logged_at DESC LIMIT 1");
 if ($r && $row = $r->fetch_assoc()) {

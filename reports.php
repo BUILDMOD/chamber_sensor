@@ -17,6 +17,13 @@ date_default_timezone_set('Asia/Manila');
 $server_ts_ms = round(microtime(true) * 1000);
 $server_time_formatted = date('M j, Y — h:i:s A');
 
+// Load system settings for AI Assistant
+$ss = [];
+$r = $conn->query("SELECT setting_key,setting_value FROM system_settings");
+if ($r) while ($row = $r->fetch_assoc()) $ss[$row['setting_key']] = $row['setting_value'];
+
+function ss($ss, $k, $default = '') { return htmlspecialchars($ss[$k] ?? $default); }
+
 $displayName = 'Menu';
 if (isset($_SESSION) && !empty($_SESSION['fullname'])) $displayName = $_SESSION['fullname'];
 elseif (isset($_SESSION) && !empty($_SESSION['user'])) $displayName = $_SESSION['user'];
