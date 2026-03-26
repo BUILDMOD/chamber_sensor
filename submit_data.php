@@ -58,6 +58,11 @@ if ($stmt->execute()) {
     require_once 'auto_engine.php';
     runAutoEngine($conn, floatval($temperature), floatval($humidity), $timestamp);
 
+    // ── Run sprayer schedule check on every sensor submission ──
+    // ESP32 calls submit_data.php every 8 seconds — this guarantees schedule_runner
+    // fires within 8 seconds of the scheduled time (no cron needed)
+    require_once 'schedule_runner.php';
+
     $conn->query("CREATE TABLE IF NOT EXISTS alert_thresholds (
         id INT AUTO_INCREMENT PRIMARY KEY,
         metric VARCHAR(30) NOT NULL UNIQUE,

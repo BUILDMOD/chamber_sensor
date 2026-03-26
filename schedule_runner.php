@@ -67,15 +67,7 @@ $currentDay = strtolower($now->format('l')); // monday, tuesday, etc.
 $currentTime = $now->format('H:i:s');
 $currentWeekday = $now->format('N'); // 1=Monday, 7=Sunday
 
-// Get system mode
-$modeRow = $conn->query("SELECT mode FROM system_mode WHERE id=1 LIMIT 1")->fetch_assoc();
-$manualMode = ($modeRow['mode'] ?? 'auto') === 'manual';
-
-// Only run schedules if not in manual mode
-if ($manualMode) {
-    echo "System in manual mode - skipping schedule execution\n";
-    exit;
-}
+// Schedules run regardless of system mode - they are independent time-based tasks
 
 // Get active sprayer schedules
 $schedules = [];
@@ -114,24 +106,29 @@ foreach ($schedules as $schedule) {
     $currentHour = $now->format('H');
     $currentMinute = $now->format('i');
     
-    if ($scheduleHour == $currentHour && $scheduleMinute == $currentMinute) {
-        // Check if sprayer is already locked (already running)
-        if (isLocked($conn, 'sprayer')) {
-            echo "Sprayer already running/locked - skipping schedule\n";
-            continue;
-        }
-        
+        if ($scheduleHour == $currentHour && $scheduleMinute == $currentMinute) {
+        // Skip if sprayer is already locked/running
+        if (isLocked($conn, 'sprayer')) continue;
+
+        // DEDUPLICATION: only fire ONCE per schedule per day
+        // Prevents multiple fires within the same minute (submit_data runs every 8s)
+        $todayStr    = $now->format('Y-m-d');
+        $runTimeHHMM = substr($runTime, 0, 5); // HH:MM
+        $alreadyFired = $conn->query(
+            "SELECT id FROM device_logs
+             WHERE device='sprayer' AND action='ON' AND trigger_type='schedule'
+             AND DATE(logged_at) = '{$todayStr}'
+             AND TIME_FORMAT(logged_at, '%H:%i') = '{$runTimeHHMM}'
+             LIMIT 1"
+        );
+        if ($alreadyFired && $alreadyFired->num_rows > 0) continue; // already fired today
+
         // Get current sprayer state
         $sprayerState = $conn->query("SELECT status, controlled_by FROM device_state WHERE device='sprayer' LIMIT 1")->fetch_assoc();
-        
+
         // Only turn ON if currently OFF and not manually controlled
         if ($sprayerState && $sprayerState['status'] === 'off' && $sprayerState['controlled_by'] !== 'manual') {
-            // Turn ON sprayer with duration lock
             deviceOn($conn, 'sprayer', 'schedule', $totalDuration);
-            echo "Sprayer turned ON by schedule at $currentTime for {$totalDuration}s\n";
-            
-            // Schedule OFF after duration (we'll handle this in the next cycle)
-            // The lock ensures no other process interferes
         }
     }
 }
@@ -154,10 +151,9 @@ if ($r) {
             }
             
             deviceOff($conn, 'sprayer', 'schedule', 'Server schedule: Duration completed', $durationSeconds);
-            echo "Sprayer turned OFF by schedule - duration completed\n";
+
         }
     }
 }
 
-$conn->close();
 ?>

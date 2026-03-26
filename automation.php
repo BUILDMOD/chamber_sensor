@@ -1,7 +1,6 @@
 <?php
 include('includes/auth_check.php');
 include('includes/db_connect.php');
-include_once('ai_prompt_helper.php');
 if (session_status() === PHP_SESSION_NONE) session_start();
 
 date_default_timezone_set('Asia/Manila');
@@ -66,7 +65,7 @@ $errors = []; $success = '';
 if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['resolve_fault'])) {
     $fid = intval($_POST['resolve_fault']);
     $s=$conn->prepare("UPDATE device_faults SET resolved=1 WHERE id=?");
-    if($s){$s->bind_param("i",$fid);if($s->execute())$success='Fault marked as resolved.';$s->close();}
+    if($s){$s->bind_param("i",$fid);if($s->execute()){header('Location: automation.php?msg=fault_resolved');exit;}$s->close();}
 }
 
 // ── Add Rule ──
@@ -98,7 +97,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['add_rule'])) {
 
         if (empty($errors)) {
             $s=$conn->prepare("INSERT INTO automation_rules (device,sensor,operator,threshold) VALUES (?,?,?,?)");
-            if ($s){$s->bind_param("sssd",$device,$sensor,$operator,$threshold);if($s->execute())$success='Rule added.';else $errors[]='DB error: '.$conn->error;$s->close();}
+            if ($s){$s->bind_param("sssd",$device,$sensor,$operator,$threshold);if($s->execute()){header('Location: automation.php?msg=rule_added');exit;}else $errors[]='DB error: '.$conn->error;$s->close();}
         }
     }
 }
@@ -107,29 +106,33 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['add_rule'])) {
 if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['toggle_rule'])) {
     $rid = intval($_POST['rule_id']??0); $enabled = intval($_POST['enabled']??0);
     $s=$conn->prepare("UPDATE automation_rules SET enabled=? WHERE id=?");
-    if($s){$s->bind_param("ii",$enabled,$rid);$s->execute();$success='Rule updated.';$s->close();}
+    if($s){$s->bind_param("ii",$enabled,$rid);if($s->execute()){header('Location: automation.php');exit;}$s->close();}
 }
 
 // ── Delete Rule ──
 if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['delete_rule'])) {
     $rid = intval($_POST['rule_id']??0);
     $s=$conn->prepare("DELETE FROM automation_rules WHERE id=?");
-    if($s){$s->bind_param("i",$rid);if($s->execute())$success='Rule deleted.';$s->close();}
+    if($s){$s->bind_param("i",$rid);if($s->execute()){header('Location: automation.php?msg=rule_deleted');exit;}$s->close();}
 }
 
 // ── Add Schedule ──
 if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['add_schedule'])) {
     if (!$isOwner) { $errors[]='Access denied.'; } else {
         $device   = 'sprayer';
-        $run_time = $_POST['run_time'] ?? '';
+        $run_time = trim($_POST['run_time'] ?? '');
         $dur_min  = intval($_POST['dur_min'] ?? 0);
         $dur_sec  = intval($_POST['dur_sec'] ?? 0);
-        if ($dur_min <= 0 && $dur_sec <= 0) $dur_sec = 30; // fallback
         $days     = $_POST['days'] ?? 'daily';
-        if (!$run_time) $errors[]='Time required.';
-        if (empty($errors)) {
+        // Strict validation — must have a valid run_time and at least 1 second duration
+        if (!$run_time || !preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $run_time)) {
+            $errors[]='Invalid or missing time. Please use the Add Schedule button properly.';
+        } elseif ($dur_min <= 0 && $dur_sec <= 0) {
+            $errors[]='Duration must be at least 1 second.';
+        } else {
+            if ($dur_sec <= 0 && $dur_min > 0) $dur_sec = 0;
             $s=$conn->prepare("INSERT INTO scheduled_tasks (device,run_time,duration_minutes,duration_seconds,days) VALUES (?,?,?,?,?)");
-            if($s){$s->bind_param("ssiis",$device,$run_time,$dur_min,$dur_sec,$days);if($s->execute())$success='Schedule added.';else $errors[]='DB error: '.$conn->error;$s->close();}
+            if($s){$s->bind_param("ssiis",$device,$run_time,$dur_min,$dur_sec,$days);if($s->execute()){header('Location: automation.php?msg=schedule_added');exit;}else $errors[]='DB error: '.$conn->error;$s->close();}
         }
     }
 }
@@ -138,14 +141,14 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['add_schedule'])) {
 if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['toggle_schedule'])) {
     $sid=intval($_POST['sched_id']??0);$enabled=intval($_POST['s_enabled']??0);
     $s=$conn->prepare("UPDATE scheduled_tasks SET enabled=? WHERE id=?");
-    if($s){$s->bind_param("ii",$enabled,$sid);$s->execute();$success='Schedule updated.';$s->close();}
+    if($s){$s->bind_param("ii",$enabled,$sid);if($s->execute()){header('Location: automation.php');exit;}$s->close();}
 }
 
 // ── Delete Schedule ──
 if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['delete_schedule'])) {
     $sid=intval($_POST['sched_id']??0);
     $s=$conn->prepare("DELETE FROM scheduled_tasks WHERE id=?");
-    if($s){$s->bind_param("i",$sid);if($s->execute())$success='Schedule deleted.';$s->close();}
+    if($s){$s->bind_param("i",$sid);if($s->execute()){header('Location: automation.php?msg=schedule_deleted');exit;}$s->close();}
 }
 
 // ── Ensure device_faults table exists ──
@@ -438,7 +441,17 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
   </header>
 
   <div class="page">
-    <?php if($success): ?><div class="flash flash-ok"><i class="fas fa-check-circle"></i> <?= htmlspecialchars($success) ?></div><?php endif; ?>
+    <?php
+$msg_map = [
+    'rule_added'      => 'Rule added.',
+    'rule_deleted'    => 'Rule deleted.',
+    'schedule_added'  => 'Schedule added.',
+    'schedule_deleted'=> 'Schedule deleted.',
+    'fault_resolved'  => 'Fault marked as resolved.',
+];
+$flash_msg = $msg_map[$_GET['msg'] ?? ''] ?? $success ?? '';
+?>
+<?php if($flash_msg): ?><div class="flash flash-ok"><i class="fas fa-check-circle"></i> <?= htmlspecialchars($flash_msg) ?></div><?php endif; ?>
     <?php foreach($errors as $e): ?><div class="flash flash-err"><i class="fas fa-triangle-exclamation"></i> <?= htmlspecialchars($e) ?></div><?php endforeach; ?>
 
     <!-- Active Faults (only shown when faults exist) -->
@@ -1086,7 +1099,42 @@ document.getElementById('ruleOperator')?.addEventListener('change', function() {
   const GROQ_API_KEY = '<?= htmlspecialchars(ss($ss, 'groq_api_key', '')) ?>';
   const GROQ_MODEL   = 'llama-3.3-70b-versatile';
 
-  const SYSTEM_PROMPT = `<?= getAISystemPrompt($conn, $ss) ?>`;
+  const SYSTEM_PROMPT = `You are MushroomOS Assistant, an expert AI embedded inside MushroomOS — a smart mushroom cultivation monitoring system for J.WHO Mushroom Farm.
+
+CURRENT SYSTEM STATUS (Real-time):
+- Current Time: <?= date('M j, Y h:i A') ?> (Asia/Manila)
+- Current Temperature: <?= $current_temp ?? 'Sensor offline' ?>°C
+- Current Humidity: <?= $current_humidity ?? 'Sensor offline' ?>%
+- Active Devices: <?= !empty($active_devices) ? implode(', ', $active_devices) : 'No devices active' ?>
+- Recent Alerts: <?= !empty($recent_alerts) ? $recent_alerts : 'No recent alerts' ?>
+- System Uptime: Server running normally
+
+SYSTEM DETAILS:
+- Farm: J.WHO Mushroom Farm
+- System: MushroomOS (Web-based monitoring system)
+- Location: Philippines (Asia/Manila timezone)
+- Sensors: Temperature & Humidity monitoring
+- Devices: Mist system, Fan, Heater, Sprayer, Exhaust
+- Camera: ESP32-CAM for visual monitoring
+- Database: MySQL for data storage
+- Features: Real-time monitoring, alerts, automation, reports
+- Ideal ranges: Temperature 22-28°C, Humidity 85-95%
+- Alert system: Email notifications for out-of-range conditions
+- Data retention: 90 days
+
+You help farm operators with:
+- Analyzing current sensor readings and system status
+- Interpreting device activity and automation rules
+- Diagnosing problems based on real-time data
+- Mushroom cultivation advice (oyster, shiitake, etc.)
+- Automation & device control suggestions
+- Harvest timing and post-harvest tips
+- General mushroom farming best practices
+- Understanding MushroomOS features and navigation
+
+IMPORTANT: Always reference to current system status provided above when answering. If user asks "what's happening now" or similar, provide current temperature, humidity, and device status from the system status. Be proactive in identifying potential issues based on current readings.
+
+Be concise, practical, and friendly. Use short paragraphs. When giving ranges or numbers, be specific. Always relate answers to mushroom farming context and mention relevant MushroomOS features when helpful.`;
 
   // ── State ──
   const messages = []; // { role, content }
