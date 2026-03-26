@@ -949,5 +949,8 @@ if(urlTab==='system'){
 
 })();
 </script>
-</body>
+
+<!-- Simple AI Chat Bubble -->
+<?php include('includes/simple_ai_chat.php'); ?>
+
 </html>

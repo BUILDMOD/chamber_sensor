@@ -156,18 +156,21 @@ if ($r) {
         $lockedUntil = (int)($row['locked_until'] ?? 0);
         if ($lockedUntil > 0 && $lockedUntil <= time()) {
             // Duration expired, turn OFF
-            $lastOn = $conn->query("SELECT logged_at FROM device_logs
-                                    WHERE device='sprayer' AND action='ON'
+            // Get the intended duration from the most recent ON log
+            $lastOn = $conn->query("SELECT logged_at, trigger_detail FROM device_logs
+                                    WHERE device='sprayer' AND action='ON' AND trigger_type='schedule'
                                     ORDER BY logged_at DESC LIMIT 1");
             $durationSeconds = null;
             if ($lastOn && $lastOn->num_rows > 0) {
-                $onSince = new DateTime($lastOn->fetch_assoc()['logged_at']);
-                $now = new DateTime();
-                $durationSeconds = $now->getTimestamp() - $onSince->getTimestamp();
+                $row = $lastOn->fetch_assoc();
+                $detail = $row['trigger_detail'];
+                // Extract the intended duration from the trigger detail
+                if (preg_match('/locked (\d+)s/', $detail, $matches)) {
+                    $durationSeconds = intval($matches[1]);
+                }
             }
             
             deviceOff($conn, 'sprayer', 'schedule', 'Server schedule: Duration completed', $durationSeconds);
-
         }
     }
 }

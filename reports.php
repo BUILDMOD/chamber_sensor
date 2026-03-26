@@ -1234,5 +1234,6 @@ function navUrl($view, $year, $month, $day) {
 
 })();
 </script>
+
 </body>
 </html>
