@@ -75,10 +75,27 @@ if (isset($_GET['mode'])) {
     exit;
 }
 
-// Handle manual device control
+// Handle manual device control - support both formats
+$device = null;
+$action = null;
+
+// Format 1: update_device_status.php?device=mist&action=on
 if (isset($_GET['device']) && isset($_GET['action'])) {
     $device = $_GET['device'];
-    $action = $_GET['action']; // 'on' or 'off'
+    $action = $_GET['action'];
+}
+// Format 2: update_device_status.php?mist=1 (dashboard format)
+else {
+    foreach ($devices as $dev) {
+        if (isset($_GET[$dev])) {
+            $device = $dev;
+            $action = $_GET[$dev] == '1' ? 'on' : 'off';
+            break;
+        }
+    }
+}
+
+if ($device && $action) {
     
     // Validate device
     if (!in_array($device, $devices)) {
@@ -94,14 +111,14 @@ if (isset($_GET['device']) && isset($_GET['action'])) {
         exit;
     }
     
-    // Check if system is in manual mode
+    // Manual device control allowed anytime (emergency override)
+    // But warn if not in manual mode
     $modeRow = $conn->query("SELECT mode FROM system_mode WHERE id=1 LIMIT 1")->fetch_assoc();
     $manualMode = ($modeRow['mode'] ?? 'auto') === 'manual';
     
     if (!$manualMode) {
-        $response['message'] = 'System must be in manual mode to control devices';
-        echo json_encode($response);
-        exit;
+        // Allow control but warn user
+        $response['warning'] = 'Device controlled while system is in auto mode';
     }
     
     // Update device state

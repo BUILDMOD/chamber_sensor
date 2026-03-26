@@ -67,6 +67,22 @@ $currentDay = strtolower($now->format('l')); // monday, tuesday, etc.
 $currentTime = $now->format('H:i:s');
 $currentWeekday = $now->format('N'); // 1=Monday, 7=Sunday
 
+// Check for recent ESP32 boot (within last 5 minutes)
+$recentBoot = $conn->query(
+    "SELECT logged_at FROM device_logs 
+     WHERE device='system' AND trigger_detail LIKE '%ESP32 boot%' 
+     AND logged_at > DATE_SUB(NOW(), INTERVAL 5 MINUTE) 
+     ORDER BY logged_at DESC LIMIT 1"
+);
+$bootTimeProtection = false;
+if ($recentBoot && $recentBoot->num_rows > 0) {
+    $bootTimeProtection = true;
+    echo "Boot protection active - skipping schedule execution\n";
+    // Log that we're in boot protection
+    $conn->query("INSERT INTO device_logs (device,action,trigger_type,trigger_detail) VALUES ('system','ON','manual','Schedule runner in boot protection mode')");
+    return; // Skip all schedules during boot protection
+}
+
 // Schedules run regardless of system mode - they are independent time-based tasks
 
 // Get active sprayer schedules
