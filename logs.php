@@ -103,7 +103,7 @@ if ($rs && $rs->num_rows > 0) {
     $latest_sensor['age_minutes'] = $age_minutes;
 }
 
-// ── System Offline Detection ──
+// ── System Offline Detection (Integrated from check_offline.php) ──
 if (!$sensor_online) {
     // Check if there's already an unresolved offline alert
     $existing_alert = $conn->query("SELECT id FROM alert_logs 
@@ -139,11 +139,23 @@ if (!$sensor_online) {
             $uq->close();
         }
         if (empty($recipient)) {
-            $oq = $conn->prepare("SELECT email FROM users WHERE role = 'owner' LIMIT 1");
-            $oq->execute();
-            $or2 = $oq->get_result();
-            if ($or2->num_rows > 0) $recipient = $or2->fetch_assoc()['email'];
-            $oq->close();
+            // Fallback to most recently active user from system_logs
+            $active_user_query = $conn->query("SELECT u.email FROM users u 
+                JOIN system_logs sl ON u.username = sl.user 
+                WHERE sl.event_type = 'login' 
+                ORDER BY sl.logged_at DESC LIMIT 1");
+            if ($active_user_query && $active_user_query->num_rows > 0) {
+                $recipient = $active_user_query->fetch_assoc()['email'];
+            }
+            
+            // Final fallback to owner
+            if (empty($recipient)) {
+                $oq = $conn->prepare("SELECT email FROM users WHERE role = 'owner' LIMIT 1");
+                $oq->execute();
+                $or2 = $oq->get_result();
+                if ($or2->num_rows > 0) $recipient = $or2->fetch_assoc()['email'];
+                $oq->close();
+            }
         }
         
         if (!empty($recipient)) {
@@ -201,13 +213,29 @@ if ($sensor_online && $latest_sensor) {
 }
 
 // ── Auto-resolve sensor offline / system alerts ──
-if ($sensor_online) {
-    // Resolve "offline" system alerts
-    $conn->query("UPDATE alert_logs
-        SET resolved=1
-        WHERE alert_type='system'
-          AND resolved=0
-          AND (message LIKE '%offline%' OR message LIKE '%Sensor offline%')");
+// Only resolve offline alerts when sensor is truly online AND has been stable for at least 2 minutes
+if ($sensor_online && $latest_sensor && $latest_sensor['age_minutes'] <= 2) {
+    // Only resolve if we have recent, stable data (not just a single reading)
+    $recent_readings_count = 0;
+    $recent_check = $conn->prepare("SELECT COUNT(*) as cnt FROM sensor_data 
+        WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 2 MINUTE)");
+    if ($recent_check) {
+        $recent_check->execute();
+        $recent_result = $recent_check->get_result();
+        if ($recent_result && $row = $recent_result->fetch_assoc()) {
+            $recent_readings_count = intval($row['cnt']);
+        }
+        $recent_check->close();
+    }
+    
+    // Only resolve if we have multiple recent readings (indicates stable connection)
+    if ($recent_readings_count >= 2) {
+        $conn->query("UPDATE alert_logs
+            SET resolved=1
+            WHERE alert_type='system'
+              AND resolved=0
+              AND (message LIKE '%offline%' OR message LIKE '%Sensor offline%')");
+    }
 }
 
 // ── Auto-resolve device fault alerts ──
@@ -264,7 +292,7 @@ if ($alert_type) $where[] = "alert_type='".addslashes($alert_type)."'";
 if ($alert_sev)  $where[] = "severity='".addslashes($alert_sev)."'";
 $wq = implode(' AND ', $where);
 $alert_logs = [];
-$r = $conn->query("SELECT * FROM alert_logs WHERE $wq ORDER BY logged_at DESC LIMIT 200");
+$r = $conn->query("SELECT * FROM alert_logs WHERE $wq ORDER BY logged_at DESC LIMIT 500");
 if ($r) while ($row = $r->fetch_assoc()) $alert_logs[] = $row;
 
 // ── Fetch system logs ──
@@ -272,7 +300,7 @@ $swhere = ["DATE(logged_at) BETWEEN '$date_from' AND '$date_to'"];
 if ($log_type) $swhere[] = "event_type='".addslashes($log_type)."'";
 $swq = implode(' AND ', $swhere);
 $sys_logs = [];
-$r = $conn->query("SELECT * FROM system_logs WHERE $swq ORDER BY logged_at DESC LIMIT 200");
+$r = $conn->query("SELECT * FROM system_logs WHERE $swq ORDER BY logged_at DESC LIMIT 500");
 if ($r) while ($row = $r->fetch_assoc()) $sys_logs[] = $row;
 
 // ── Alert stats ──

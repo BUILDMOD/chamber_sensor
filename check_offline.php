@@ -1,8 +1,7 @@
 <?php
 /**
- * check_system_offline.php
- * This script should be called by cron job every 5 minutes to check if system is offline
- * Add to cron: */5 * * * * /usr/bin/php /path/to/mushroom_system/check_system_offline.php
+ * check_offline.php
+ * Original file for checking system offline status
  */
 date_default_timezone_set('Asia/Manila');
 include 'includes/db_connect.php';
@@ -13,8 +12,8 @@ if ($result && $result->num_rows > 0) {
     $latest = $result->fetch_assoc();
     $age_minutes = round((time() - strtotime($latest['timestamp'])) / 60);
     
-    // If offline for more than 5 minutes, check if we need to send alert
-    if ($age_minutes > 5) {
+    // If offline for more than 2 minutes, check if we need to send alert
+    if ($age_minutes > 2) {
         // Check if there's already an unresolved offline alert
         $existing_alert = $conn->query("SELECT id FROM alert_logs 
             WHERE alert_type='system' 
@@ -37,13 +36,24 @@ if ($result && $result->num_rows > 0) {
             // Send email notification
             include_once 'send_email.php';
             
-            // Get user email
+            // Get most recently logged-in user
             $recipient = '';
-            $uq = $conn->prepare("SELECT email FROM users WHERE role = 'owner' LIMIT 1");
-            $uq->execute();
-            $ur = $uq->get_result();
-            if ($ur->num_rows > 0) $recipient = $ur->fetch_assoc()['email'];
-            $uq->close();
+            $active_user_query = $conn->query("SELECT u.email FROM users u 
+                JOIN system_logs sl ON u.username = sl.user 
+                WHERE sl.event_type = 'login' 
+                ORDER BY sl.logged_at DESC LIMIT 1");
+            if ($active_user_query && $active_user_query->num_rows > 0) {
+                $recipient = $active_user_query->fetch_assoc()['email'];
+            }
+            
+            // Fallback to owner if no active user found
+            if (empty($recipient)) {
+                $oq = $conn->prepare("SELECT email FROM users WHERE role = 'owner' LIMIT 1");
+                $oq->execute();
+                $or2 = $oq->get_result();
+                if ($or2->num_rows > 0) $recipient = $or2->fetch_assoc()['email'];
+                $oq->close();
+            }
             
             if (!empty($recipient)) {
                 $subject = "⚠️ MushroomOS — System Offline";

@@ -42,6 +42,10 @@ function sendEmail($to, $subject, $body) {
         $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
         $mail->Port       = 587;
         $mail->SMTPDebug  = 0; // Set to 2 temporarily if emails still don't arrive
+        
+        // Add timeouts for faster sending
+        $mail->Timeout    = 10; // 10 seconds timeout
+        $mail->SMTPTimeout = 10; // 10 seconds SMTP timeout
 
         $mail->setFrom($smtpUser, $fromName);
         $mail->addAddress($to);

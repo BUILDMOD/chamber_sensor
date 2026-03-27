@@ -1094,6 +1094,20 @@ function renderAlerts(msgs){
 loadLive();
 setInterval(loadLive,5000);
 
+// Offline Monitoring
+async function monitorOffline(){
+  try{
+    const r=await fetch('monitor_offline.php',{cache:'no-store'});
+    if(!r.ok)throw 0;
+    const j=await r.json();
+    console.log('[monitorOffline] Status:', j);
+  }catch(_){
+    console.log('[monitorOffline] Error checking offline status');
+  }
+}
+setInterval(monitorOffline,30000); // Check every 30 seconds
+monitorOffline(); // Run immediately on load
+
 // Device States
 async function fetchDeviceStates(){
   try{

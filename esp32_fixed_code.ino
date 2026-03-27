@@ -93,8 +93,12 @@ const char* DB_PATH       = "/mushroom_system";
 #define RELAY_SPRAYER  19
 #define RELAY_EXHAUST  23
 
-// LCD I2C address — try 0x27 first, if blank screen try 0x3F
+// ESP32-compatible LCD initialization
+// Set the LCD address to 0x27 for ESP32 (different from some Arduino boards)
 LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// Suppress AVR library warnings for ESP32
+#define _I2C_AVR_H_
 
 // ================================================================
 //  FALLBACK THRESHOLDS (loaded from server on each poll)
@@ -148,6 +152,11 @@ const unsigned long POLL_INTERVAL    = 6000;
 const unsigned long WIFI_CHECK_MS    = 30000;
 const unsigned long LCD_UPDATE_MS    = 2000;
 
+// ================================================================
+//  OFFLINE DETECTION
+// ================================================================
+int offlineCounter = 0;
+
 unsigned long lastSensor  = 0;
 unsigned long lastSend    = 0;
 unsigned long lastPoll    = 0;
@@ -160,11 +169,12 @@ bool          bootComplete = false; // set true after first successful poll
 // ================================================================
 
 bool  manualMode = false;
-bool  srvMist    = false;
-bool  srvFan     = false;
-bool  srvHeater  = false;
-bool  srvSprayer = false;
-bool  srvExhaust = false;
+bool  srvMist     = false;
+bool  srvFan      = false;
+bool  srvHeater   = false;
+bool  srvSprayer  = false;
+bool  srvExhaust  = false;
+bool  srvBuzzer   = false;
 
 float lastTemp = NAN;
 float lastHum  = NAN;
@@ -514,20 +524,34 @@ void updateLCD() {
 // ================================================================
 
 void sendToServer() {
-  if (WiFi.status() != WL_CONNECTED) return;
-  if (isnan(lastTemp) || isnan(lastHum)) return;
+  if (WiFi.status() != WL_CONNECTED) {
+    offlineCounter++;
+    Serial.printf("[Offline] Counter: %d\n", offlineCounter);
+    return;
+  }
+  
+  if (isnan(lastTemp) || isnan(lastHum)) {
+    offlineCounter++;
+    Serial.printf("[Sensor] Invalid readings - offline counter: %d\n", offlineCounter);
+    return;
+  }
 
   HTTPClient http;
   http.begin(ENDPOINT_SUBMIT);
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   http.setTimeout(5000);
 
-  String body = "temperature=" + String(lastTemp, 2)
-              + "&humidity="   + String(lastHum,  2);
+  String body = "temperature=" + String(lastTemp, 1)
+              + "&humidity="   + String(lastHum, 1);
 
   int code = http.POST(body);
   Serial.printf("[HTTP] submit_data → %d\n", code);
   http.end();
+  
+  // Reset offline counter on successful send
+  if (code == 200) {
+    offlineCounter = 0;
+  }
 }
 
 // ================================================================
@@ -870,6 +894,11 @@ void loop() {
   if (now - lastSend > SEND_INTERVAL) {
     lastSend = now;
     sendToServer();
+    
+    // Reset offline counter when data sent successfully
+    if (WiFi.status() == WL_CONNECTED) {
+      offlineCounter = 0;
+    }
   }
 
   // Poll device states from server
