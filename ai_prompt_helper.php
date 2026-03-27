@@ -55,14 +55,12 @@ function getAISystemPrompt($conn, $ss = []) {
     // Enhanced alert system with categorization
     $alert_count = 0;
     $emergency_count = 0;
-    $fault_count = 0;
-    $r = $conn->query("SELECT COUNT(*) as cnt, trigger_type FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency','fault') GROUP BY trigger_type");
+    $r = $conn->query("SELECT COUNT(*) as cnt, trigger_type FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency') GROUP BY trigger_type");
     if ($r) while ($row = $r->fetch_assoc()) {
         $alert_count += $row['cnt'];
         if ($row['trigger_type'] === 'emergency') $emergency_count = $row['cnt'];
-        if ($row['trigger_type'] === 'fault') $fault_count = $row['cnt'];
     }
-    $alerts_str = $alert_count > 0 ? "$alert_count alerts (Emergency: $emergency_count, Fault: $fault_count) in last 24 hours" : 'No recent alerts';
+    $alerts_str = $alert_count > 0 ? "$alert_count alerts (Emergency: $emergency_count) in last 24 hours" : 'No recent alerts';
 
     // Enhanced fault tracking with severity levels
     $active_faults = [];
@@ -246,9 +244,9 @@ REAL-TIME ENVIRONMENTAL DATA:
 DEVICE MONITORING:
 - Active Devices: {$active_devices_str}
 - Device Runtimes: {$runtime_str}
+- Recent Emergency Alerts: {$alerts_str}
 - Active Faults: {$faults_str}
 - Critical Faults: {$critical_faults}
-- Recent Emergency/Fault Alerts: {$alerts_str}
 - Unresolved Alerts: {$unresolved_alerts}
 
 CHAMBER HEALTH ANALYSIS:
@@ -303,10 +301,10 @@ ENHANCED AI CAPABILITIES:
 CRITICAL RESPONSE GUIDELINES:
 1. Always acknowledge the current user: {$logged_in_user} with {$logged_in_role} privileges
 2. Reference real-time sensor readings and trends in all environmental recommendations
-3. Consider device runtime and fault status when providing operational guidance
+3. Consider device runtime when providing operational guidance
 4. Use chamber health score and trends for long-term optimization advice
 5. Provide specific, actionable recommendations based on current system state
-6. Alert users to critical faults or emergency conditions immediately
+6. Alert users to emergency conditions immediately
 7. Suggest automation improvements based on recent trigger patterns
 8. NEVER claim lack of system access — all current data is provided above
 9. Maintain concise, professional communication while being thorough

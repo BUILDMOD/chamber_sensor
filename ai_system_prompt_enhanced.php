@@ -31,9 +31,9 @@ function getAISystemPrompt($conn, $ss = []) {
 
     // ── Recent alerts ──
     $alert_count = 0;
-    $r = $conn->query("SELECT COUNT(*) as cnt FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency','fault')");
+    $r = $conn->query("SELECT COUNT(*) as cnt FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency')");
     if ($r && $row = $r->fetch_assoc()) $alert_count = $row['cnt'];
-    $alerts_str = $alert_count > 0 ? "$alert_count emergency/fault alerts in last 24 hours" : 'No recent alerts';
+    $alerts_str = $alert_count > 0 ? "$alert_count emergency alerts in last 24 hours" : 'No recent alerts';
 
     // ── Active faults ──
     $active_faults = [];

@@ -35,8 +35,6 @@ $conn->query("CREATE TABLE IF NOT EXISTS system_settings (
 
 // Seed system_settings defaults
 $defaults = [
-    'fault_timeout_min'   => '5',
-    'stuck_timeout_min'   => '60',
     'camera_interval_sec' => '1800',
     'data_retention_days' => '90',
     'notify_temp'         => '1',
@@ -123,18 +121,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_smtp'])) {
     }
 }
 
-// ── Save Auto Engine Settings ──
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_auto_engine'])) {
-    if (!$isOwner) { $errors[] = 'Access denied.'; } else {
-        $keys = ['fault_timeout_min','stuck_timeout_min'];
-        foreach ($keys as $k) {
-            $val = (string)intval($_POST[$k] ?? 5);
-            $s = $conn->prepare("INSERT INTO system_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
-            if ($s) { $s->bind_param("ss", $k, $val); $s->execute(); $s->close(); }
-        }
-        if (empty($errors)) $success = 'Auto engine settings saved.';
-    }
-}
 
 // ── Save Camera Settings ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_camera'])) {
@@ -210,7 +196,7 @@ if ($r) {
 }
 
 // Get recent alerts (last 24 hours)
-$r = $conn->query("SELECT COUNT(*) as count FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency','fault')");
+$r = $conn->query("SELECT COUNT(*) as count FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency')");
 if ($r && $row = $r->fetch_assoc()) {
     $recent_alerts = $row['count'] . ' alerts in last 24 hours';
 }
@@ -250,7 +236,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 .flash-ok{background:var(--green-lt);color:var(--green);}
 .flash-err{background:var(--red-lt);color:var(--red);}
 .flash-info{background:var(--blue-lt);color:var(--blue);}
-.card{background:var(--surface);border-radius:var(--r);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden;margin-bottom:16px;}
+.card{background:var(--surface);border-radius:var(--r);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden;margin-bottom:24px;}
 .card-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px 14px;border-bottom:1px solid var(--border);}
 .card-title{font-size:13px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px;}
 .card-title .icon{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;}
@@ -330,12 +316,16 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
 <button class="hamburger" id="hamburger" aria-label="Menu">
   <span></span><span></span><span></span>
 </button>
+
 <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <img src="assets/img/logo.png" alt="logo">
-    <div><div class="sidebar-logo-text">MushroomOS</div><div class="sidebar-logo-sub">Cultivation System</div></div>
+    <div>
+      <div class="sidebar-logo-text">MushroomOS</div>
+      <div class="sidebar-logo-sub">Cultivation System</div>
+    </div>
   </div>
   <nav class="sidebar-nav">
     <a href="dashboard.php"><i class="fas fa-table-cells-large"></i> Dashboard</a>
@@ -344,7 +334,9 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
     <a href="logs.php"><i class="fas fa-list-check"></i> Logs</a>
     <a href="settings.php" class="active"><i class="fas fa-gear"></i> Settings</a>
     <a href="profile.php"><i class="fas fa-sliders"></i> System Profile</a>
-    <div class="nav-bottom"><a href="logout.php"><i class="fas fa-arrow-right-from-bracket"></i> Logout</a></div>
+    <div class="nav-bottom">
+      <a href="logout.php"><i class="fas fa-right-from-bracket"></i> Logout</a>
+    </div>
   </nav>
 </aside>
 
@@ -355,17 +347,31 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
   </header>
 
   <div class="page">
-    <?php if ($success): ?><div class="flash flash-ok"><i class="fas fa-check-circle"></i> <?= htmlspecialchars($success) ?></div><?php endif; ?>
-    <?php foreach ($errors as $e): ?><div class="flash flash-err"><i class="fas fa-triangle-exclamation"></i> <?= htmlspecialchars($e) ?></div><?php endforeach; ?>
+    <?php if (!empty($errors)): ?>
+      <div class="flash flash-err">
+        <i class="fas fa-exclamation-triangle"></i>
+        <?= implode('<br>', $errors) ?>
+      </div>
+    <?php endif; ?>
+    
+    <?php if (!empty($success)): ?>
+      <div class="flash flash-ok">
+        <i class="fas fa-check-circle"></i>
+        <?= htmlspecialchars($success) ?>
+      </div>
+    <?php endif; ?>
 
     <?php if (!$isOwner): ?>
-      <div class="access-notice"><i class="fas fa-lock"></i> Only the Owner can modify settings. You can view the current configuration below.</div>
+      <div class="access-notice">
+        <i class="fas fa-lock"></i>
+        <span>You are viewing in read-only mode. Only system owner can modify settings.</span>
+      </div>
     <?php endif; ?>
 
     <!-- Alert Thresholds -->
     <div class="card">
       <div class="card-header">
-        <div class="card-title"><span class="icon icon-amber"><i class="fas fa-sliders"></i></span> Alert Thresholds</div>
+        <div class="card-title"><span class="icon icon-green"><i class="fas fa-bell"></i></span> Alert Thresholds</div>
         <span style="font-size:11px;color:var(--muted);">Triggers alerts when values go out of range</span>
       </div>
       <div class="card-body">
@@ -376,8 +382,8 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
           ?>
           <div class="threshold-row">
             <div class="threshold-label">
-              <div class="dot" style="background:<?= $col ?>;"></div>
               <?= $label ?>
+              <span class="dot" style="background: <?= $col ?>;"></span>
             </div>
             <div class="form-group">
               <label>Min (<?= $unit ?>)</label>
@@ -396,7 +402,6 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
             </div>
           </div>
           <?php endforeach; ?>
-          <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">Alerts fire when readings stay outside the range. Defaults: Temperature 22–28°C, Humidity 85–95%.</p>
           <?php if ($isOwner): ?>
           <button type="submit" class="btn btn-primary"><i class="fas fa-floppy-disk"></i><span class="btn-label"> Save Thresholds</span></button>
           <?php endif; ?>
@@ -411,23 +416,33 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
         <span style="font-size:11px;color:var(--muted);">SMTP configuration & alert triggers</span>
       </div>
       <div class="card-body">
-        <div class="info-box"><i class="fas fa-circle-info"></i>Use Gmail with an App Password (not your real password). Enable 2-Step Verification on your Google account first, then generate an App Password at <b>myaccount.google.com/apppasswords</b>.</div>
-
         <form method="POST">
           <input type="hidden" name="save_smtp" value="1">
 
           <p class="section-title">SMTP Server</p>
-          <div class="form-grid-3">
-            <div class="form-group"><label>SMTP Host</label><input type="text" name="smtp_host" value="<?= ns($ns,'smtp_host','smtp.gmail.com') ?>" placeholder="smtp.gmail.com" <?= !$isOwner ? 'disabled' : '' ?>></div>
-            <div class="form-group"><label>Port</label><input type="number" name="smtp_port" value="<?= ns($ns,'smtp_port','587') ?>" placeholder="587" <?= !$isOwner ? 'disabled' : '' ?>></div>
-            <div class="form-group"><label>From Name</label><input type="text" name="smtp_from_name" value="<?= ns($ns,'smtp_from_name','MushroomOS') ?>" placeholder="MushroomOS" <?= !$isOwner ? 'disabled' : '' ?>></div>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label>SMTP Host</label>
+              <input type="text" name="smtp_host" value="<?= ns($ns,'smtp_host','') ?>" <?= !$isOwner ? 'disabled' : '' ?>>
+            </div>
+            <div class="form-group">
+              <label>SMTP Port</label>
+              <input type="number" name="smtp_port" value="<?= ns($ns,'smtp_port','587') ?>" <?= !$isOwner ? 'disabled' : '' ?>>
+            </div>
           </div>
           <div class="form-grid-2">
-            <div class="form-group"><label>SMTP Username (Email)</label><input type="email" name="smtp_user" value="<?= ns($ns,'smtp_user') ?>" placeholder="your@gmail.com" <?= !$isOwner ? 'disabled' : '' ?>></div>
             <div class="form-group">
-              <label>SMTP Password <?= ($ns['smtp_pass'] ?? false) ? '<span style="color:var(--green);font-size:11px;">● saved</span>' : '' ?></label>
-              <input type="password" name="smtp_pass" placeholder="Leave blank to keep current" <?= !$isOwner ? 'disabled' : '' ?>>
+              <label>SMTP Username</label>
+              <input type="text" name="smtp_user" value="<?= ns($ns,'smtp_user','') ?>" <?= !$isOwner ? 'disabled' : '' ?>>
             </div>
+            <div class="form-group">
+              <label>From Name</label>
+              <input type="text" name="smtp_from_name" value="<?= ns($ns,'smtp_from_name','MushroomOS') ?>" <?= !$isOwner ? 'disabled' : '' ?>>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>SMTP Password <?= ($ns['smtp_pass'] ?? false) ? '<span style="color:var(--green);font-size:11px;">● saved</span>' : '' ?></label>
+            <input type="password" name="smtp_pass" placeholder="Leave blank to keep current" <?= !$isOwner ? 'disabled' : '' ?>>
           </div>
 
           <p class="section-title" style="margin-top:4px;">Alert Triggers</p>
@@ -438,24 +453,25 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
               ['notify_temp',      'Temperature out of range',   'Alert when temp goes above or below thresholds',   $ns],
               ['notify_hum',       'Humidity out of range',      'Alert when humidity goes above or below thresholds',$ns],
               ['notify_offline',   'Sensor offline',             'Alert when no reading received for 5+ minutes',    $ns],
-              ['notify_emergency', 'Emergency / Fault Alerts',   'Alert on device faults and emergency events',       $ss],
             ];
             foreach ($trigger_items as [$key, $label, $sub, $src]):
               $checked = ($src[$key] ?? '1') === '1' ? 'checked' : '';
             ?>
             <div class="checkbox-row">
               <input type="checkbox" id="<?= $key ?>" name="<?= $key ?>" value="1" <?= $checked ?> <?= !$isOwner ? 'disabled' : '' ?>>
-              <div><label for="<?= $key ?>"><?= $label ?></label><div class="sub"><?= $sub ?></div></div>
+              <label for="<?= $key ?>">
+                <?= $label ?>
+                <div class="sub"><?= $sub ?></div>
+              </label>
             </div>
             <?php endforeach; ?>
           </div>
 
-          <div class="form-group" style="max-width:200px;margin-bottom:0;">
+          <div class="form-group" style="max-width:200px;margin-bottom:0;margin-top:14px;">
             <label>Cooldown Between Emails (min)</label>
             <input type="number" name="notify_cooldown_min" min="1" max="1440" value="<?= ns($ns,'notify_cooldown_min', ss($ss,'notify_cooldown_min','30')) ?>" <?= !$isOwner ? 'disabled' : '' ?>>
             <span style="font-size:11px;color:var(--muted);">Minimum gap between repeated alert emails</span>
           </div>
-
           <?php if ($isOwner): ?>
           <div class="form-footer">
             <div class="form-footer-btns">
@@ -464,36 +480,6 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
               </button>
             </div>
             <span style="font-size:12px;color:var(--muted);">Powered by PHPMailer.</span>
-          </div>
-          <?php endif; ?>
-        </form>
-      </div>
-    </div>
-
-    <!-- Auto Engine Settings -->
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title"><span class="icon icon-green"><i class="fas fa-robot"></i></span> Auto Engine Settings</div>
-      </div>
-      <div class="card-body">
-        <form method="POST">
-          <input type="hidden" name="save_auto_engine" value="1">
-          <p class="section-title">Configure fault detection and protection timers</p>
-          <div class="form-grid-2">
-            <div class="form-group">
-              <label>Fault Detection Timeout (minutes)</label>
-              <input type="number" name="fault_timeout_min" min="1" max="60" value="<?= ss($ss,'fault_timeout_min','5') ?>" <?= !$isOwner?'disabled':'' ?>>
-              <span style="font-size:11px;color:var(--muted);">Device forced OFF if sensor stops responding after this many minutes (default: 5)</span>
-            </div>
-            <div class="form-group">
-              <label>Stuck-On Detection Timeout (minutes)</label>
-              <input type="number" name="stuck_timeout_min" min="10" max="480" value="<?= ss($ss,'stuck_timeout_min','60') ?>" <?= !$isOwner?'disabled':'' ?>>
-              <span style="font-size:11px;color:var(--muted);">Device forced OFF if continuously ON longer than this (default: 60)</span>
-            </div>
-          </div>
-          <?php if ($isOwner): ?>
-          <div class="form-footer" style="margin-top:14px;">
-            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> <span class="btn-label">Save Engine Settings</span></button>
           </div>
           <?php endif; ?>
         </form>
@@ -522,9 +508,7 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
             Image quality settings (brightness, contrast, flip, mirror, etc.) can be adjusted from the <strong>Live Camera</strong> button on the Dashboard.
           </div>
           <?php if ($isOwner): ?>
-          <div class="form-footer" style="margin-top:14px;">
             <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> <span class="btn-label">Save Camera Settings</span></button>
-          </div>
           <?php endif; ?>
         </form>
       </div>
@@ -533,28 +517,33 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
     <!-- AI Assistant Settings -->
     <div class="card">
       <div class="card-header">
-        <div class="card-title"><span class="icon icon-blue"><i class="fas fa-robot"></i></span> AI Assistant</div>
+        <div class="card-title"><span class="icon icon-amber"><i class="fas fa-robot"></i></span> AI Assistant Settings</div>
         <span style="font-size:11px;color:var(--muted);">Groq API configuration</span>
       </div>
-      <?php if($isOwner): ?>
-      <form method="POST">
-        <input type="hidden" name="save_ai_settings" value="1">
-        <div style="padding:20px;">
-          <div class="form-group">
-            <label>Groq API Key</label>
-            <input type="password" name="groq_api_key" value="<?= htmlspecialchars(ss($ss, 'groq_api_key', '')) ?>" placeholder="Enter your Groq API key">
-            <div style="font-size:11px;color:var(--muted);margin-top:4px;">
-              Get your free API key at <a href="https://console.groq.com" target="_blank" style="color:var(--blue);">console.groq.com</a>
+      <div class="card-body">
+        <form method="POST">
+          <?php if($isOwner): ?>
+            <input type="hidden" name="save_ai_settings" value="1">
+          <?php endif; ?>
+          <div style="padding:20px;">
+            <div class="form-group">
+              <label>Groq API Key</label>
+              <input type="password" name="groq_api_key" value="<?= htmlspecialchars(ss($ss, 'groq_api_key', '')) ?>" placeholder="Enter your Groq API key" <?= !$isOwner ? 'disabled' : '' ?>>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px;">
+                Get your free API key at <a href="https://console.groq.com" target="_blank" style="color:var(--blue);">console.groq.com</a>
+              </div>
             </div>
           </div>
-        </div>
-        <div style="padding:0 20px 20px;">
-          <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> <span class="btn-label">Save AI Settings</span></button>
-        </div>
-        <?php endif; ?>
-      </form>
+          <?php if($isOwner): ?>
+            <div style="padding:0 20px 20px;">
+              <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> <span class="btn-label">Save AI Settings</span></button>
+            </div>
+          <?php endif; ?>
+        </form>
+      </div>
     </div>
 
+    </div>
   </div>
 </main>
 
@@ -749,10 +738,10 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
 <div id="ai-chat-window" role="dialog" aria-label="MushroomOS AI Assistant">
   <!-- Header -->
   <div class="ai-chat-header">
-    <div class="ai-chat-avatar">🍄</div>
+    <div class="ai-chat-avatar"><i class="fas fa-seedling"></i></div>
     <div class="ai-chat-header-info">
       <div class="ai-chat-header-name">MushroomOS Assistant</div>
-      <div class="ai-chat-header-sub">Powered by Groq · llama-3.3-70b</div>
+      <div class="ai-chat-header-sub">Powered by Groq AI</div>
     </div>
     <button class="ai-chat-close-btn" id="ai-close-btn" aria-label="Close"><i class="fas fa-times"></i></button>
   </div>
@@ -830,11 +819,12 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
     const div = document.createElement('div');
     div.className = 'ai-msg' + (isUser ? ' user' : '');
     div.innerHTML = `
-      <div class="ai-msg-avatar">${isUser ? '<i class="fas fa-user"></i>' : '🍄'}</div>
+      <div class="ai-msg-avatar">${isUser ? '<i class="fas fa-user"></i>' : '<i class="fas fa-robot"></i>'}</div>
       <div>
-        <div class="ai-msg-bubble">${escapeHtml(text).replace(/\n/g, '<br>')}</div>
+        <div class="ai-msg-bubble">${escapeHtml(text)}</div>
         <div class="ai-msg-time">${now}</div>
-      </div>`;
+      </div>
+    `;
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     return div;
@@ -849,8 +839,17 @@ input[type=checkbox]{width:16px;height:16px;accent-color:var(--green);cursor:poi
     div.className = 'ai-msg';
     div.id = 'ai-typing';
     div.innerHTML = `
-      <div class="ai-msg-avatar">🍄</div>
-      <div><div class="ai-msg-bubble"><div class="ai-typing-dots"><span></span><span></span><span></span></div></div></div>`;
+      <div class="ai-msg-avatar"><i class="fas fa-robot"></i></div>
+      <div>
+        <div class="ai-msg-bubble">
+          <div class="ai-typing-dots">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      </div>
+    `;
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }

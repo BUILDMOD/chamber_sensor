@@ -7,9 +7,7 @@
  *   ✅ 5 relay outputs (Mist, Fan, Heater, Sprayer, Exhaust)
  *   ✅ Auto control logic based on sensor readings
  *   ✅ Manual control from dashboard (via get_device_status.php)
- *   ✅ Buzzer activates when server detects a device fault/emergency
  *   ✅ I2C LCD 16x2 shows live temp & humidity
- *   ✅ Server-side fault detection forces devices OFF automatically
  *   ✅ NTP time sync (Asia/Manila UTC+8)
  *   ✅ Sprayer schedule — ESP32-local, exact NTP timing (fetched from server DB)
  *   ✅ SAFE BOOT SEQUENCE - prevents unwanted device activation on power-on
@@ -33,10 +31,6 @@
  *    EXHAUST → GPIO23
  *    VCC     → 5V
  *    GND     → GND
- *
- *  Buzzer (passive):
- *    +  → GPIO26
- *    -  → GND
  *
  *  I2C LCD 16x2:
  *    VCC → 5V
@@ -174,7 +168,6 @@ bool  srvFan      = false;
 bool  srvHeater   = false;
 bool  srvSprayer  = false;
 bool  srvExhaust  = false;
-bool  srvBuzzer   = false;
 
 float lastTemp = NAN;
 float lastHum  = NAN;
@@ -597,9 +590,6 @@ void pollServer() {
       if (doc.containsKey("exhaust")) {
         srvExhaust = doc["exhaust"].as<int>() == 1;
       }
-      if (doc.containsKey("buzzer")) {
-        srvBuzzer = doc["buzzer"].as<int>() == 1;
-      }
 
       // Debug: Show controlled_by values from the controlled_by object
       String mistControl = "unknown";
@@ -821,7 +811,6 @@ void resetServerDevices() {
   srvHeater  = false;
   srvSprayer = false;
   srvExhaust = false;
-  srvBuzzer  = false;
   manualMode = false;
   
   Serial.println("[Boot] Device states reset - system ready");

@@ -1,7 +1,6 @@
 <?php
 include('includes/auth_check.php');
 include('includes/db_connect.php');
-include_once('ai_prompt_helper.php');
 if (session_status() === PHP_SESSION_NONE) session_start();
 
 date_default_timezone_set('Asia/Manila');
@@ -57,7 +56,7 @@ if ($tr) while ($r2 = $tr->fetch_assoc()) {
     if ($r2['metric']==='temperature')    { $thr['temp_min']=$r2['min_value']; $thr['temp_max']=$r2['max_value']; }
     if ($r2['metric']==='humidity')       { $thr['hum_min']=$r2['min_value'];  $thr['hum_max']=$r2['max_value']; }
     if ($r2['metric']==='emergency_temp') { $thr['emerg_temp_low']=$r2['min_value']; $thr['emerg_temp_high']=$r2['max_value']; }
-    if ($r2['metric']==='emergency_hum')  { $thr['emerg_hum_low']=$r2['min_value']; $thr['emerg_hum_high']=$r2['max_value']; }
+    if ($r2['metric']==='emergency_hum')  { $thr['emerg_hum_high']=$r2['max_value']; }
 }
 
 $errors = []; $success = '';
@@ -183,6 +182,7 @@ $rules = [];
 $r=$conn->query("SELECT * FROM automation_rules ORDER BY device, id");
 if($r) while($row=$r->fetch_assoc()) $rules[]=$row;
 
+// Active (unresolved) faults
 $active_faults = [];
 $r=$conn->query("SELECT * FROM device_faults WHERE resolved=0 ORDER BY logged_at DESC");
 if($r) while($row=$r->fetch_assoc()) $active_faults[]=$row;
@@ -432,7 +432,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
     <a href="logs.php"><i class="fas fa-list-check"></i> Logs</a>
     <a href="settings.php"><i class="fas fa-gear"></i> Settings</a>
     <a href="profile.php"><i class="fas fa-sliders"></i> System Profile</a>
-    <div class="nav-bottom"><a href="logout.php"><i class="fas fa-right-from-bracket"></i> Logout</a></div>
+    <div class="nav-bottom"><a href="logout.php"><i class="fas fa-arrow-right-from-bracket"></i> Logout</a></div>
   </nav>
 </aside>
 
@@ -449,6 +449,7 @@ $msg_map = [
     'rule_deleted'    => 'Rule deleted.',
     'schedule_added'  => 'Schedule added.',
     'schedule_deleted'=> 'Schedule deleted.',
+    'fault_resolved'  => 'Fault marked as resolved.',
 ];
 $flash_msg = $msg_map[$_GET['msg'] ?? ''] ?? $success ?? '';
 ?>
@@ -911,11 +912,8 @@ document.getElementById('openAddSchedule')?.addEventListener('click',()=>openMod
   });
 })();
 </script>
+</body>
 
-<!-- ════════════════════════════════════════════
-     🍄 MushroomOS AI Assistant — Floating Bubble
-     Uses Groq llama-3.3-70b (free, no credit card)
-     ════════════════════════════════════════════ -->
 <style>
 /* ── Bubble Button ── */
 #ai-bubble-btn {
@@ -1075,10 +1073,10 @@ document.getElementById('openAddSchedule')?.addEventListener('click',()=>openMod
 <div id="ai-chat-window" role="dialog" aria-label="MushroomOS AI Assistant">
   <!-- Header -->
   <div class="ai-chat-header">
-    <div class="ai-chat-avatar"><i class="fas fa-seedling"></i></div>
+    <div class="ai-chat-avatar">🍄</div>
     <div class="ai-chat-header-info">
       <div class="ai-chat-header-name">MushroomOS Assistant</div>
-      <div class="ai-chat-header-sub">Powered by Groq AI</div>
+      <div class="ai-chat-header-sub">Powered by Groq · llama-3.3-70b</div>
     </div>
     <button class="ai-chat-close-btn" id="ai-close-btn" aria-label="Close"><i class="fas fa-times"></i></button>
   </div>
@@ -1109,7 +1107,42 @@ document.getElementById('openAddSchedule')?.addEventListener('click',()=>openMod
   const GROQ_API_KEY = '<?= htmlspecialchars(ss($ss, 'groq_api_key', '')) ?>';
   const GROQ_MODEL   = 'llama-3.3-70b-versatile';
 
-  const SYSTEM_PROMPT = `<?= getAISystemPrompt($conn, $ss) ?>`;
+  const SYSTEM_PROMPT = `You are MushroomOS Assistant, an expert AI embedded inside MushroomOS — a smart mushroom cultivation monitoring system for J.WHO Mushroom Farm.
+
+CURRENT SYSTEM STATUS (Real-time):
+- Current Time: <?= date('M j, Y h:i A') ?> (Asia/Manila)
+- Current Temperature: <?= $current_temp ?? 'Sensor offline' ?>°C
+- Current Humidity: <?= $current_humidity ?? 'Sensor offline' ?>%
+- Active Devices: <?= !empty($active_devices) ? implode(', ', $active_devices) : 'No devices active' ?>
+- Recent Alerts: <?= !empty($recent_alerts) ? $recent_alerts : 'No recent alerts' ?>
+- System Uptime: Server running normally
+
+SYSTEM DETAILS:
+- Farm: J.WHO Mushroom Farm
+- System: MushroomOS (Web-based monitoring system)
+- Location: Philippines (Asia/Manila timezone)
+- Sensors: Temperature & Humidity monitoring
+- Devices: Mist system, Fan, Heater, Sprayer, Exhaust
+- Camera: ESP32-CAM for visual monitoring
+- Database: MySQL for data storage
+- Features: Real-time monitoring, alerts, automation, reports
+- Ideal ranges: Temperature 22-28°C, Humidity 85-95%
+- Alert system: Email notifications for out-of-range conditions
+- Data retention: 90 days
+
+You help farm operators with:
+- Analyzing current sensor readings and system status
+- Interpreting device activity and automation rules
+- Diagnosing problems based on real-time data
+- Mushroom cultivation advice (oyster, shiitake, etc.)
+- Automation & device control suggestions
+- Harvest timing and post-harvest tips
+- General mushroom farming best practices
+- Understanding MushroomOS features and navigation
+
+IMPORTANT: Always reference to current system status provided above when answering. If user asks "what's happening now" or similar, provide current temperature, humidity, and device status from the system status. Be proactive in identifying potential issues based on current readings.
+
+Be concise, practical, and friendly. Use short paragraphs. When giving ranges or numbers, be specific. Always relate answers to mushroom farming context and mention relevant MushroomOS features when helpful.`;
 
   // ── State ──
   const messages = []; // { role, content }
@@ -1149,7 +1182,7 @@ document.getElementById('openAddSchedule')?.addEventListener('click',()=>openMod
     const div = document.createElement('div');
     div.className = 'ai-msg' + (isUser ? ' user' : '');
     div.innerHTML = `
-      <div class="ai-msg-avatar">${isUser ? '<i class="fas fa-user"></i>' : '<i class="fas fa-robot"></i>'}</div>
+      <div class="ai-msg-avatar">${isUser ? '<i class="fas fa-user"></i>' : '🍄'}</div>
       <div>
         <div class="ai-msg-bubble">${escapeHtml(text).replace(/\n/g, '<br>')}</div>
         <div class="ai-msg-time">${now}</div>
@@ -1168,7 +1201,7 @@ document.getElementById('openAddSchedule')?.addEventListener('click',()=>openMod
     div.className = 'ai-msg';
     div.id = 'ai-typing';
     div.innerHTML = `
-      <div class="ai-msg-avatar"><i class="fas fa-robot"></i></div>
+      <div class="ai-msg-avatar">🍄</div>
       <div><div class="ai-msg-bubble"><div class="ai-typing-dots"><span></span><span></span><span></span></div></div></div>`;
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -1260,5 +1293,4 @@ document.getElementById('openAddSchedule')?.addEventListener('click',()=>openMod
 
 })();
 </script>
-</body>
 </html>

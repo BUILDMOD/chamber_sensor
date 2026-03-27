@@ -76,7 +76,7 @@ $conn->query("CREATE TABLE IF NOT EXISTS device_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
     device VARCHAR(30) NOT NULL,
     action ENUM('ON','OFF') NOT NULL,
-    trigger_type ENUM('auto','manual','schedule','emergency','fault') NOT NULL DEFAULT 'manual',
+    trigger_type ENUM('auto','manual','schedule','emergency') NOT NULL DEFAULT 'manual',
     trigger_detail VARCHAR(200),
     duration_seconds INT DEFAULT NULL,
     logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

@@ -7,9 +7,7 @@
  *   ✅ 5 relay outputs (Mist, Fan, Heater, Sprayer, Exhaust)
  *   ✅ Auto control logic based on sensor readings
  *   ✅ Manual control from dashboard (via get_device_status.php)
- *   ✅ Buzzer activates when server detects fault/emergency
  *   ✅ I2C LCD 16x2 shows live temp & humidity
- *   ✅ Server-side fault detection forces devices OFF
  *   ✅ NTP time sync (Asia/Manila UTC+8)
  *   ✅ Sprayer schedule — ESP32-local, exact NTP timing
  */
@@ -43,8 +41,6 @@ const char* DB_PATH       = "/mushroom_system";
 #define RELAY_HEATER   18
 #define RELAY_SPRAYER  19
 #define RELAY_EXHAUST  23
-#define BUZZER_PIN     26
-
 // LCD I2C
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
@@ -113,15 +109,10 @@ bool srvFan     = false;
 bool srvHeater  = false;
 bool srvSprayer = false;
 bool srvExhaust = false;
-bool srvBuzzer  = false;
 
 float lastTemp = NAN;
 float lastHum  = NAN;
 
-// Buzzer timing
-unsigned long buzzerStart = 0;
-bool buzzerActive = false;
-const unsigned long BUZZER_BEEP_MS = 30000UL;
 
 // ================================================================
 //  ENDPOINTS
@@ -383,7 +374,6 @@ void pollServer() {
       srvHeater  = doc["heater"].as<int>()  == 1;
       srvSprayer = doc["sprayer"].as<int>() == 1;
       srvExhaust = doc["exhaust"].as<int>() == 1;
-      srvBuzzer  = doc["buzzer"].as<int>()  == 1;
 
       // Sync thresholds
       if (doc.containsKey("temp_min"))        TEMP_MIN        = doc["temp_min"].as<float>();
@@ -394,17 +384,6 @@ void pollServer() {
       if (doc.containsKey("emerg_temp_low"))  EMERG_TEMP_LOW  = doc["emerg_temp_low"].as<float>();
       if (doc.containsKey("emerg_hum_high"))  EMERG_HUM_HIGH  = doc["emerg_hum_high"].as<float>();
 
-      // Buzzer control
-      if (srvBuzzer && !buzzerActive) {
-        buzzerActive = true;
-        buzzerStart  = millis();
-        Serial.println("[FAULT] Buzzer activated by server!");
-      }
-      if (!srvBuzzer && buzzerActive) {
-        buzzerActive = false;
-        noTone(BUZZER_PIN);
-        Serial.println("[FAULT] Buzzer cleared by server.");
-      }
 
       if (justSwitchedToManual) {
         Serial.printf("[MANUAL] Switched to manual\n");
@@ -439,11 +418,8 @@ void autoControl(unsigned long now) {
 
   // Local emergency fallback
   bool emergency = (lastTemp < EMERG_TEMP_LOW || lastTemp > EMERG_TEMP_HIGH || lastHum > EMERG_HUM_HIGH);
-  if (emergency && !buzzerActive) {
-    tone(BUZZER_PIN, 3000);
+  if (emergency) {
     Serial.println("[LOCAL EMERGENCY] Sensor out of range!");
-  } else if (!emergency && !buzzerActive) {
-    noTone(BUZZER_PIN);
   }
 }
 
@@ -455,23 +431,6 @@ void manualControl() {
   applyRelays(srvMist, srvFan, srvHeater, srvSprayer, srvExhaust);
 }
 
-// ================================================================
-//  BUZZER HANDLER
-// ================================================================
-
-void handleBuzzer(unsigned long now) {
-  if (!buzzerActive) return;
-  if (now - buzzerStart >= BUZZER_BEEP_MS) {
-    buzzerActive = false;
-    noTone(BUZZER_PIN);
-    return;
-  }
-  unsigned long elapsed = (now - buzzerStart) % 500UL;
-  if (elapsed < 300) tone(BUZZER_PIN, 2500);
-  else               noTone(BUZZER_PIN);
-}
-
-// ================================================================
 //  BOOT RESET
 // ================================================================
 
@@ -488,7 +447,7 @@ void resetServerDevices() {
   h.end();
 
   // Reset local states
-  srvMist = srvFan = srvHeater = srvSprayer = srvExhaust = srvBuzzer = false;
+  srvMist = srvFan = srvHeater = srvSprayer = srvExhaust = false;
   manualMode = false;
 }
 
@@ -503,7 +462,6 @@ void setup() {
   pinMode(RELAY_HEATER,  OUTPUT); digitalWrite(RELAY_HEATER,  HIGH);
   pinMode(RELAY_SPRAYER, OUTPUT); digitalWrite(RELAY_SPRAYER, HIGH);
   pinMode(RELAY_EXHAUST, OUTPUT); digitalWrite(RELAY_EXHAUST, HIGH);
-  pinMode(BUZZER_PIN,    OUTPUT); noTone(BUZZER_PIN);
 
   Serial.begin(115200);
   delay(500);
@@ -589,6 +547,4 @@ void loop() {
     else            autoControl(now);
   }
 
-  // Handle buzzer
-  handleBuzzer(now);
 }

@@ -40,7 +40,7 @@ if ($r) {
 }
 
 // Get recent alerts (last 24 hours)
-$r = $conn->query("SELECT COUNT(*) as count FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency','fault')");
+$r = $conn->query("SELECT COUNT(*) as count FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency')");
 if ($r && $row = $r->fetch_assoc()) {
     $recent_alerts = $row['count'] . ' alerts in last 24 hours';
 }
@@ -236,37 +236,6 @@ if ($sensor_online && $latest_sensor && $latest_sensor['age_minutes'] <= 2) {
               AND resolved=0
               AND (message LIKE '%offline%' OR message LIKE '%Sensor offline%')");
     }
-}
-
-// ── Auto-resolve device fault alerts ──
-// If a fault has been resolved in device_faults table, resolve its alert too
-$conn->query("CREATE TABLE IF NOT EXISTS device_faults (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    device VARCHAR(30) NOT NULL,
-    fault_type ENUM('no_response','stuck_on') NOT NULL,
-    detail VARCHAR(200),
-    sensor_val FLOAT,
-    resolved TINYINT(1) NOT NULL DEFAULT 0,
-    logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)");
-// Resolve device alerts where the associated fault has been resolved
-$conn->query("UPDATE alert_logs al
-    SET al.resolved=1
-    WHERE al.alert_type='device'
-      AND al.resolved=0
-      AND NOT EXISTS (
-          SELECT 1 FROM device_faults df
-          WHERE df.resolved=0
-            AND al.message LIKE CONCAT('%', df.device, '%')
-      )");
-
-// ── Auto-resolve: if NO active faults at all, resolve all device alerts ──
-$active_fault_count = 0;
-$rfc = $conn->query("SELECT COUNT(*) as cnt FROM device_faults WHERE resolved=0");
-if ($rfc) $active_fault_count = intval($rfc->fetch_assoc()['cnt']);
-if ($active_fault_count === 0) {
-    $conn->query("UPDATE alert_logs SET resolved=1
-        WHERE alert_type='device' AND resolved=0");
 }
 
 // ══════════════════════════════════════════════════════
@@ -478,7 +447,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
     <a href="logs.php" class="active"><i class="fas fa-list-check"></i> Logs</a>
     <a href="settings.php"><i class="fas fa-gear"></i> Settings</a>
     <a href="profile.php"><i class="fas fa-sliders"></i> System Profile</a>
-    <div class="nav-bottom"><a href="logout.php"><i class="fas fa-arrow-right-from-bracket"></i> Logout</a></div>
+    <div class="nav-bottom"><a href="logout.php"><i class="fas fa-right-from-bracket"></i> Logout</a></div>
   </nav>
 </aside>
 
@@ -538,7 +507,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
     <!-- Auto-resolve info notice -->
     <div class="autoresolve-notice">
       <i class="fas fa-rotate"></i>
-      Alerts auto-resolve when conditions return to normal: temperature (<?= $thr['temp_min'] ?>–<?= $thr['temp_max'] ?>°C), humidity (<?= $thr['hum_min'] ?>–<?= $thr['hum_max'] ?>%), sensor online, and no active device faults.
+      Alerts auto-resolve when conditions return to normal: temperature (<?= $thr['temp_min'] ?>–<?= $thr['temp_max'] ?>°C), humidity (<?= $thr['hum_min'] ?>–<?= $thr['hum_max'] ?>%), and sensor online.
     </div>
 
     <!-- Tabs -->
@@ -860,10 +829,10 @@ if(urlTab==='system'){
 <div id="ai-chat-window" role="dialog" aria-label="MushroomOS AI Assistant">
   <!-- Header -->
   <div class="ai-chat-header">
-    <div class="ai-chat-avatar">🍄</div>
+    <div class="ai-chat-avatar"><i class="fas fa-seedling"></i></div>
     <div class="ai-chat-header-info">
       <div class="ai-chat-header-name">MushroomOS Assistant</div>
-      <div class="ai-chat-header-sub">Powered by Groq · llama-3.3-70b</div>
+      <div class="ai-chat-header-sub">Powered by Groq AI</div>
     </div>
     <button class="ai-chat-close-btn" id="ai-close-btn" aria-label="Close"><i class="fas fa-times"></i></button>
   </div>
@@ -941,7 +910,7 @@ if(urlTab==='system'){
     const div = document.createElement('div');
     div.className = 'ai-msg' + (isUser ? ' user' : '');
     div.innerHTML = `
-      <div class="ai-msg-avatar">${isUser ? '<i class="fas fa-user"></i>' : '🍄'}</div>
+      <div class="ai-msg-avatar">${isUser ? '<i class="fas fa-user"></i>' : '<i class="fas fa-robot"></i>'}</div>
       <div>
         <div class="ai-msg-bubble">${escapeHtml(text).replace(/\n/g, '<br>')}</div>
         <div class="ai-msg-time">${now}</div>
@@ -960,7 +929,7 @@ if(urlTab==='system'){
     div.className = 'ai-msg';
     div.id = 'ai-typing';
     div.innerHTML = `
-      <div class="ai-msg-avatar">🍄</div>
+      <div class="ai-msg-avatar"><i class="fas fa-robot"></i></div>
       <div><div class="ai-msg-bubble"><div class="ai-typing-dots"><span></span><span></span><span></span></div></div></div>`;
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -1052,8 +1021,3 @@ if(urlTab==='system'){
 
 })();
 </script>
-
-<!-- Simple AI Chat Bubble -->
-<?php include('includes/simple_ai_chat.php'); ?>
-
-</html>

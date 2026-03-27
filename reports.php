@@ -451,7 +451,7 @@ function navUrl($view, $year, $month, $day) {
     <a href="logs.php"><i class="fas fa-list-check"></i> Logs</a>
     <a href="settings.php"><i class="fas fa-gear"></i> Settings</a>
     <a href="profile.php"><i class="fas fa-sliders"></i> System Profile</a>
-    <div class="nav-bottom"><a href="logout.php"><i class="fas fa-arrow-right-from-bracket"></i> Logout</a></div>
+    <div class="nav-bottom"><a href="logout.php"><i class="fas fa-right-from-bracket"></i> Logout</a></div>
   </nav>
 </aside>
 
@@ -1049,10 +1049,10 @@ function navUrl($view, $year, $month, $day) {
 <div id="ai-chat-window" role="dialog" aria-label="MushroomOS AI Assistant">
   <!-- Header -->
   <div class="ai-chat-header">
-    <div class="ai-chat-avatar">🍄</div>
+    <div class="ai-chat-avatar"><i class="fas fa-seedling"></i></div>
     <div class="ai-chat-header-info">
       <div class="ai-chat-header-name">MushroomOS Assistant</div>
-      <div class="ai-chat-header-sub">Powered by Groq · llama-3.3-70b</div>
+      <div class="ai-chat-header-sub">Powered by Groq AI</div>
     </div>
     <button class="ai-chat-close-btn" id="ai-close-btn" aria-label="Close"><i class="fas fa-times"></i></button>
   </div>
@@ -1123,7 +1123,7 @@ function navUrl($view, $year, $month, $day) {
     const div = document.createElement('div');
     div.className = 'ai-msg' + (isUser ? ' user' : '');
     div.innerHTML = `
-      <div class="ai-msg-avatar">${isUser ? '<i class="fas fa-user"></i>' : '🍄'}</div>
+      <div class="ai-msg-avatar">${isUser ? '<i class="fas fa-user"></i>' : '<i class="fas fa-robot"></i>'}</div>
       <div>
         <div class="ai-msg-bubble">${escapeHtml(text).replace(/\n/g, '<br>')}</div>
         <div class="ai-msg-time">${now}</div>
@@ -1142,7 +1142,7 @@ function navUrl($view, $year, $month, $day) {
     div.className = 'ai-msg';
     div.id = 'ai-typing';
     div.innerHTML = `
-      <div class="ai-msg-avatar">🍄</div>
+      <div class="ai-msg-avatar"><i class="fas fa-robot"></i></div>
       <div><div class="ai-msg-bubble"><div class="ai-typing-dots"><span></span><span></span><span></span></div></div></div>`;
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
