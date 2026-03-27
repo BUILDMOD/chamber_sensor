@@ -58,10 +58,67 @@ if ($stmt->execute()) {
     require_once 'auto_engine.php';
     runAutoEngine($conn, floatval($temperature), floatval($humidity), $timestamp);
 
-    // ── Run sprayer schedule check on every sensor submission ──
-    // ESP32 calls submit_data.php every 8 seconds — this guarantees schedule_runner
-    // fires within 8 seconds of the scheduled time (no cron needed)
-    require_once 'schedule_runner.php';
+    // ── System Online Recovery Detection ──
+    // Check if this is the first data after being offline
+    $lastDataQuery = $conn->query("SELECT timestamp FROM sensor_data ORDER BY id DESC LIMIT 2 OFFSET 1");
+    $prevTimestamp = null;
+    if ($lastDataQuery && $lastDataQuery->num_rows > 0) {
+        $prevRow = $lastDataQuery->fetch_assoc();
+        $prevTimestamp = $prevRow['timestamp'];
+    }
+    
+    // If previous data was more than 5 minutes ago, system was offline
+    if ($prevTimestamp) {
+        $offlineMinutes = round((strtotime($timestamp) - strtotime($prevTimestamp)) / 60);
+        if ($offlineMinutes > 5) {
+            // System was offline, send recovery notification
+            include_once 'send_email.php';
+            
+            // Get current logged-in user from database (most recent active session)
+            $recipient = '';
+            // First try to get the most recently active user
+            $active_user_query = $conn->query("SELECT u.email FROM users u 
+                JOIN system_logs sl ON u.username = sl.user 
+                WHERE sl.event_type = 'login' 
+                ORDER BY sl.logged_at DESC LIMIT 1");
+            if ($active_user_query && $active_user_query->num_rows > 0) {
+                $recipient = $active_user_query->fetch_assoc()['email'];
+            }
+            
+            // Fallback to owner if no active user found
+            if (empty($recipient)) {
+                $oq = $conn->prepare("SELECT email FROM users WHERE role = 'owner' LIMIT 1");
+                $oq->execute();
+                $or2 = $oq->get_result();
+                if ($or2->num_rows > 0) $recipient = $or2->fetch_assoc()['email'];
+                $oq->close();
+            }
+            
+            if (!empty($recipient)) {
+                $subject = "✅ MushroomOS — System Online";
+                $body = "
+                    <div style='font-family:sans-serif;max-width:480px;margin:0 auto;'>
+                        <div style='background:#2b4d30;padding:24px;border-radius:12px 12px 0 0;text-align:center;'>
+                            <h2 style='color:#c8e8b8;margin:0;font-size:20px;'>&#127812; MushroomOS — System Online</h2>
+                            <p style='color:rgba(200,232,184,0.6);font-size:12px;margin:6px 0 0;'>J.WHO Mushroom Farm</p>
+                        </div>
+                        <div style='background:#ffffff;padding:24px;border-radius:0 0 12px 12px;border:1px solid #e0e0e0;'>
+                            <p style='background:#e8f5e8;border-left:4px solid #1a9e5c;padding:12px 16px;border-radius:4px;color:#1a9e5c;font-weight:600;margin:0 0 16px;'>
+                                &#10004; System is back online after being offline for {$offlineMinutes} minutes.
+                            </p>
+                            <p style='color:#555;font-size:13px;'>Current readings:</p>
+                            <table style='width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;'>
+                                <tr><td style='padding:8px 12px;color:#6e7681;'>Temperature</td><td style='padding:8px 12px;font-weight:600;'>{$temperature}°C</td></tr>
+                                <tr><td style='padding:8px 12px;color:#6e7681;'>Humidity</td><td style='padding:8px 12px;font-weight:600;'>{$humidity}%</td></tr>
+                                <tr><td style='padding:8px 12px;color:#6e7681;'>Back Online</td><td style='padding:8px 12px;font-weight:600;'>" . date('M j, Y h:i:s A', strtotime($timestamp)) . "</td></tr>
+                            </table>
+                            <p style='font-size:12px;color:#aaa;text-align:center;margin:0;'>MushroomOS &middot; J.WHO Mushroom Farm</p>
+                        </div>
+                    </div>";
+                sendEmail($recipient, $subject, $body);
+            }
+        }
+    }
 
     $conn->query("CREATE TABLE IF NOT EXISTS alert_thresholds (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -167,15 +224,16 @@ if ($stmt->execute()) {
         if ($should_notify) {
             $cooldown_min = intval($ss_notif['notify_cooldown_min'] ?? $ns['notify_cooldown_min'] ?? 30);
             $recipient = '';
-            @session_start();
-            if (!empty($_SESSION['user'])) {
-                $uq = $conn->prepare("SELECT email FROM users WHERE username = ? LIMIT 1");
-                $uq->bind_param("s", $_SESSION['user']);
-                $uq->execute();
-                $ur = $uq->get_result();
-                if ($ur->num_rows > 0) $recipient = $ur->fetch_assoc()['email'];
-                $uq->close();
+            // First try to get most recently active user
+            $active_user_query = $conn->query("SELECT u.email FROM users u 
+                JOIN system_logs sl ON u.username = sl.user 
+                WHERE sl.event_type = 'login' 
+                ORDER BY sl.logged_at DESC LIMIT 1");
+            if ($active_user_query && $active_user_query->num_rows > 0) {
+                $recipient = $active_user_query->fetch_assoc()['email'];
             }
+            
+            // Fallback to owner if no active user found
             if (empty($recipient)) {
                 $oq = $conn->prepare("SELECT email FROM users WHERE role = 'owner' LIMIT 1");
                 $oq->execute();

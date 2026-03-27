@@ -13,6 +13,7 @@
  *   ✅ NTP time sync (Asia/Manila UTC+8)
  *   ✅ Sprayer schedule — ESP32-local, exact NTP timing (fetched from server DB)
  *   ✅ SAFE BOOT SEQUENCE - prevents unwanted device activation on power-on
+ *   ✅ FIXED AM/PM time conversion from database
  *
  * ================================================================
  *  WIRING GUIDE
@@ -91,7 +92,6 @@ const char* DB_PATH       = "/mushroom_system";
 #define RELAY_HEATER   18
 #define RELAY_SPRAYER  19
 #define RELAY_EXHAUST  23
-#define BUZZER_PIN     26
 
 // LCD I2C address — try 0x27 first, if blank screen try 0x3F
 LiquidCrystal_I2C lcd(0x27, 16, 2);
@@ -165,15 +165,9 @@ bool  srvFan     = false;
 bool  srvHeater  = false;
 bool  srvSprayer = false;
 bool  srvExhaust = false;
-bool  srvBuzzer  = false;
 
 float lastTemp = NAN;
 float lastHum  = NAN;
-
-// ── Buzzer timing (non-blocking) ──
-unsigned long buzzerStart = 0;
-bool          buzzerActive = false;
-const unsigned long BUZZER_BEEP_MS = 30000UL;
 
 // ================================================================
 //  ENDPOINTS
@@ -235,39 +229,114 @@ void syncNTP() {
 }
 
 // ================================================================
+//  CONVERT TIME STRING TO SECONDS SINCE MIDNIGHT (FIXED VERSION)
+//  Handles both 24-hour format (HH:MM:SS) and 12-hour format with AM/PM
+// ================================================================
+
+int timeStringToSeconds(String timeStr) {
+  // Remove any extra spaces
+  timeStr.trim();
+  
+  // Handle 24-hour format directly (HH:MM:SS or HH:MM)
+  if (timeStr.length() >= 5 && timeStr.indexOf(':') >= 0) {
+    int firstColon = timeStr.indexOf(':');
+    int secondColon = timeStr.indexOf(':', firstColon + 1);
+    
+    int hour = timeStr.substring(0, firstColon).toInt();
+    int minute = 0;
+    int second = 0;
+    
+    if (secondColon > 0) {
+      // Format: HH:MM:SS
+      minute = timeStr.substring(firstColon + 1, secondColon).toInt();
+      second = timeStr.substring(secondColon + 1).toInt();
+    } else {
+      // Format: HH:MM
+      minute = timeStr.substring(firstColon + 1).toInt();
+      second = 0;
+    }
+    
+    // Convert to 24-hour format if needed
+    if (timeStr.indexOf("AM") > 0 || timeStr.indexOf("am") > 0) {
+      // 12 AM = 0 hour
+      if (hour == 12) hour = 0;
+    } else if (timeStr.indexOf("PM") > 0 || timeStr.indexOf("pm") > 0) {
+      // 12 PM stays 12, other PM hours add 12
+      if (hour != 12) hour += 12;
+    }
+    
+    // Validate and convert to seconds
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59 && second >= 0 && second <= 59) {
+      int totalSeconds = hour * 3600 + minute * 60 + second;
+      Serial.printf("[Time] Converted '%s' to %d seconds (%02d:%02d:%02d)\n", 
+                    timeStr.c_str(), totalSeconds, hour, minute, second);
+      return totalSeconds;
+    }
+  }
+  
+  Serial.printf("[Time] ERROR: Invalid time format '%s'\n", timeStr.c_str());
+  return -1; // Invalid time
+}
+
+// ================================================================
 //  FETCH SPRAYER SCHEDULES FROM SERVER
 // ================================================================
 
 void fetchSpraySchedules() {
   if (WiFi.status() != WL_CONNECTED) return;
+  
+  Serial.println("[Schedule] Fetching schedules from server...");
+  
   HTTPClient http;
-  http.begin(ENDPOINT_SCHEDULES);
+  http.begin(String(SERVER_HOST) + String(DB_PATH) + "/get_spray_schedules.php");
   http.setTimeout(5000);
-  int code = http.GET();
-  if (code != 200) { http.end(); return; }
-
-  String payload = http.getString();
-  http.end();
-
-  StaticJsonDocument<1024> doc;
-  if (deserializeJson(doc, payload)) return;
-
-  spraySlotCount = 0;
-  JsonArray arr = doc["schedules"].as<JsonArray>();
-  for (JsonObject s : arr) {
-    if (spraySlotCount >= MAX_SPRAY_SLOTS) break;
-    spraySlots[spraySlotCount].timeOfDay   = s["time_of_day"].as<int>();
-    spraySlots[spraySlotCount].durationSec = s["duration_sec"].as<int>();
-    spraySlots[spraySlotCount].active      = false;
-    spraySlots[spraySlotCount].firedToday  = false;
-    spraySlots[spraySlotCount].startMs     = 0;
-    spraySlotCount++;
-    Serial.printf("[Schedule] Slot %d: %ds duration at %ds from midnight\n",
-      spraySlotCount,
-      spraySlots[spraySlotCount-1].durationSec,
-      spraySlots[spraySlotCount-1].timeOfDay);
+  int httpCode = http.GET();
+  
+  if (httpCode == 200) {
+    String payload = http.getString();
+    Serial.printf("[Schedule] Server response: %s\n", payload.c_str());
+    
+    StaticJsonDocument<512> doc;
+    if (!deserializeJson(doc, payload) && doc.containsKey("schedules")) {
+      spraySlotCount = 0;
+      
+      for (JsonObject s : doc["schedules"].as<JsonArray>()) {
+        if (spraySlotCount >= MAX_SPRAY_SLOTS) break;
+        
+        // Get time string and convert to seconds (FIXED)
+        String timeStr = s["run_time"].as<String>();
+        int timeInSeconds = timeStringToSeconds(timeStr);
+        
+        if (timeInSeconds >= 0) { // Valid time
+          spraySlots[spraySlotCount].timeOfDay   = timeInSeconds;
+          spraySlots[spraySlotCount].durationSec = s["duration_sec"].as<int>();
+          spraySlots[spraySlotCount].active      = false;
+          spraySlots[spraySlotCount].firedToday  = false;
+          spraySlots[spraySlotCount].startMs     = 0;
+          
+          // Convert seconds back to readable format for display
+          int displayHour = timeInSeconds / 3600;
+          int displayMin = (timeInSeconds % 3600) / 60;
+          int displaySec = timeInSeconds % 60;
+          
+          Serial.printf("[Schedule] Slot %d: %ds duration at %02d:%02d:%02d (from '%s')\n",
+            spraySlotCount + 1,
+            spraySlots[spraySlotCount].durationSec,
+            displayHour, displayMin, displaySec,
+            timeStr.c_str());
+          
+          spraySlotCount++;
+        }
+      }
+      Serial.printf("[Schedule] Loaded %d valid spray slots\n", spraySlotCount);
+    } else {
+      Serial.println("[Schedule] Failed to parse JSON response");
+    }
+  } else {
+    Serial.printf("[Schedule] HTTP error: %d\n", httpCode);
   }
-  Serial.printf("[Schedule] Loaded %d spray slots\n", spraySlotCount);
+  
+  http.end();
 }
 
 // ================================================================
@@ -306,46 +375,86 @@ void handleSprayerSchedule() {
   for (int i = 0; i < spraySlotCount; i++) {
     SpraySlot &slot = spraySlots[i];
 
-    // Start spray
+    // Start spray (with 60-second window - more forgiving)
     if (!slot.active && !slot.firedToday &&
         nowSeconds >= slot.timeOfDay &&
-        nowSeconds < slot.timeOfDay + 5) {
+        nowSeconds < slot.timeOfDay + 60) {
       slot.active     = true;
       slot.firedToday = true;
       slot.startMs    = millis();
+      
+      // Display schedule time in readable format
+      int schedHour = slot.timeOfDay / 3600;
+      int schedMin = (slot.timeOfDay % 3600) / 60;
+      Serial.printf("[Spray] Slot %d TRIGGERED at %02d:%02d — duration %d sec\n", 
+                    i + 1, schedHour, schedMin, slot.durationSec);
+      
       if (WiFi.status() == WL_CONNECTED) {
         // Turn sprayer ON
         HTTPClient h;
-        h.begin(String(SERVER_HOST) + String(DB_PATH) + "/update_device_status.php?sprayer=1");
-        h.GET(); h.end();
+        String statusUrl = String(SERVER_HOST) + String(DB_PATH) + "/update_device_status.php?sprayer=1";
+        Serial.printf("[HTTP] Turning sprayer ON: %s\n", statusUrl.c_str());
+        h.begin(statusUrl);
+        int httpCode = h.GET();
+        Serial.printf("[HTTP] Status update response: %d\n", httpCode);
+        h.end();
+        
         // Log ON event to device_logs
         HTTPClient hLog;
         String logUrl = String(SERVER_HOST) + String(DB_PATH)
           + "/log_device_event.php?device=sprayer&action=ON&trigger=schedule"
           + "&detail=Schedule+started+(duration+" + String(slot.durationSec) + "s)";
+        Serial.printf("[HTTP] Logging ON event: %s\n", logUrl.c_str());
         hLog.begin(logUrl);
-        hLog.GET(); hLog.end();
+        int logCode = hLog.GET();
+        Serial.printf("[HTTP] Log ON response: %d\n", logCode);
+        hLog.end();
+        
+        if (httpCode == 200 && logCode == 200) {
+          Serial.println("[Spray] ✓ Sprayer ON and logged successfully");
+        } else {
+          Serial.println("[Spray] ✗ Failed to update status or log event");
+        }
+      } else {
+        Serial.println("[Spray] ✗ WiFi not connected - cannot update server");
       }
-      Serial.printf("[Spray] Slot %d ON — duration %d sec\n", i, slot.durationSec);
     }
 
     // Stop spray after duration
     if (slot.active && (millis() - slot.startMs >= (unsigned long)slot.durationSec * 1000UL)) {
       slot.active = false;
+      
+      Serial.printf("[Spray] Slot %d COMPLETED - turning OFF\n", i + 1);
+      
       if (WiFi.status() == WL_CONNECTED) {
         // Turn sprayer OFF
         HTTPClient h;
-        h.begin(String(SERVER_HOST) + String(DB_PATH) + "/update_device_status.php?sprayer=0");
-        h.GET(); h.end();
+        String statusUrl = String(SERVER_HOST) + String(DB_PATH) + "/update_device_status.php?sprayer=0";
+        Serial.printf("[HTTP] Turning sprayer OFF: %s\n", statusUrl.c_str());
+        h.begin(statusUrl);
+        int httpCode = h.GET();
+        Serial.printf("[HTTP] Status update response: %d\n", httpCode);
+        h.end();
+        
         // Log OFF event to device_logs with duration
         HTTPClient hLog;
         String logUrl = String(SERVER_HOST) + String(DB_PATH)
           + "/log_device_event.php?device=sprayer&action=OFF&trigger=schedule"
           + "&detail=Schedule+completed&duration=" + String(slot.durationSec);
+        Serial.printf("[HTTP] Logging OFF event: %s\n", logUrl.c_str());
         hLog.begin(logUrl);
-        hLog.GET(); hLog.end();
+        int logCode = hLog.GET();
+        Serial.printf("[HTTP] Log OFF response: %d\n", logCode);
+        hLog.end();
+        
+        if (httpCode == 200 && logCode == 200) {
+          Serial.println("[Spray] ✓ Sprayer OFF and logged successfully");
+        } else {
+          Serial.println("[Spray] ✗ Failed to update status or log event");
+        }
+      } else {
+        Serial.println("[Spray] ✗ WiFi not connected - cannot update server");
       }
-      Serial.printf("[Spray] Slot %d OFF — done\n", i);
     }
   }
 }
@@ -360,6 +469,12 @@ void readSensors() {
   if (!isnan(t)) lastTemp = t;
   if (!isnan(h)) lastHum  = h;
   Serial.printf("[Sensor] Temp: %.1f°C  Hum: %.1f%%\n", lastTemp, lastHum);
+  
+  // Debug emergency thresholds
+  Serial.printf("[Debug] Emergency thresholds: Temp < %.1f°C or > %.1f°C, Hum > %.1f%%\n", 
+                EMERG_TEMP_LOW, EMERG_TEMP_HIGH, EMERG_HUM_HIGH);
+  bool emergency = (lastTemp < EMERG_TEMP_LOW || lastTemp > EMERG_TEMP_HIGH || lastHum > EMERG_HUM_HIGH);
+  Serial.printf("[Debug] Emergency state: %s\n", emergency ? "TRUE" : "FALSE");
 }
 
 // ================================================================
@@ -441,12 +556,47 @@ void pollServer() {
       bool justSwitchedToManual = (!prevManual && newManual && bootComplete);
 
       manualMode = newManual;
-      srvMist    = doc["mist"].as<int>()    == 1;
-      srvFan     = doc["fan"].as<int>()     == 1;
-      srvHeater  = doc["heater"].as<int>()  == 1;
-      srvSprayer = doc["sprayer"].as<int>() == 1;
-      srvExhaust = doc["exhaust"].as<int>() == 1;
-      srvBuzzer  = doc["buzzer"].as<int>()  == 1;
+      
+      // Parse device states correctly - they're now nested objects
+      if (doc.containsKey("mist")) {
+        srvMist = doc["mist"].as<int>() == 1;
+      }
+      if (doc.containsKey("fan")) {
+        srvFan = doc["fan"].as<int>() == 1;
+      }
+      if (doc.containsKey("heater")) {
+        srvHeater = doc["heater"].as<int>() == 1;
+      }
+      if (doc.containsKey("sprayer")) {
+        srvSprayer = doc["sprayer"].as<int>() == 1;
+      }
+      if (doc.containsKey("exhaust")) {
+        srvExhaust = doc["exhaust"].as<int>() == 1;
+      }
+      if (doc.containsKey("buzzer")) {
+        srvBuzzer = doc["buzzer"].as<int>() == 1;
+      }
+
+      // Debug: Show controlled_by values from the controlled_by object
+      String mistControl = "unknown";
+      String fanControl = "unknown";
+      String heaterControl = "unknown";
+      String sprayerControl = "unknown";
+      String exhaustControl = "unknown";
+      
+      if (doc.containsKey("controlled_by")) {
+        JsonObject controlled = doc["controlled_by"];
+        mistControl = controlled["mist"] | "unknown";
+        fanControl = controlled["fan"] | "unknown";
+        heaterControl = controlled["heater"] | "unknown";
+        sprayerControl = controlled["sprayer"] | "unknown";
+        exhaustControl = controlled["exhaust"] | "unknown";
+      }
+      
+      Serial.printf("[Server] States: mist=%d(%s) fan=%d(%s) heater=%d(%s) exhaust=%d(%s) sprayer=%d(%s)\n",
+                    srvMist, mistControl.c_str(), srvFan, fanControl.c_str(), 
+                    srvHeater, heaterControl.c_str(), srvExhaust, exhaustControl.c_str(),
+                    srvSprayer, sprayerControl.c_str());
 
       // Sync thresholds from server
       if (doc.containsKey("temp_min"))        TEMP_MIN        = doc["temp_min"].as<float>();
@@ -456,18 +606,6 @@ void pollServer() {
       if (doc.containsKey("emerg_temp_high")) EMERG_TEMP_HIGH = doc["emerg_temp_high"].as<float>();
       if (doc.containsKey("emerg_temp_low"))  EMERG_TEMP_LOW  = doc["emerg_temp_low"].as<float>();
       if (doc.containsKey("emerg_hum_high"))  EMERG_HUM_HIGH  = doc["emerg_hum_high"].as<float>();
-
-      // Buzzer from server fault signal
-      if (srvBuzzer && !buzzerActive) {
-        buzzerActive = true;
-        buzzerStart  = millis();
-        Serial.println("[FAULT] Buzzer activated by server!");
-      }
-      if (!srvBuzzer && buzzerActive) {
-        buzzerActive = false;
-        noTone(BUZZER_PIN);
-        Serial.println("[FAULT] Buzzer cleared by server.");
-      }
 
       // ── Apply relay state after poll ──
       // Note: actual relay writes are handled by manualControl()/autoControl() in loop()
@@ -494,11 +632,83 @@ bool prevSprayer = false;
 bool prevExhaust = false;
 
 void applyRelays(bool mist, bool fan, bool heater, bool sprayer, bool exhaust) {
-  if (mist    != prevMist)    { digitalWrite(RELAY_MIST,    mist    ? LOW : HIGH); prevMist    = mist;    }
-  if (fan     != prevFan)     { digitalWrite(RELAY_FAN,     fan     ? LOW : HIGH); prevFan     = fan;     }
-  if (heater  != prevHeater)  { digitalWrite(RELAY_HEATER,  heater  ? LOW : HIGH); prevHeater  = heater;  }
-  if (sprayer != prevSprayer) { digitalWrite(RELAY_SPRAYER, sprayer ? LOW : HIGH); prevSprayer = sprayer; }
-  if (exhaust != prevExhaust) { digitalWrite(RELAY_EXHAUST, exhaust ? LOW : HIGH); prevExhaust = exhaust; }
+  if (mist    != prevMist)    { 
+    digitalWrite(RELAY_MIST,    mist    ? LOW : HIGH); 
+    logDeviceChange("mist", mist, prevMist);
+    prevMist = mist; 
+  }
+  if (fan     != prevFan)     { 
+    digitalWrite(RELAY_FAN,     fan     ? LOW : HIGH); 
+    logDeviceChange("fan", fan, prevFan);
+    prevFan = fan;     
+  }
+  if (heater  != prevHeater)  { 
+    digitalWrite(RELAY_HEATER,  heater  ? LOW : HIGH); 
+    logDeviceChange("heater", heater, prevHeater);
+    prevHeater = heater;  
+  }
+  if (sprayer != prevSprayer) { 
+    digitalWrite(RELAY_SPRAYER, sprayer ? LOW : HIGH); 
+    // Sprayer logging is handled separately in handleSprayerSchedule()
+    prevSprayer = sprayer; 
+  }
+  if (exhaust != prevExhaust) { 
+    digitalWrite(RELAY_EXHAUST, exhaust ? LOW : HIGH); 
+    logDeviceChange("exhaust", exhaust, prevExhaust);
+    prevExhaust = exhaust; 
+  }
+}
+
+// Log device state changes to device activity log
+void logDeviceChange(String device, bool newState, bool prevState) {
+  if (WiFi.status() != WL_CONNECTED) return;
+  
+  String action = newState ? "ON" : "OFF";
+  String trigger = "auto"; // sensor-based automation
+  String detail = "";
+  
+  // Create detailed trigger description based on current sensor values
+  if (device == "fan") {
+    if (newState) {
+      detail = "Temperature+above+threshold+(+" + String(lastTemp, 1) + "°C)";
+    } else {
+      detail = "Temperature+back+in+range+(+" + String(lastTemp, 1) + "°C)";
+    }
+  } else if (device == "mist") {
+    if (newState) {
+      detail = "Humidity+below+threshold+(+" + String(lastHum, 1) + "%)";
+    } else {
+      detail = "Humidity+back+in+range+(+" + String(lastHum, 1) + "%)";
+    }
+  } else if (device == "heater") {
+    if (newState) {
+      detail = "Temperature+below+threshold+(+" + String(lastTemp, 1) + "°C)";
+    } else {
+      detail = "Temperature+back+in+range+(+" + String(lastTemp, 1) + "°C)";
+    }
+  } else if (device == "exhaust") {
+    if (newState) {
+      detail = "Temperature+above+threshold+(+" + String(lastTemp, 1) + "°C)";
+    } else {
+      detail = "Temperature+back+in+range+(+" + String(lastTemp, 1) + "°C)";
+    }
+  }
+  
+  HTTPClient http;
+  String logUrl = String(SERVER_HOST) + String(DB_PATH)
+    + "/log_device_event.php?device=" + device
+    + "&action=" + action
+    + "&trigger=" + trigger
+    + "&detail=" + detail;
+  
+  Serial.printf("[Log] %s %s: %s\n", device.c_str(), action.c_str(), detail.c_str());
+  
+  http.begin(logUrl);
+  int httpCode = http.GET();
+  if (httpCode != 200) {
+    Serial.printf("[Log] Failed to log %s change: HTTP %d\n", device.c_str(), httpCode);
+  }
+  http.end();
 }
 
 // ================================================================
@@ -508,17 +718,24 @@ void applyRelays(bool mist, bool fan, bool heater, bool sprayer, bool exhaust) {
 void autoControl(unsigned long now) {
   if (isnan(lastTemp) || isnan(lastHum)) return;
 
-  // All devices follow server DB state — auto_engine.php handles all logic
-  applyRelays(srvMist, srvFan, srvHeater, srvSprayer, srvExhaust);
+  // Debug: Show current sensor values and server states
+  Serial.printf("[Auto] Temp: %.1f°C Hum: %.1f%% | Server: mist=%d fan=%d heater=%d exhaust=%d\n", 
+                lastTemp, lastHum, srvMist, srvFan, srvHeater, srvExhaust);
 
-  // Local emergency fallback (runs even without WiFi)
-  bool emergency = (lastTemp < EMERG_TEMP_LOW || lastTemp > EMERG_TEMP_HIGH || lastHum > EMERG_HUM_HIGH);
-  if (emergency && !buzzerActive) {
-    tone(BUZZER_PIN, 3000);
-    Serial.println("[LOCAL EMERGENCY] Sensor out of safe range!");
-  } else if (!emergency && !buzzerActive) {
-    noTone(BUZZER_PIN);
-  }
+  // Simple auto control - just follow server states without emergency overrides
+  bool finalMist    = srvMist;
+  bool finalFan     = srvFan;
+  bool finalHeater  = srvHeater;
+  bool finalExhaust = srvExhaust;
+  
+  // Sprayer follows schedule regardless
+  bool finalSprayer = srvSprayer;
+  
+  // Debug: Show final states being applied
+  Serial.printf("[Auto] Final: mist=%d fan=%d heater=%d exhaust=%d sprayer=%d\n", 
+                finalMist, finalFan, finalHeater, finalExhaust, finalSprayer);
+  
+  applyRelays(finalMist, finalFan, finalHeater, finalSprayer, finalExhaust);
 }
 
 // ================================================================
@@ -527,22 +744,6 @@ void autoControl(unsigned long now) {
 
 void manualControl() {
   applyRelays(srvMist, srvFan, srvHeater, srvSprayer, srvExhaust);
-}
-
-// ================================================================
-//  BUZZER HANDLER (non-blocking beep pattern)
-// ================================================================
-
-void handleBuzzer(unsigned long now) {
-  if (!buzzerActive) return;
-  if (now - buzzerStart >= BUZZER_BEEP_MS) {
-    buzzerActive = false;
-    noTone(BUZZER_PIN);
-    return;
-  }
-  unsigned long elapsed = (now - buzzerStart) % 500UL;
-  if (elapsed < 300) tone(BUZZER_PIN, 2500);
-  else               noTone(BUZZER_PIN);
 }
 
 // ================================================================
@@ -609,7 +810,6 @@ void setup() {
   pinMode(RELAY_HEATER,  OUTPUT); digitalWrite(RELAY_HEATER,  HIGH);
   pinMode(RELAY_SPRAYER, OUTPUT); digitalWrite(RELAY_SPRAYER, HIGH);
   pinMode(RELAY_EXHAUST, OUTPUT); digitalWrite(RELAY_EXHAUST, HIGH);
-  pinMode(BUZZER_PIN,    OUTPUT); noTone(BUZZER_PIN);
 
   Serial.begin(115200);
   delay(500);
@@ -698,7 +898,4 @@ void loop() {
     if (manualMode) manualControl();
     else            autoControl(now);
   }
-
-  // Handle buzzer
-  handleBuzzer(now);
 }
