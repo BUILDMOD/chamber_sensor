@@ -6,6 +6,9 @@
 date_default_timezone_set('Asia/Manila');
 include 'includes/db_connect.php';
 
+// Ensure ENUM is consistent
+$conn->query("ALTER TABLE alert_logs MODIFY COLUMN alert_type ENUM('temperature','humidity','system') NOT NULL");
+
 // Get latest sensor reading
 $result = $conn->query("SELECT temperature, humidity, timestamp FROM sensor_data ORDER BY id DESC LIMIT 1");
 if ($result && $result->num_rows > 0) {
@@ -33,29 +36,13 @@ if ($result && $result->num_rows > 0) {
                 $stmt->close();
             }
             
-            // Send email notification
+            // Send alert email to ALL verified users (owner + all staff)
             include_once 'send_email.php';
-            
-            // Get most recently logged-in user
-            $recipient = '';
-            $active_user_query = $conn->query("SELECT u.email FROM users u 
-                JOIN system_logs sl ON u.username = sl.user 
-                WHERE sl.event_type = 'login' 
-                ORDER BY sl.logged_at DESC LIMIT 1");
-            if ($active_user_query && $active_user_query->num_rows > 0) {
-                $recipient = $active_user_query->fetch_assoc()['email'];
-            }
-            
-            // Fallback to owner if no active user found
-            if (empty($recipient)) {
-                $oq = $conn->prepare("SELECT email FROM users WHERE role = 'owner' LIMIT 1");
-                $oq->execute();
-                $or2 = $oq->get_result();
-                if ($or2->num_rows > 0) $recipient = $or2->fetch_assoc()['email'];
-                $oq->close();
-            }
-            
-            if (!empty($recipient)) {
+            $all_recipients = [];
+            $all_users_q = $conn->query("SELECT email FROM users WHERE verified=1 AND email != ''");
+            if ($all_users_q) while ($eu = $all_users_q->fetch_assoc()) $all_recipients[] = $eu['email'];
+
+            if (!empty($all_recipients)) {
                 $subject = "⚠️ MushroomOS — System Offline";
                 $body = "
                     <div style='font-family:sans-serif;max-width:480px;margin:0 auto;'>
@@ -78,7 +65,7 @@ if ($result && $result->num_rows > 0) {
                             <p style='font-size:12px;color:#aaa;text-align:center;margin:0;'>MushroomOS &middot; J.WHO Mushroom Farm</p>
                         </div>
                     </div>";
-                sendEmail($recipient, $subject, $body);
+                foreach ($all_recipients as $r) { sendEmail($r, $subject, $body); }
             }
         }
     }

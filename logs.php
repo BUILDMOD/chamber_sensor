@@ -17,6 +17,20 @@ $r = $conn->query("SELECT setting_key,setting_value FROM system_settings");
 if ($r) while ($row = $r->fetch_assoc()) $ss[$row['setting_key']] = $row['setting_value'];
 function ss($ss, $k, $default = '') { return htmlspecialchars($ss[$k] ?? $default); }
 
+function formatLogTimestamp($ts) {
+    try {
+        // Assume DB stores UTC timestamps; show in Asia/Manila local time.
+        $dt = DateTime::createFromFormat('Y-m-d H:i:s', $ts, new DateTimeZone('UTC'));
+        if (!$dt) {
+            $dt = new DateTime($ts, new DateTimeZone('UTC'));
+        }
+        $dt->setTimezone(new DateTimeZone('Asia/Manila'));
+        return $dt->format('M j, Y — g:i:s A');
+    } catch (Exception $e) {
+        return htmlspecialchars($ts);
+    }
+}
+
 // Get real-time system data for AI Assistant
 $current_temp = null;
 $current_humidity = null;
@@ -91,6 +105,9 @@ if ($tr) while ($row = $tr->fetch_assoc()) {
     if ($row['metric']==='humidity')       { $thr['hum_min']=$row['min_value'];  $thr['hum_max']=$row['max_value']; }
 }
 
+// ── Ensure alert_logs has 'system' in ENUM (fix for old DB schema) ──
+$conn->query("ALTER TABLE alert_logs MODIFY COLUMN alert_type ENUM('temperature','humidity','system') NOT NULL");
+
 // Get latest sensor reading
 $latest_sensor = null;
 $sensor_online = false;
@@ -118,47 +135,20 @@ if (!$sensor_online) {
         $message = "Sensor offline — no data received for {$age_text}";
         $stmt = $conn->prepare("INSERT INTO alert_logs (alert_type, severity, message) VALUES (?, ?, ?)");
         if ($stmt) {
-            $severity = 'critical';
-            $stmt->bind_param("sss", $alert_type, $severity, $message);
             $alert_type = 'system';
+            $severity   = 'critical';
+            $stmt->bind_param("sss", $alert_type, $severity, $message);
             $stmt->execute();
             $stmt->close();
         }
         
-        // Send email notification for system offline
+        // Send alert email to ALL verified users (owner + all staff)
         include_once 'send_email.php';
-        
-        // Get logged-in user email first, then fallback to owner
-        $recipient = '';
-        if (!empty($_SESSION['user'])) {
-            $uq = $conn->prepare("SELECT email FROM users WHERE username = ? LIMIT 1");
-            $uq->bind_param("s", $_SESSION['user']);
-            $uq->execute();
-            $ur = $uq->get_result();
-            if ($ur->num_rows > 0) $recipient = $ur->fetch_assoc()['email'];
-            $uq->close();
-        }
-        if (empty($recipient)) {
-            // Fallback to most recently active user from system_logs
-            $active_user_query = $conn->query("SELECT u.email FROM users u 
-                JOIN system_logs sl ON u.username = sl.user 
-                WHERE sl.event_type = 'login' 
-                ORDER BY sl.logged_at DESC LIMIT 1");
-            if ($active_user_query && $active_user_query->num_rows > 0) {
-                $recipient = $active_user_query->fetch_assoc()['email'];
-            }
-            
-            // Final fallback to owner
-            if (empty($recipient)) {
-                $oq = $conn->prepare("SELECT email FROM users WHERE role = 'owner' LIMIT 1");
-                $oq->execute();
-                $or2 = $oq->get_result();
-                if ($or2->num_rows > 0) $recipient = $or2->fetch_assoc()['email'];
-                $oq->close();
-            }
-        }
-        
-        if (!empty($recipient)) {
+        $all_recipients = [];
+        $all_users_q = $conn->query("SELECT email FROM users WHERE verified=1 AND email != ''");
+        if ($all_users_q) while ($eu = $all_users_q->fetch_assoc()) $all_recipients[] = $eu['email'];
+
+        if (!empty($all_recipients)) {
             $subject = "⚠️ MushroomOS — System Offline";
             $last_temp = $latest_sensor ? $latest_sensor['temperature'] : 'Unknown';
             $last_hum = $latest_sensor ? $latest_sensor['humidity'] : 'Unknown';
@@ -185,7 +175,7 @@ if (!$sensor_online) {
                         <p style='font-size:12px;color:#aaa;text-align:center;margin:0;'>MushroomOS &middot; J.WHO Mushroom Farm</p>
                     </div>
                 </div>";
-            sendEmail($recipient, $subject, $body);
+            foreach ($all_recipients as $r) { sendEmail($r, $subject, $body); }
         }
     }
 }
@@ -246,7 +236,7 @@ if ($sensor_online && $latest_sensor && $latest_sensor['age_minutes'] <= 2) {
 $alert_type   = $_GET['alert_type']   ?? '';
 $alert_sev    = $_GET['severity']     ?? '';
 $log_type     = $_GET['log_type']     ?? '';
-$date_from    = $_GET['date_from']    ?? date('Y-m-d', strtotime('-7 days'));
+$date_from    = $_GET['date_from']    ?? date('Y-m-d', strtotime('-30 days'));
 $date_to      = $_GET['date_to']      ?? date('Y-m-d');
 
 // ── Mark all resolved (manual) ──
@@ -263,6 +253,16 @@ $wq = implode(' AND ', $where);
 $alert_logs = [];
 $r = $conn->query("SELECT * FROM alert_logs WHERE $wq ORDER BY logged_at DESC LIMIT 500");
 if ($r) while ($row = $r->fetch_assoc()) $alert_logs[] = $row;
+
+// ── Also include unresolved alerts outside the date range (so they're always visible) ──
+$extra_where = ["resolved=0", "DATE(logged_at) NOT BETWEEN '$date_from' AND '$date_to'"];
+if ($alert_type) $extra_where[] = "alert_type='".addslashes($alert_type)."'";
+if ($alert_sev)  $extra_where[] = "severity='".addslashes($alert_sev)."'";
+$ewq = implode(' AND ', $extra_where);
+$r2 = $conn->query("SELECT * FROM alert_logs WHERE $ewq ORDER BY logged_at DESC LIMIT 200");
+if ($r2) while ($row = $r2->fetch_assoc()) $alert_logs[] = $row;
+// Sort combined: newest first
+usort($alert_logs, fn($a,$b) => strcmp($b['logged_at'], $a['logged_at']));
 
 // ── Fetch system logs ──
 $swhere = ["DATE(logged_at) BETWEEN '$date_from' AND '$date_to'"];
@@ -566,7 +566,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
                     <?php endif; ?>
                   </span>
                 </td>
-                <td class="mono"><?= date('M j, Y — g:i:s A', strtotime($al['logged_at'])) ?></td>
+                <td class="mono"><?= formatLogTimestamp($al['logged_at']) ?></td>
               </tr>
               <?php endforeach; ?>
             </tbody>
@@ -613,7 +613,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
                 <td class="msg-col"><?= htmlspecialchars($sl['description']) ?></td>
                 <td style="font-weight:600;"><?= htmlspecialchars($sl['user'] ?? '—') ?></td>
                 <td class="mono"><?= htmlspecialchars($sl['ip_address'] ?? '—') ?></td>
-                <td class="mono"><?= date('M j, Y — g:i:s A', strtotime($sl['logged_at'])) ?></td>
+                <td class="mono"><?= formatLogTimestamp($sl['logged_at']) ?></td>
               </tr>
               <?php endforeach; ?>
             </tbody>
@@ -637,16 +637,21 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
 // Tabs
 const tabs = document.querySelectorAll('.tab');
 const urlTab = new URLSearchParams(location.search).get('tab');
+function activateTab(name){
+  tabs.forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
+  document.getElementById('tab-alerts').style.display = name==='alerts' ? '' : 'none';
+  document.getElementById('tab-system').style.display = name==='system' ? '' : 'none';
+}
+
 tabs.forEach(tab=>{
-  tab.addEventListener('click',()=>{
-    tabs.forEach(t=>t.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById('tab-alerts').style.display = tab.dataset.tab==='alerts'?'':'none';
-    document.getElementById('tab-system').style.display = tab.dataset.tab==='system'?'':'none';
-  });
+  tab.addEventListener('click',()=>{ activateTab(tab.dataset.tab); });
 });
+
 if(urlTab==='system'){
-  document.querySelector('[data-tab="system"]').click();
+  activateTab('system');
+} else {
+  // default to alert log on first load/refresh
+  activateTab('alerts');
 }
 </script>
 <script>

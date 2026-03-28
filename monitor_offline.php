@@ -25,13 +25,15 @@ if ($rs && $rs->num_rows > 0) {
 // Create tables if not exist
 $conn->query("CREATE TABLE IF NOT EXISTS alert_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    alert_type ENUM('temperature','humidity','device','system') NOT NULL,
+    alert_type ENUM('temperature','humidity','system') NOT NULL,
     severity ENUM('warning','critical','info') NOT NULL DEFAULT 'warning',
     message TEXT NOT NULL,
     value FLOAT NULL,
     resolved TINYINT(1) NOT NULL DEFAULT 0,
     logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )");
+// Ensure ENUM is up to date in case table already exists with old schema
+$conn->query("ALTER TABLE alert_logs MODIFY COLUMN alert_type ENUM('temperature','humidity','system') NOT NULL");
 
 // OFFLINE DETECTION AND ALERT CREATION
 if (!$sensor_online) {
@@ -40,7 +42,6 @@ if (!$sensor_online) {
         WHERE alert_type='system' 
         AND resolved=0 
         AND (message LIKE '%offline%' OR message LIKE '%Sensor offline%')
-        AND logged_at >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
         ORDER BY id DESC LIMIT 1");
     
     if (!$existing_alert || $existing_alert->num_rows === 0) {
@@ -58,41 +59,13 @@ if (!$sensor_online) {
             error_log("[monitor_offline] Created offline alert: {$message}");
         }
         
-        // Send email notification for system offline
+        // Send alert email to ALL verified users (owner + all staff)
         include_once 'send_email.php';
-        
-        // Get logged-in user email first, then fallback to owner
-        $recipient = '';
-        if (!empty($_SESSION['user'])) {
-            $uq = $conn->prepare("SELECT email FROM users WHERE username = ? LIMIT 1");
-            $uq->bind_param("s", $_SESSION['user']);
-            $uq->execute();
-            $ur = $uq->get_result();
-            if ($ur->num_rows > 0) $recipient = $ur->fetch_assoc()['email'];
-            $uq->close();
-        }
-        
-        if (empty($recipient)) {
-            // Fallback to most recently active user from system_logs
-            $active_user_query = $conn->query("SELECT u.email FROM users u 
-                JOIN system_logs sl ON u.username = sl.user 
-                WHERE sl.event_type = 'login' 
-                ORDER BY sl.logged_at DESC LIMIT 1");
-            if ($active_user_query && $active_user_query->num_rows > 0) {
-                $recipient = $active_user_query->fetch_assoc()['email'];
-            }
-            
-            // Final fallback to owner
-            if (empty($recipient)) {
-                $oq = $conn->prepare("SELECT email FROM users WHERE role = 'owner' LIMIT 1");
-                $oq->execute();
-                $or2 = $oq->get_result();
-                if ($or2->num_rows > 0) $recipient = $or2->fetch_assoc()['email'];
-                $oq->close();
-            }
-        }
-        
-        if (!empty($recipient)) {
+        $all_recipients = [];
+        $all_users_q = $conn->query("SELECT email FROM users WHERE verified=1 AND email != ''");
+        if ($all_users_q) while ($eu = $all_users_q->fetch_assoc()) $all_recipients[] = $eu['email'];
+
+        if (!empty($all_recipients)) {
             $subject = "⚠️ MushroomOS — System Offline";
             $last_temp = $latest_sensor ? $latest_sensor['temperature'] : 'Unknown';
             $last_hum = $latest_sensor ? $latest_sensor['humidity'] : 'Unknown';
@@ -120,8 +93,7 @@ if (!$sensor_online) {
                     </div>
                 </div>";
             
-            $email_result = sendEmail($recipient, $subject, $body);
-            error_log("[monitor_offline] Email result: {$email_result}");
+            foreach ($all_recipients as $r) { sendEmail($r, $subject, $body); }
         }
     }
 } else {

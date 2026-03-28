@@ -660,19 +660,27 @@ $isOwner = $sessionRole === 'owner';
             <span id="recFormDateLabel" style="font-size:12px;font-weight:600;color:var(--text);flex:1;"></span>
           </div>
           <div class="rec-form-row">
-            <label>Count</label>
-            <input type="number" id="recCount" min="0" placeholder="e.g. 12">
-            <label style="margin-left:8px;">Stage</label>
-            <select id="recStage">
-              <option value="Spawn Run">Spawn Run</option>
-              <option value="Pinning">Pinning</option>
-              <option value="Fruiting">Fruiting</option>
-              <option value="Harvest">Harvest</option>
+            <label>Weight (g)</label>
+            <input type="number" id="recCount" min="0" step="1" placeholder="e.g. 350">
+            <input type="hidden" id="recStage" value="Harvest">
+          </div>
+          <div class="rec-form-row">
+            <label>Batch #</label>
+            <input type="text" id="recBatch" placeholder="e.g. Batch 3" style="flex:1;">
+          </div>
+          <div class="rec-form-row">
+            <label>Quality</label>
+            <select id="recQuality" style="flex:1;">
+              <option value="">— select —</option>
+              <option value="Excellent">Excellent</option>
+              <option value="Good">Good</option>
+              <option value="Fair">Fair</option>
+              <option value="Poor">Poor</option>
             </select>
           </div>
           <div class="rec-form-row">
-            <label>Notes</label>
-            <textarea id="recNotes" placeholder="Optional notes…"></textarea>
+            <label>Problems</label>
+            <input type="text" id="recProblems" placeholder="e.g. may contamination sa sulok" style="flex:1;">
           </div>
           <div style="display:flex;align-items:center;gap:10px;">
             <button class="btn-save-rec" id="recSaveBtn"><i class="fas fa-plus"></i> Save Record</button>
@@ -686,7 +694,10 @@ $isOwner = $sessionRole === 'owner';
             <span style="font-size:12px;font-weight:700;color:var(--text);" id="recDetailTitle">
               Select a date to view or log records
             </span>
-            <button class="detail-clear-btn" id="recClearBtn" style="display:none;">✕ Clear</button>
+            <div style="display:flex;gap:6px;">
+              <button class="detail-clear-btn" id="recAddBtn" style="display:none;color:var(--green);"><i class="fas fa-plus" style="font-size:10px;"></i> Add</button>
+              <button class="detail-clear-btn" id="recClearBtn" style="display:none;">✕ Clear</button>
+            </div>
           </div>
           <div id="recDetailBody">
             <div class="empty-state"><i class="fas fa-seedling"></i><span>Pick a date above to see or add records.</span></div>
@@ -954,7 +965,7 @@ $isOwner = $sessionRole === 'owner';
       <li><strong>Mist</strong> — Activates to raise humidity when below ideal range.</li>
       <li><strong>Fan</strong> — Regulates temperature and maintains air circulation.</li>
       <li><strong>Heater</strong> — Adds heat when temperature drops too low.</li>
-      <li><strong>Sprayer</strong> — Directly moistens mushrooms and substrate.</li>
+      <li><strong>Sprayer</strong> — Directly moistens mushrooms.</li>
       <li><strong>Exhaust</strong> — Vents excess heat or humidity from the chamber.</li>
     </ul>
   </div>
@@ -1313,16 +1324,29 @@ async function loadRecords(date) {
 }
 
 function renderRecords(records) {
-  $$('recDetailBody').innerHTML = records.length
-    ? `<table class="rec-detail-table">
-        <thead><tr><th>Count</th><th>Stage</th><th>Notes</th></tr></thead>
-        <tbody>${records.map(r=>`<tr>
-          <td><span class="count-badge">${r.mushroom_count}</span></td>
-          <td><span class="stage-badge">${r.growth_stage}</span></td>
-          <td style="color:var(--muted);">${r.notes||'—'}</td>
-        </tr>`).join('')}</tbody>
-      </table>`
-    : `<p style="font-size:12px;color:var(--muted);padding:8px 0;">No records yet for this date.</p>`;
+  if (!records.length) {
+    $$('recDetailBody').innerHTML = '<p style="font-size:12px;color:var(--muted);padding:8px 0;">No records yet for this date.</p>';
+    return;
+  }
+  const rows = records.map(r => {
+    let batch = '—', quality = '—', problems = '—';
+    if (r.notes) {
+      const bm = r.notes.match(/Batch: ([^|]+)/);   if (bm) batch    = bm[1].trim();
+      const qm = r.notes.match(/Quality: ([^|]+)/); if (qm) quality  = qm[1].trim();
+      const pm = r.notes.match(/Problems: (.+)/);   if (pm) problems = pm[1].trim();
+    }
+    const qColor = (quality==='Excellent'||quality==='Good') ? 'var(--green)' : quality==='Fair' ? 'var(--amber)' : quality==='Poor' ? 'var(--red)' : 'var(--muted)';
+    return '<tr>'
+      + '<td><span class="count-badge">' + r.mushroom_count + 'g</span></td>'
+      + '<td style="color:var(--muted);">' + batch + '</td>'
+      + '<td><span style="font-size:11px;font-weight:600;color:' + qColor + ';">' + quality + '</span></td>'
+      + '<td style="color:var(--muted);">' + problems + '</td>'
+      + '</tr>';
+  }).join('');
+  $$('recDetailBody').innerHTML = '<table class="rec-detail-table">'
+    + '<thead><tr><th>Weight (g)</th><th>Batch</th><th>Quality</th><th>Problems</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody>'
+    + '</table>';
 }
 
 const recPicker = $$('recDatePicker');
@@ -1334,11 +1358,14 @@ recPicker.addEventListener('change', async function(){
   const label = d.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'});
   $$('recDetailTitle').textContent = `Records — ${label}`;
   $$('recClearBtn').style.display = '';
+  $$('recAddBtn').style.display = 'none';
   // Show log form
   $$('recForm').style.display = '';
   $$('recFormDateLabel').textContent = label;
   $$('recCount').value = '';
-  $$('recNotes').value = '';
+  $$('recBatch').value = '';
+  $$('recQuality').value = '';
+  $$('recProblems').value = '';
   $$('recFormMsg').className = 'rec-form-msg';
   $$('recFormMsg').textContent = '';
   // Load existing records
@@ -1347,25 +1374,38 @@ recPicker.addEventListener('change', async function(){
 });
 
 function clearRec(){
-  recPicker.value='';
+  recPicker.value = '';
   currentRecDate = null;
-  $$('recDetailTitle').textContent='Select a date to view or log records';
-  $$('recClearBtn').style.display='none';
-  $$('recForm').style.display='none';
-  $$('recDetailBody').innerHTML='<div class="empty-state"><i class="fas fa-seedling"></i><span>Pick a date above to see or add records.</span></div>';
+  $$('recDetailTitle').textContent = 'Select a date to view or log records';
+  $$('recClearBtn').style.display = 'none';
+  $$('recAddBtn').style.display = 'none';
+  $$('recForm').style.display = 'none';
+  $$('recDetailBody').innerHTML = '<div class="empty-state"><i class="fas fa-seedling"></i><span>Pick a date above to see or add records.</span></div>';
 }
 $$('recClearBtn').addEventListener('click', clearRec);
+$$('recAddBtn').addEventListener('click', function(){
+  $$('recAddBtn').style.display = 'none';
+  $$('recForm').style.display = '';
+  $$('recCount').focus();
+});
 
 // Save record
 $$('recSaveBtn').addEventListener('click', async function(){
   if (!currentRecDate) return;
   const count = $$('recCount').value.trim();
   const stage = $$('recStage').value;
-  const notes = $$('recNotes').value.trim();
+  const batch    = $$('recBatch').value.trim();
+  const quality  = $$('recQuality').value.trim();
+  const problems = $$('recProblems').value.trim();
+  const noteParts = [];
+  if (batch)    noteParts.push('Batch: ' + batch);
+  if (quality)  noteParts.push('Quality: ' + quality);
+  if (problems) noteParts.push('Problems: ' + problems);
+  const notes = noteParts.join(' | ');
 
-  if (!count || isNaN(count) || parseInt(count) < 0) {
+  if (!count || isNaN(parseFloat(count)) || parseFloat(count) < 0) {
     $$('recFormMsg').className = 'rec-form-msg err';
-    $$('recFormMsg').textContent = 'Please enter a valid mushroom count.';
+    $$('recFormMsg').textContent = 'Please enter a valid weight in grams.';
     return;
   }
 
@@ -1375,7 +1415,7 @@ $$('recSaveBtn').addEventListener('click', async function(){
   try {
     const body = new URLSearchParams({
       record_date: currentRecDate,
-      mushroom_count: parseInt(count),
+      mushroom_count: Math.round(parseFloat(count)),
       growth_stage: stage,
       notes: notes
     });
@@ -1383,10 +1423,15 @@ $$('recSaveBtn').addEventListener('click', async function(){
     const d = await r.json();
 
     if (d.success) {
-      $$('recFormMsg').className = 'rec-form-msg ok';
-      $$('recFormMsg').textContent = '✓ Record saved!';
+      // Hide form, show records only + show Add button
+      $$('recForm').style.display = 'none';
+      $$('recAddBtn').style.display = '';
       $$('recCount').value = '';
-      $$('recNotes').value = '';
+      $$('recBatch').value = '';
+      $$('recQuality').value = '';
+      $$('recProblems').value = '';
+      $$('recFormMsg').className = 'rec-form-msg';
+      $$('recFormMsg').textContent = '';
       // Reload records for this date
       const records = await loadRecords(currentRecDate);
       renderRecords(records);
@@ -1477,6 +1522,8 @@ function shiftMonthRange(dir) {
 }
 
 loadMonthlySummary();
+
+
 
 // ── Manual Image Upload ──
 let uploadFile = null;

@@ -15,6 +15,46 @@ try {
         exit;
     }
 
+    // ── POST: Save a harvest record ──
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $record_date   = $_POST['record_date']   ?? '';
+        $mushroom_count = intval($_POST['mushroom_count'] ?? 0);
+        $growth_stage  = $_POST['growth_stage']  ?? 'Harvest';
+        $notes         = trim($_POST['notes']    ?? '');
+        $created_by    = $_SESSION['user'] ?? '';
+
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $record_date)) {
+            echo json_encode(['success'=>false,'error'=>'Invalid date']);
+            exit;
+        }
+        if ($mushroom_count < 0) {
+            echo json_encode(['success'=>false,'error'=>'Invalid weight']);
+            exit;
+        }
+
+        $conn->query("CREATE TABLE IF NOT EXISTS mushroom_records (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            record_date DATE NOT NULL,
+            mushroom_count INT NOT NULL DEFAULT 0,
+            growth_stage VARCHAR(50) DEFAULT '',
+            notes TEXT DEFAULT '',
+            created_by VARCHAR(100) DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )");
+
+        $stmt = $conn->prepare("INSERT INTO mushroom_records (record_date, mushroom_count, growth_stage, notes) VALUES (?, ?, ?, ?)");
+        if (!$stmt) throw new Exception('Prepare failed: ' . $conn->error);
+        $stmt->bind_param('siis', $record_date, $mushroom_count, $growth_stage, $notes);
+        if ($stmt->execute()) {
+            echo json_encode(['success'=>true,'id'=>$stmt->insert_id]);
+        } else {
+            throw new Exception('Insert failed: ' . $stmt->error);
+        }
+        $stmt->close();
+        exit;
+    }
+
+    // ── GET: Fetch records ──
     $type  = $_GET['type']  ?? '';
     $month = $_GET['month'] ?? date('Y-m');
     $day   = $_GET['day']   ?? '';
