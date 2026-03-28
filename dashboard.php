@@ -62,7 +62,6 @@ if ($r) {
 }
 
 // Get recent alerts (last 24 hours)
-$r = $conn->query("SELECT COUNT(*) as count FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency')");
 if ($r && $row = $r->fetch_assoc()) {
     $recent_alerts = $row['count'] . ' alerts in last 24 hours';
 }
@@ -72,7 +71,7 @@ $server_time_formatted = date('M j, Y — h:i:s A');
 
 // ── Load thresholds from DB (never hardcoded) ──
 $thr = ['temp_min'=>22,'temp_max'=>28,'hum_min'=>85,'hum_max'=>95,
-        'emergency_temp_high'=>35,'emergency_temp_low'=>15,'emergency_hum_high'=>98];
+];
 $conn2 = null;
 try {
     include_once('includes/db_connect.php');
@@ -86,14 +85,11 @@ try {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )");
     $conn->query("INSERT IGNORE INTO alert_thresholds (metric,min_value,max_value) VALUES
-        ('temperature',22,28),('humidity',85,95),
-        ('emergency_temp',15,35),('emergency_hum',0,98)");
+        ('temperature',22,28),('humidity',85,95)");
     $tr = $conn->query("SELECT metric,min_value,max_value FROM alert_thresholds");
     if ($tr) while ($row = $tr->fetch_assoc()) {
         if ($row['metric']==='temperature') { $thr['temp_min']=$row['min_value']; $thr['temp_max']=$row['max_value']; }
         if ($row['metric']==='humidity')    { $thr['hum_min']=$row['min_value'];  $thr['hum_max']=$row['max_value']; }
-        if ($row['metric']==='emergency_temp') { $thr['emergency_temp_low']=$row['min_value']; $thr['emergency_temp_high']=$row['max_value']; }
-        if ($row['metric']==='emergency_hum')  { $thr['emergency_hum_high']=$row['max_value']; }
     }
 } catch(Exception $e) { /* use defaults */ }
 
@@ -987,9 +983,6 @@ const THRESH = {
   tempMax: <?= $thr['temp_max'] ?>,
   humMin:  <?= $thr['hum_min'] ?>,
   humMax:  <?= $thr['hum_max'] ?>,
-  emergTempHigh: <?= $thr['emergency_temp_high'] ?>,
-  emergTempLow:  <?= $thr['emergency_temp_low'] ?>,
-  emergHumHigh:  <?= $thr['emergency_hum_high'] ?>,
 };
 const $$ = id => document.getElementById(id);
 const toNum = v => { const n = parseFloat(v); return isFinite(n) ? n : 0; };

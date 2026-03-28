@@ -1,6 +1,9 @@
 <?php
 include('includes/auth_check.php');
 include('includes/db_connect.php');
+// ── Drop device_faults table (feature removed) ──
+$conn->query("DROP TABLE IF EXISTS device_faults");
+$conn->query("DELETE FROM alert_logs WHERE alert_type='device'");
 include_once('ai_prompt_helper.php');
 if (session_status() === PHP_SESSION_NONE) session_start();
 
@@ -40,7 +43,6 @@ if ($r) {
 }
 
 // Get recent alerts (last 24 hours)
-$r = $conn->query("SELECT COUNT(*) as count FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency')");
 if ($r && $row = $r->fetch_assoc()) {
     $recent_alerts = $row['count'] . ' alerts in last 24 hours';
 }
@@ -48,7 +50,7 @@ if ($r && $row = $r->fetch_assoc()) {
 // ── Create tables ──
 $conn->query("CREATE TABLE IF NOT EXISTS alert_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    alert_type ENUM('temperature','humidity','device','system') NOT NULL,
+    alert_type ENUM('temperature','humidity','system') NOT NULL,
     severity ENUM('warning','critical','info') NOT NULL DEFAULT 'warning',
     message TEXT NOT NULL,
     value FLOAT NULL,
@@ -71,7 +73,7 @@ $conn->query("CREATE TABLE IF NOT EXISTS system_logs (
 
 // Load thresholds
 $thr = ['temp_min'=>22,'temp_max'=>28,'hum_min'=>85,'hum_max'=>95,
-        'emerg_temp_high'=>35,'emerg_temp_low'=>15,'emerg_hum_high'=>98];
+];
 $conn->query("CREATE TABLE IF NOT EXISTS alert_thresholds (
     id INT AUTO_INCREMENT PRIMARY KEY,
     metric VARCHAR(30) NOT NULL UNIQUE,
@@ -82,13 +84,11 @@ $conn->query("CREATE TABLE IF NOT EXISTS alert_thresholds (
 )");
 $conn->query("INSERT IGNORE INTO alert_thresholds (metric,min_value,max_value) VALUES
     ('temperature',22,28),('humidity',85,95),
-    ('emergency_temp',15,35),('emergency_hum',0,98)");
+    ");
 $tr = $conn->query("SELECT metric,min_value,max_value FROM alert_thresholds");
 if ($tr) while ($row = $tr->fetch_assoc()) {
     if ($row['metric']==='temperature')    { $thr['temp_min']=$row['min_value']; $thr['temp_max']=$row['max_value']; }
     if ($row['metric']==='humidity')       { $thr['hum_min']=$row['min_value'];  $thr['hum_max']=$row['max_value']; }
-    if ($row['metric']==='emergency_temp') { $thr['emerg_temp_low']=$row['min_value']; $thr['emerg_temp_high']=$row['max_value']; }
-    if ($row['metric']==='emergency_hum')  { $thr['emerg_hum_high']=$row['max_value']; }
 }
 
 // Get latest sensor reading
@@ -529,7 +529,6 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
               <option value="">All Types</option>
               <option value="temperature" <?= $alert_type==='temperature'?'selected':'' ?>>Temperature</option>
               <option value="humidity" <?= $alert_type==='humidity'?'selected':'' ?>>Humidity</option>
-              <option value="device" <?= $alert_type==='device'?'selected':'' ?>>Device</option>
               <option value="system" <?= $alert_type==='system'?'selected':'' ?>>System</option>
             </select>
             <select name="severity">

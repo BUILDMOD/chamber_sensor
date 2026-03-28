@@ -1,6 +1,9 @@
 <?php
 include('includes/auth_check.php');
 include('includes/db_connect.php');
+// ── Drop device_faults table (feature removed) ──
+$conn->query("DROP TABLE IF EXISTS device_faults");
+
 include_once('ai_prompt_helper.php');
 if (session_status() === PHP_SESSION_NONE) session_start();
 
@@ -43,31 +46,22 @@ $conn->query("CREATE TABLE IF NOT EXISTS device_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
     device VARCHAR(30) NOT NULL,
     action ENUM('ON','OFF') NOT NULL,
-    trigger_type ENUM('auto','manual','schedule','emergency') NOT NULL DEFAULT 'manual',
+    trigger_type ENUM('auto','manual','schedule') NOT NULL DEFAULT 'manual',
     trigger_detail TEXT DEFAULT NULL,
     duration_seconds INT DEFAULT NULL,
     logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )");
 
 // ── Load thresholds from DB ──
-$thr = ['temp_min'=>22,'temp_max'=>28,'hum_min'=>85,'hum_max'=>95,
-        'emerg_temp_high'=>35,'emerg_temp_low'=>15,'emerg_hum_high'=>98];
+$thr = ['temp_min'=>22,'temp_max'=>28,'hum_min'=>85,'hum_max'=>95];
 $tr = $conn->query("SELECT metric,min_value,max_value FROM alert_thresholds");
 if ($tr) while ($r2 = $tr->fetch_assoc()) {
     if ($r2['metric']==='temperature')    { $thr['temp_min']=$r2['min_value']; $thr['temp_max']=$r2['max_value']; }
     if ($r2['metric']==='humidity')       { $thr['hum_min']=$r2['min_value'];  $thr['hum_max']=$r2['max_value']; }
-    if ($r2['metric']==='emergency_temp') { $thr['emerg_temp_low']=$r2['min_value']; $thr['emerg_temp_high']=$r2['max_value']; }
-    if ($r2['metric']==='emergency_hum')  { $thr['emerg_hum_low']=$r2['min_value']; $thr['emerg_hum_high']=$r2['max_value']; }
 }
 
 $errors = []; $success = '';
 
-// ── Resolve Fault ──
-if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['resolve_fault'])) {
-    $fid = intval($_POST['resolve_fault']);
-    $s=$conn->prepare("UPDATE device_faults SET resolved=1 WHERE id=?");
-    if($s){$s->bind_param("i",$fid);if($s->execute()){header('Location: automation.php?msg=fault_resolved');exit;}$s->close();}
-}
 
 // ── Add Rule ──
 if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['add_rule'])) {
@@ -152,19 +146,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['delete_schedule'])) {
     if($s){$s->bind_param("i",$sid);if($s->execute()){header('Location: automation.php?msg=schedule_deleted');exit;}$s->close();}
 }
 
-// ── Ensure device_faults table exists ──
-$conn->query("CREATE TABLE IF NOT EXISTS device_faults (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    device VARCHAR(30) NOT NULL,
-    fault_type ENUM('no_response','stuck_on') NOT NULL,
-    detail VARCHAR(200),
-    sensor_val FLOAT,
-    resolved TINYINT(1) NOT NULL DEFAULT 0,
-    logged_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)");
 
-// ── Auto-cleanup old resolved faults (keep only last 7 days) ──
-$conn->query("DELETE FROM device_faults WHERE resolved=1 AND logged_at < DATE_SUB(NOW(), INTERVAL 7 DAY)");
 
 // ── Log date filter ──
 $log_date_from = $_GET['log_from'] ?? date('Y-m-d');
@@ -183,9 +165,6 @@ $rules = [];
 $r=$conn->query("SELECT * FROM automation_rules ORDER BY device, id");
 if($r) while($row=$r->fetch_assoc()) $rules[]=$row;
 
-$active_faults = [];
-$r=$conn->query("SELECT * FROM device_faults WHERE resolved=0 ORDER BY logged_at DESC");
-if($r) while($row=$r->fetch_assoc()) $active_faults[]=$row;
 
 $schedules = [];
 $r=$conn->query("SELECT * FROM scheduled_tasks ORDER BY run_time");
@@ -243,11 +222,6 @@ if ($r) {
 }
 
 // Get recent alerts (last 24 hours)
-$r = $conn->query("SELECT COUNT(*) as count FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency')");
-if ($r && $row = $r->fetch_assoc()) {
-    $recent_alerts = $row['count'] . ' alerts in last 24 hours';
-}
-
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -327,12 +301,6 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
 .pill-auto{background:var(--blue-lt);color:var(--blue);}
 .pill-manual{background:var(--amber-lt);color:var(--amber);}
 .pill-schedule{background:#ede9fe;color:#7c3aed;}
-.pill-emergency{background:var(--red-lt);color:var(--red);}
-.pill-fault{background:#fff3e0;color:#e65100;}
-.fault-banner{display:flex;align-items:flex-start;gap:10px;padding:12px 16px;border-radius:8px;background:#fff3e0;border:1px solid #ffcc80;margin-bottom:8px;}
-.fault-banner i{color:#e65100;font-size:14px;margin-top:1px;flex-shrink:0;}
-.fault-banner-text{font-size:12.5px;font-weight:600;color:#bf360c;line-height:1.5;}
-.fault-banner-time{font-size:11px;color:#e65100;margin-top:2px;font-family:'DM Mono',monospace;}
 .builtin-rule{display:flex;align-items:center;gap:12px;padding:11px 20px;border-bottom:1px solid var(--border);background:var(--surface2);}
 .builtin-rule:last-child{border-bottom:none;}
 .builtin-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--red-lt);color:var(--red);letter-spacing:.3px;}

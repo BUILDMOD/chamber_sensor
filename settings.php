@@ -40,7 +40,6 @@ $defaults = [
     'notify_temp'         => '1',
     'notify_hum'          => '1',
     'notify_offline'      => '1',
-    'notify_emergency'    => '1',
     'notify_cooldown_min' => '30',
     'cam_resolution'      => 'VGA',
     'cam_quality'         => '12',
@@ -105,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_smtp'])) {
             if ($s) { $s->bind_param("ss", $k, $val); $s->execute(); $s->close(); }
         }
         // Notification trigger toggles → system_settings table
-        $notif_ss_keys = ['notify_temp','notify_hum','notify_offline','notify_emergency'];
+        $notif_ss_keys = ['notify_temp','notify_hum','notify_offline'];
         foreach ($notif_ss_keys as $k) {
             $val = isset($_POST[$k]) ? '1' : '0';
             $s = $conn->prepare("INSERT INTO system_settings (setting_key,setting_value) VALUES (?,?) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value)");
@@ -196,7 +195,6 @@ if ($r) {
 }
 
 // Get recent alerts (last 24 hours)
-$r = $conn->query("SELECT COUNT(*) as count FROM device_logs WHERE logged_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) AND trigger_type IN ('emergency')");
 if ($r && $row = $r->fetch_assoc()) {
     $recent_alerts = $row['count'] . ' alerts in last 24 hours';
 }
